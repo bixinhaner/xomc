@@ -366,7 +366,22 @@ func (r *fakeRepository) LoadLogRows(context.Context, string, time.Time, time.Ti
 func (r *fakeRepository) ListPMMetricFields(_ context.Context, filter FieldFilter) ([]FieldDefinition, error) {
 	r.pmFieldFilters = append(r.pmFieldFilters, filter)
 	if r.pmFieldsByCombo != nil {
-		return r.pmFieldsByCombo[pmFieldComboKey(filter.ObjectCode, filter.Tech)], nil
+		if strings.TrimSpace(filter.ObjectCode) != "" {
+			return r.pmFieldsByCombo[pmFieldComboKey(filter.ObjectCode, filter.Tech)], nil
+		}
+		tech := pmExportTech(filter.Tech)
+		keys := make([]string, 0, len(r.pmFieldsByCombo))
+		for key := range r.pmFieldsByCombo {
+			if strings.HasSuffix(key, "/"+tech) {
+				keys = append(keys, key)
+			}
+		}
+		sort.Strings(keys)
+		out := make([]FieldDefinition, 0)
+		for _, key := range keys {
+			out = append(out, r.pmFieldsByCombo[key]...)
+		}
+		return out, nil
 	}
 	return []FieldDefinition{
 		{
@@ -444,6 +459,12 @@ func pmTestMetricField(objectCode, tech, id string) FieldDefinition {
 		MetricType:    metricType,
 		SupportStatus: SupportSupported,
 	}
+}
+
+func pmTestMetricFieldWithAlias(objectCode, tech, id, alias string) FieldDefinition {
+	field := pmTestMetricField(objectCode, tech, id)
+	field.OutputAlias = alias
+	return field
 }
 
 func (r *fakeRepository) ListDeliveryTargets(_ context.Context, filter DeliveryTargetFilter) ([]DeliveryTarget, error) {
@@ -2127,16 +2148,167 @@ func TestRunFileProfilePMWideExportKeepsEmptyMetricColumns(t *testing.T) {
 	require.Equal(t, "SN0001,15min,2026-08-04 16:45:00+08,,12,", lines[1])
 }
 
+func TestRunS0001PMLegacyProfileUsesOldTemplateHeader(t *testing.T) {
+	repo := newFakeRepository()
+	repo.pmFieldsByCombo = map[string][]FieldDefinition{
+		pmFieldComboKey("PC", "LTE"): {pmTestMetricFieldWithAlias("PC", "LTE", "C000000001", "Current setup time mean")},
+		pmFieldComboKey("PE", "LTE"): {pmTestMetricFieldWithAlias("PE", "LTE", "K900010002", "Current RRC setup success rate")},
+	}
+	repo.pmRows = []ExportDataRow{
+		{
+			"pm.device_sn":    "SN0001",
+			"pm.metric_path":  "C000000001",
+			"pm.metric_type":  "counter",
+			"pm.metric_value": "11",
+			"pm.statis_type":  "avg",
+			"pm.granularity":  "15min",
+			"pm.end_time":     "2026-08-17 10:15:00+08",
+			"pm.object_ldn":   "25600257",
+		},
+		{
+			"pm.device_sn":    "SN0001",
+			"pm.metric_path":  "K900010002",
+			"pm.metric_type":  "kpi",
+			"pm.metric_value": "99.5",
+			"pm.statis_type":  "avg",
+			"pm.granularity":  "15min",
+			"pm.end_time":     "2026-08-17 10:15:00+08",
+			"pm.object_ldn":   "25600257",
+		},
+	}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+	windowEnd := time.Date(2026, 8, 17, 10, 15, 0, 0, time.UTC)
+
+	resp, err := svc.RunFileProfile(context.Background(), "S0001", RunProfileRequest{
+		GroupID:   "pm-15m",
+		WindowEnd: &windowEnd,
+		Limit:     1,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, resp.Items, 1)
+	records, err := csv.NewReader(strings.NewReader(resp.Items[0].ArtifactContent)).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	require.Equal(t, []string{
+		"dn", "related_enb_dn", "related_enb_id", "related_enb_userlabel",
+		"cel_id", "cel_id_local", "userlabel", "freq_mode",
+		"RRC.SetupTimeMean", "RRC setup success rate",
+	}, records[0])
+	require.Equal(t, []string{"25600257", "SN0001", "100001", "Site-A", "1", "1", "Nova-001", "4", "11", "99.5"}, records[1])
+	require.Equal(t, []string{"C000000001", "K900010002"}, repo.pmMetricQueries[0].MetricPaths)
+
+	templateFields := svc.ListFields(context.Background(), FieldFilter{
+		Domain:     DomainPM,
+		ObjectCode: "PC",
+		Tech:       "LTE",
+		Profile:    legacyPMS0001PCProfile,
+	})
+	require.Equal(t, records[0], outputAliases(templateFields))
+}
+
+func TestRunS0007PMLegacyProfileMatchesOldCSVAndOmitsUnsupportedMetrics(t *testing.T) {
+	repo := newFakeRepository()
+	repo.pmFieldsByCombo = map[string][]FieldDefinition{
+		pmFieldComboKey("PC", "LTE"): {pmTestMetricFieldWithAlias("PC", "LTE", "C000000012", "Current RRC setup success")},
+		pmFieldComboKey("PE", "LTE"): {pmTestMetricFieldWithAlias("PE", "LTE", "K900010009", "DL Packet loss Rate")},
+	}
+	repo.pmRows = []ExportDataRow{
+		{
+			"pm.device_sn":    "SN0001",
+			"pm.metric_path":  "C000000012",
+			"pm.metric_type":  "counter",
+			"pm.metric_value": "90",
+			"pm.statis_type":  "sum",
+			"pm.granularity":  "60min",
+			"pm.end_time":     "2026-07-30 01:00:00+08",
+			"pm.object_ldn":   "25600257",
+		},
+		{
+			"pm.device_sn":    "SN0001",
+			"pm.metric_path":  "K900010009",
+			"pm.metric_type":  "kpi",
+			"pm.metric_value": "0.25",
+			"pm.statis_type":  "avg",
+			"pm.granularity":  "60min",
+			"pm.end_time":     "2026-07-30 01:00:00+08",
+			"pm.object_ldn":   "25600257",
+		},
+	}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+	windowEnd := time.Date(2026, 7, 30, 1, 0, 0, 0, time.UTC)
+
+	resp, err := svc.RunFileProfile(context.Background(), "S0007", RunProfileRequest{
+		GroupID:   "pm-60m",
+		WindowEnd: &windowEnd,
+		Limit:     1,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, resp.Items, 1)
+	records, err := csv.NewReader(strings.NewReader(resp.Items[0].ArtifactContent)).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	require.Equal(t, []string{
+		"DATE_TIME", "dn", "related_enb_dn", "related_enb_id", "related_enb_userlabel",
+		"cel_id", "cel_id_local", "userlabel", "freq_mode",
+		"RRC_setup_suc", "DL_Packet_loss_Rate",
+	}, records[0])
+	require.Equal(t, []string{"30/07/2026 00:00", "25600257", "SN0001", "100001", "Site-A", "1", "1", "Nova-001", "4", "90", "0.25"}, records[1])
+	require.NotContains(t, records[0], "ERAB_SetupFail_TNL")
+	require.Equal(t, []string{"C000000012", "K900010009"}, repo.pmMetricQueries[0].MetricPaths)
+
+	templateFields := svc.ListFields(context.Background(), FieldFilter{
+		Domain:     DomainPM,
+		ObjectCode: "PC",
+		Tech:       "LTE",
+		Profile:    legacyPMS0007PCProfile,
+	})
+	require.Equal(t, records[0], outputAliases(templateFields))
+}
+
 func TestDefaultPMFileProfilesResolveDictionaryFieldsForEveryScenario(t *testing.T) {
 	catalog := NewDefaultCatalog()
 	repo := newFakeRepository()
 	repo.pmFieldsByCombo = map[string][]FieldDefinition{
-		pmFieldComboKey("PC", "LTE"): {pmTestMetricField("PC", "LTE", "LTE_PC_C001")},
-		pmFieldComboKey("PE", "LTE"): {pmTestMetricField("PE", "LTE", "LTE_PE_K001")},
-		pmFieldComboKey("PC", "GNB"): {pmTestMetricField("PC", "GNB", "GNB_PC_C001")},
-		pmFieldComboKey("PC", "GSM"): {pmTestMetricField("PC", "GSM", "GSM_PC_C001")},
+		pmFieldComboKey("PC", "LTE"): {
+			pmTestMetricField("PC", "LTE", "LTE_PC_C001"),
+			pmTestMetricField("PC", "LTE", "C000000001"),
+			pmTestMetricField("PC", "LTE", "C000000005"),
+			pmTestMetricField("PC", "LTE", "C000000012"),
+			pmTestMetricField("PC", "LTE", "C000080004"),
+			pmTestMetricField("PC", "LTE", "C000080030"),
+		},
+		pmFieldComboKey("PE", "LTE"): {
+			pmTestMetricField("PE", "LTE", "LTE_PE_K001"),
+			pmTestMetricField("PE", "LTE", "C000110003"),
+		},
+		pmFieldComboKey("PC", "GNB"): {
+			pmTestMetricField("PC", "GNB", "GNB_PC_C001"),
+			pmTestMetricField("PC", "GNB", "KGNB0101"),
+		},
+		pmFieldComboKey("PC", "GSM"): {
+			pmTestMetricField("PC", "GSM", "GSM_PC_C001"),
+			pmTestMetricField("PC", "GSM", "KGSM0101"),
+			pmTestMetricField("PC", "GSM", "KGSM0104"),
+		},
 	}
 	svc := NewServiceWithRepository(catalog, repo)
+
+	expectedFirstMetricByProfile := map[string]string{
+		legacyPMS0001PCProfile:    "C000000001",
+		legacyPMS0007PCProfile:    "C000000012",
+		legacyPMS0002PEProfile:    "C000110003",
+		legacyPMS0002PCProfile:    "C000080030",
+		legacyPMS0003PCProfile:    "C000080030",
+		legacyPMS0008PCProfile:    "C000000001",
+		legacyPMS0009PCProfile:    "C000000005",
+		legacyPMS0011GSMPCProfile: "KGSM0101",
+		legacyPMS0012GNBPCProfile: "KGNB0101",
+		legacyPMS0013GSMPCProfile: "C000080004",
+		legacyPMS0016LTEPCProfile: "C000000001",
+		legacyPMS0016GSMPCProfile: "KGSM0104",
+	}
 
 	checked := make(map[string]int)
 	totalPMObjects := 0
@@ -2159,10 +2331,18 @@ func TestDefaultPMFileProfilesResolveDictionaryFieldsForEveryScenario(t *testing
 				require.NotEmpty(t, fields, "%s/%s/%s/%s", profile.Code, group.ID, object.Code, object.Tech)
 				require.NotEmpty(t, metricPaths, "%s/%s/%s/%s", profile.Code, group.ID, object.Code, object.Tech)
 
-				combo := pmFieldComboKey(object.Code, object.Tech)
-				require.NotEmpty(t, repo.pmFieldsByCombo[combo], "missing PM dictionary fields for %s", combo)
-				require.Equal(t, repo.pmFieldsByCombo[combo][0].SystemField, metricPaths[0])
-				checked[combo]++
+				dictionaryTech := object.Tech
+				if spec, ok := legacyPMProfile(object.Profile); ok && strings.TrimSpace(spec.tech) != "" {
+					dictionaryTech = spec.tech
+				}
+				fieldCombo := pmFieldComboKey(object.Code, dictionaryTech)
+				require.NotEmpty(t, repo.pmFieldsByCombo[fieldCombo], "missing PM dictionary fields for %s", fieldCombo)
+				if expected, ok := expectedFirstMetricByProfile[object.Profile]; ok {
+					require.Equal(t, expected, metricPaths[0])
+				} else {
+					require.Equal(t, repo.pmFieldsByCombo[fieldCombo][0].SystemField, metricPaths[0])
+				}
+				checked[pmFieldComboKey(object.Code, object.Tech)]++
 				totalPMObjects++
 			}
 		}
@@ -2170,14 +2350,54 @@ func TestDefaultPMFileProfilesResolveDictionaryFieldsForEveryScenario(t *testing
 
 	require.Equal(t, 26, totalPMObjects)
 	require.Equal(t, map[string]int{
-		pmFieldComboKey("PC", "LTE"): 17,
+		pmFieldComboKey("PC", "LTE"): 16,
 		pmFieldComboKey("PE", "LTE"): 5,
 		pmFieldComboKey("PC", "GNB"): 2,
-		pmFieldComboKey("PC", "GSM"): 2,
+		pmFieldComboKey("PC", "GSM"): 3,
 	}, checked)
 	for _, filter := range repo.pmFieldFilters {
 		require.Contains(t, []string{"LTE", "GNB", "GSM"}, filter.Tech)
 	}
+}
+
+func TestRunS0013GSMProfileUsesLegacyMetricTechButKeepsGSMPath(t *testing.T) {
+	repo := newFakeRepository()
+	repo.pmFieldsByCombo = map[string][]FieldDefinition{
+		pmFieldComboKey("PC", "LTE"): {pmTestMetricField("PC", "LTE", "C000080004")},
+	}
+	repo.pmRows = []ExportDataRow{{
+		"pm.device_sn":    "SN0001",
+		"pm.metric_path":  "C000080004",
+		"pm.metric_type":  "counter",
+		"pm.metric_value": "42",
+		"pm.statis_type":  "avg",
+		"pm.granularity":  "60min",
+		"pm.end_time":     "2026-08-04 16:00:00+08",
+		"pm.object_ldn":   "CELL-1",
+	}}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+	windowEnd := time.Date(2026, 8, 4, 16, 0, 0, 0, time.FixedZone("CST", 8*3600))
+
+	resp, err := svc.RunFileProfile(context.Background(), "S0013", RunProfileRequest{
+		GroupID:   "pm-pc-60m-gsm",
+		WindowEnd: &windowEnd,
+		Limit:     1,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, resp.Items, 1)
+	run := resp.Items[0]
+	require.Equal(t, RunStatusSuccess, run.Status)
+	require.Len(t, repo.pmMetricQueries, 1)
+	require.Equal(t, "LTE", repo.pmMetricQueries[0].Tech)
+	require.Equal(t, []string{"C000080004"}, repo.pmMetricQueries[0].MetricPaths)
+	require.Contains(t, run.ArtifactPath, "/PM/GSM/")
+
+	records, err := csv.NewReader(strings.NewReader(run.ArtifactContent)).ReadAll()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(records), 2)
+	require.Contains(t, records[0], "RRU.PuschPrbMeanTot")
+	require.Contains(t, records[1], "42")
 }
 
 func TestRunDefaultPMProfileTreatsBlankTechAsLTE(t *testing.T) {
@@ -2195,10 +2415,14 @@ func TestRunDefaultPMProfileTreatsBlankTechAsLTE(t *testing.T) {
 		"pm.end_time":     "2026-08-04 16:45:00+08",
 		"pm.object_ldn":   "",
 	}}
+	pmGroup := group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, []ScenarioObject{{Code: "PC"}})
+	repo.fileProfiles = []FileProfile{
+		fileProfile("S9204", "Northbound PM", "Standard", "Standard", []string{"baseline"}, []FileGroup{pmGroup}),
+	}
 	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
 	windowEnd := time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
 
-	resp, err := svc.RunFileProfile(context.Background(), "S0001", RunProfileRequest{
+	resp, err := svc.RunFileProfile(context.Background(), "S9204", RunProfileRequest{
 		GroupID:   "pm-15m",
 		WindowEnd: &windowEnd,
 		Limit:     1,

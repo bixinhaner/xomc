@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -328,6 +329,9 @@ func (s *Service) generateFileContent(ctx context.Context, group FileGroup, obje
 	})
 	if group.Domain == DomainPM {
 		pmTech := pmExportTech(object.Tech)
+		if spec, ok := legacyPMProfile(object.Profile); ok && strings.TrimSpace(spec.tech) != "" {
+			pmTech = spec.tech
+		}
 		pmFields, metricPaths, err := s.pmExportFields(ctx, group, object, fields, pmTech)
 		if err != nil {
 			return "", 0, err
@@ -346,7 +350,14 @@ func (s *Service) generateFileContent(ctx context.Context, group FileGroup, obje
 		if len(rows) == 0 {
 			return "", 0, nil
 		}
-		return renderRowsForGroup(group, pmFields, pivotPMMetricRows(rows))
+		pivotedRows := pivotPMMetricRows(rows)
+		if spec, ok := legacyPMProfile(object.Profile); ok {
+			pivotedRows, err = s.enrichLegacyPMRows(ctx, spec, object, pivotedRows, windowStart, windowEnd)
+			if err != nil {
+				return "", 0, err
+			}
+		}
+		return renderRowsForGroup(group, pmFields, pivotedRows)
 	}
 	// Honor per-profile field selection: empty SelectedFields = all catalog fields
 	// (default); non-empty = only the listed field keys, preserving catalog order.
@@ -384,6 +395,24 @@ func (s *Service) generateFileContent(ctx context.Context, group FileGroup, obje
 }
 
 func (s *Service) pmExportFields(ctx context.Context, group FileGroup, object ScenarioObject, baseFields []FieldDefinition, tech string) ([]FieldDefinition, []string, error) {
+	if spec, ok := legacyPMProfile(object.Profile); ok {
+		metricFields, err := s.repo.ListPMMetricFields(ctx, FieldFilter{
+			Domain: DomainPM,
+			Tech:   firstNonEmpty(spec.tech, pmExportTech(tech)),
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		metricFields = resolveLegacyPMMetricFields(spec, metricFields)
+		metricFields = selectPMMetricFields(metricFields, group.SelectedFields)
+		if len(metricFields) == 0 {
+			return nil, nil, fmt.Errorf("%w: no supported fields for %s %s", commonerrors.ErrInvalidInput, group.Domain, object.Code)
+		}
+		fields := make([]FieldDefinition, 0, len(baseFields)+len(metricFields))
+		fields = append(fields, legacyPMBaseFields(spec)...)
+		fields = append(fields, metricFields...)
+		return fields, metricPathsFromFields(metricFields), nil
+	}
 	metricFields, err := s.repo.ListPMMetricFields(ctx, FieldFilter{
 		Domain:     DomainPM,
 		ObjectCode: object.Code,
@@ -401,6 +430,81 @@ func (s *Service) pmExportFields(ctx context.Context, group FileGroup, object Sc
 	fields = append(fields, pmWideBaseFields(baseFields)...)
 	fields = append(fields, metricFields...)
 	return fields, metricPathsFromFields(metricFields), nil
+}
+
+func resolveLegacyPMMetricFields(spec legacyPMProfileSpec, fields []FieldDefinition) []FieldDefinition {
+	byMetricPath := make(map[string]FieldDefinition, len(fields))
+	byAlias := make(map[string]FieldDefinition, len(fields))
+	for _, field := range fields {
+		if key := strings.ToLower(strings.TrimSpace(field.SystemField)); key != "" {
+			if _, exists := byMetricPath[key]; !exists {
+				byMetricPath[key] = field
+			}
+		}
+		for _, value := range []string{field.OutputAlias, field.CnName} {
+			if key := legacyPMMetricNameIdentity(value); key != "" {
+				if _, exists := byAlias[key]; !exists {
+					byAlias[key] = field
+				}
+			}
+		}
+	}
+
+	out := make([]FieldDefinition, 0, len(spec.metrics))
+	added := make(map[string]struct{}, len(spec.metrics))
+	for _, seed := range spec.metrics {
+		field, ok := byMetricPath[strings.ToLower(strings.TrimSpace(seed.metricPath))]
+		if !ok {
+			if key := legacyPMMetricNameIdentity(seed.matchAlias); key != "" {
+				field, ok = byAlias[key]
+			}
+		}
+		if !ok {
+			if key := legacyPMMetricNameIdentity(seed.outputAlias); key != "" {
+				field, ok = byAlias[key]
+			}
+		}
+		if !ok {
+			continue
+		}
+		fieldKey := strings.ToLower(strings.TrimSpace(field.SystemField))
+		if fieldKey == "" {
+			continue
+		}
+		if _, exists := added[fieldKey]; exists {
+			continue
+		}
+		added[fieldKey] = struct{}{}
+
+		field.Profile = spec.profile
+		field.ObjectCode = spec.objectCode
+		field.Tech = firstNonEmpty(field.Tech, spec.tech)
+		field.OutputAlias = seed.outputAlias
+		field.Key = strings.ToLower(string(DomainPM) + "." + spec.objectCode + "." + spec.profile + "." + field.SystemField)
+		out = append(out, field)
+	}
+	return out
+}
+
+func legacyPMMetricNameIdentity(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return ""
+	}
+	var b strings.Builder
+	previousSpace := true
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			previousSpace = false
+			continue
+		}
+		if !previousSpace {
+			b.WriteByte(' ')
+			previousSpace = true
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func pmExportTech(tech string) string {
@@ -503,6 +607,147 @@ func pmMetricRowGroupKey(row ExportDataRow) string {
 		row["pm.granularity"],
 		row["pm.end_time"],
 	}, "\x1f")
+}
+
+func (s *Service) enrichLegacyPMRows(ctx context.Context, spec legacyPMProfileSpec, object ScenarioObject, rows []ExportDataRow, windowStart, windowEnd time.Time) ([]ExportDataRow, error) {
+	snapshots, err := s.repo.LoadDeviceSnapshotRows(ctx, firstNonEmpty(spec.tech, object.Tech, "LTE"), maxRunLimit)
+	if err != nil {
+		return nil, fmt.Errorf("load legacy PM device fields: %w", err)
+	}
+	index := legacyPMDeviceSnapshotIndex(snapshots)
+	out := make([]ExportDataRow, 0, len(rows))
+	for _, row := range rows {
+		next := cloneExportDataRow(row)
+		snapshot := lookupLegacyPMSnapshot(index, next)
+		enrichLegacyPMRow(next, snapshot, windowStart, windowEnd)
+		out = append(out, next)
+	}
+	return out, nil
+}
+
+func cloneExportDataRow(row ExportDataRow) ExportDataRow {
+	next := make(ExportDataRow, len(row)+10)
+	for key, value := range row {
+		next[key] = value
+	}
+	return next
+}
+
+type legacyPMSnapshotIndexMap struct {
+	bySerial       map[string]ExportDataRow
+	bySerialObject map[string]ExportDataRow
+}
+
+func legacyPMDeviceSnapshotIndex(rows []ExportDataRow) legacyPMSnapshotIndexMap {
+	index := legacyPMSnapshotIndexMap{
+		bySerial:       make(map[string]ExportDataRow, len(rows)),
+		bySerialObject: make(map[string]ExportDataRow, len(rows)*2),
+	}
+	for _, row := range rows {
+		serial := strings.TrimSpace(row["device.serial_number"])
+		if serial == "" {
+			continue
+		}
+		serialKey := strings.ToLower(serial)
+		if _, exists := index.bySerial[serialKey]; !exists {
+			index.bySerial[serialKey] = row
+		}
+		for _, objectID := range []string{row["device_info.eci"], row["device_info.cell_id"]} {
+			if key := legacyPMSnapshotObjectKey(serial, objectID); key != "" {
+				if _, exists := index.bySerialObject[key]; !exists {
+					index.bySerialObject[key] = row
+				}
+			}
+		}
+	}
+	return index
+}
+
+func lookupLegacyPMSnapshot(index legacyPMSnapshotIndexMap, row ExportDataRow) ExportDataRow {
+	serial := row["pm.device_sn"]
+	objectID := row["pm.object_ldn"]
+	if key := legacyPMSnapshotObjectKey(serial, objectID); key != "" {
+		if snapshot, ok := index.bySerialObject[key]; ok {
+			return snapshot
+		}
+	}
+	if snapshot, ok := index.bySerial[strings.ToLower(strings.TrimSpace(serial))]; ok {
+		return snapshot
+	}
+	return nil
+}
+
+func legacyPMSnapshotObjectKey(serial, objectID string) string {
+	serial = strings.ToLower(strings.TrimSpace(serial))
+	objectID = strings.ToLower(strings.TrimSpace(objectID))
+	if serial == "" || objectID == "" {
+		return ""
+	}
+	return serial + "\x1f" + objectID
+}
+
+func enrichLegacyPMRow(row ExportDataRow, snapshot ExportDataRow, windowStart, windowEnd time.Time) {
+	eci := firstNonEmpty(snapshot["device_info.eci"], row["pm.object_ldn"])
+	serial := firstNonEmpty(snapshot["device.serial_number"], row["pm.device_sn"])
+	cellID := firstNonEmpty(legacyPMCellIDFromECI(eci), snapshot["device_info.cell_id"])
+	enbID := firstNonEmpty(snapshot["device_info.enb_id"], legacyPMENBIDFromECI(eci))
+	userLabel := firstNonEmpty(snapshot["device_info.device_name"], snapshot["device.site_name"])
+	siteName := firstNonEmpty(snapshot["device.site_name"], snapshot["device_info.device_name"])
+	row["legacy.pm.date_time"] = valueOrDefault(row["legacy.pm.date_time"], windowStart.Format("02/01/2006 15:04"))
+	row["legacy.pm.file_date_time"] = valueOrDefault(row["legacy.pm.file_date_time"], windowEnd.Format("20060102150405"))
+	row["legacy.pm.granularity_15"] = valueOrDefault(row["legacy.pm.granularity_15"], "15")
+	row["legacy.pm.period_minute_15"] = valueOrDefault(row["legacy.pm.period_minute_15"], "15")
+	row["legacy.pm.dn"] = valueOrDefault(row["legacy.pm.dn"], eci)
+	row["legacy.pm.serial_dn"] = valueOrDefault(row["legacy.pm.serial_dn"], serial)
+	row["legacy.pm.serial_number"] = valueOrDefault(row["legacy.pm.serial_number"], serial)
+	row["legacy.pm.related_enb_dn"] = valueOrDefault(row["legacy.pm.related_enb_dn"], serial)
+	row["legacy.pm.related_enb_id"] = valueOrDefault(row["legacy.pm.related_enb_id"], enbID)
+	row["legacy.pm.related_enb_userlabel"] = valueOrDefault(row["legacy.pm.related_enb_userlabel"], siteName)
+	row["legacy.pm.related_gnb_dn"] = valueOrDefault(row["legacy.pm.related_gnb_dn"], serial)
+	row["legacy.pm.related_gnb_id"] = valueOrDefault(row["legacy.pm.related_gnb_id"], enbID)
+	row["legacy.pm.related_gnb_userlabel"] = valueOrDefault(row["legacy.pm.related_gnb_userlabel"], siteName)
+	row["legacy.pm.related_gsm_dn"] = valueOrDefault(row["legacy.pm.related_gsm_dn"], serial)
+	row["legacy.pm.related_gsm_userlabel"] = valueOrDefault(row["legacy.pm.related_gsm_userlabel"], siteName)
+	row["legacy.pm.enb_id"] = valueOrDefault(row["legacy.pm.enb_id"], enbID)
+	row["legacy.pm.site_id"] = valueOrDefault(row["legacy.pm.site_id"], snapshot["device.site_id"])
+	row["legacy.pm.site_name"] = valueOrDefault(row["legacy.pm.site_name"], siteName)
+	row["legacy.pm.cell_name"] = valueOrDefault(row["legacy.pm.cell_name"], userLabel)
+	row["legacy.pm.cel_id"] = valueOrDefault(row["legacy.pm.cel_id"], cellID)
+	row["legacy.pm.cel_id_local"] = valueOrDefault(row["legacy.pm.cel_id_local"], firstNonEmpty(snapshot["device_info.cell_id"], cellID))
+	row["legacy.pm.userlabel"] = valueOrDefault(row["legacy.pm.userlabel"], userLabel)
+	row["legacy.pm.freq_mode"] = valueOrDefault(row["legacy.pm.freq_mode"], legacyCMFreqMode(snapshot["device_info.network_model"]))
+	row["legacy.pm.group_name"] = valueOrDefault(row["legacy.pm.group_name"], snapshot["device_groups.name"])
+	if eci != "" {
+		row["legacy.pm.eci_hash"] = valueOrDefault(row["legacy.pm.eci_hash"], eci+"$#")
+	}
+}
+
+func legacyPMENBIDFromECI(value string) string {
+	eci, ok := parseLegacyPMECI(value)
+	if !ok {
+		return ""
+	}
+	return strconv.FormatInt(eci>>8, 10)
+}
+
+func legacyPMCellIDFromECI(value string) string {
+	eci, ok := parseLegacyPMECI(value)
+	if !ok {
+		return ""
+	}
+	return strconv.FormatInt(eci&255, 10)
+}
+
+func parseLegacyPMECI(value string) (int64, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, false
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
 }
 
 func (s *Service) generateInventoryContent(ctx context.Context, profile InventoryProfile, limit int) (string, int, error) {
