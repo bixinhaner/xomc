@@ -6602,7 +6602,7 @@ CREATE TABLE public.products (
     is_builtin boolean DEFAULT false NOT NULL,
     -- 空字符串 '' 表示"无指标设备类型"（核心网等非无线产品：不区分制式、无 KPI 指标库）。
     -- KPI 路由器对空 device_type 软返回空路由，不触发 perf_indicators_* 物理表查找。
-    CONSTRAINT chk_products_indicator_device_type CHECK (((indicator_device_type)::text = ANY (ARRAY[(''::text, ('enb'::character varying)::text, ('gsm'::character varying)::text, ('gnb'::character varying)::text])))
+    CONSTRAINT chk_products_indicator_device_type CHECK (indicator_device_type = '' OR indicator_device_type IN ('enb', 'gsm', 'gnb'))
 );
 
 
