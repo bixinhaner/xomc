@@ -1,18 +1,22 @@
 package parammodel
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"errors"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 // registryMetrics 聚合 ParamRegistry / Translator 的 Prometheus 指标（设计 §1.4-§1.6 + 实施计划 §2.A.P2-02）。
 //
 // 命名遵循 P2-01 ProductRegistry 既有约定：param_registry_* 与 param_translator_*。
 // nil reg 由 NewRegistryMetrics(nil) 创建匿名 Registry，安全可丢弃，单元测试与 main 启动均可用。
 type registryMetrics struct {
-	lookupTotal              *prometheus.CounterVec // labels: source=discovered|default|miss
-	lookupDuration           prometheus.Histogram
-	cacheHitTotal            *prometheus.CounterVec // labels: layer=L1|L2|DB|miss, set=default|discovered
-	refreshTotal             *prometheus.CounterVec // labels: result=ok|err
-	translateTotal           *prometheus.CounterVec // labels: direction=to_private|to_standard, result=hit|miss
-	invalidPlaceholderTotal  *prometheus.CounterVec // labels: param_model
+	lookupTotal             *prometheus.CounterVec // labels: source=discovered|default|miss
+	lookupDuration          prometheus.Histogram
+	cacheHitTotal           *prometheus.CounterVec // labels: layer=L1|L2|DB|miss, set=default|discovered
+	refreshTotal            *prometheus.CounterVec // labels: result=ok|err
+	translateTotal          *prometheus.CounterVec // labels: direction=to_private|to_standard, result=hit|miss
+	invalidPlaceholderTotal *prometheus.CounterVec // labels: param_model
 }
 
 // NewRegistryMetrics 注册并返回 ParamRegistry/Translator 用的指标集合。
@@ -67,15 +71,39 @@ func NewRegistryMetrics(reg prometheus.Registerer) *registryMetrics {
 	if reg == nil {
 		reg = prometheus.NewRegistry()
 	}
-	reg.MustRegister(
-		m.lookupTotal,
-		m.lookupDuration,
-		m.cacheHitTotal,
-		m.refreshTotal,
-		m.translateTotal,
-		m.invalidPlaceholderTotal,
-	)
+	m.lookupTotal = registerCounterVec(reg, m.lookupTotal)
+	m.lookupDuration = registerHistogram(reg, m.lookupDuration)
+	m.cacheHitTotal = registerCounterVec(reg, m.cacheHitTotal)
+	m.refreshTotal = registerCounterVec(reg, m.refreshTotal)
+	m.translateTotal = registerCounterVec(reg, m.translateTotal)
+	m.invalidPlaceholderTotal = registerCounterVec(reg, m.invalidPlaceholderTotal)
 	return m
+}
+
+func registerCounterVec(reg prometheus.Registerer, collector *prometheus.CounterVec) *prometheus.CounterVec {
+	if err := reg.Register(collector); err != nil {
+		var alreadyRegistered prometheus.AlreadyRegisteredError
+		if errors.As(err, &alreadyRegistered) {
+			if existing, ok := alreadyRegistered.ExistingCollector.(*prometheus.CounterVec); ok {
+				return existing
+			}
+		}
+		panic(err)
+	}
+	return collector
+}
+
+func registerHistogram(reg prometheus.Registerer, collector prometheus.Histogram) prometheus.Histogram {
+	if err := reg.Register(collector); err != nil {
+		var alreadyRegistered prometheus.AlreadyRegisteredError
+		if errors.As(err, &alreadyRegistered) {
+			if existing, ok := alreadyRegistered.ExistingCollector.(prometheus.Histogram); ok {
+				return existing
+			}
+		}
+		panic(err)
+	}
+	return collector
 }
 
 // 热路径捷径——避免在调用点反复字符串字面量并防笔误。

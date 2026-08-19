@@ -37,7 +37,11 @@ const DEVICE_TYPE_KEY: Record<string, string> = {
   eGW: 'device.type.eGW',
 };
 
-export default function Header({ agentVisible = false, agentOpen = false, onAgentToggle }: HeaderProps) {
+export default function Header({
+  agentVisible = false,
+  agentOpen = false,
+  onAgentToggle,
+}: HeaderProps) {
   const deviceType = useAppStore((s) => s.deviceType);
   const theme = useAppStore((s) => s.theme);
   const toggleTheme = useAppStore((s) => s.toggleTheme);

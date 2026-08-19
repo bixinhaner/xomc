@@ -16,6 +16,7 @@ import Sidebar from './Sidebar';
 import TabBar from './TabBar';
 import TaskPanel from './TaskPanel';
 import QuickSettingsSyncWatcher from './QuickSettingsSyncWatcher';
+import StorageProtectionBlockingBanner from './StorageProtectionBlockingBanner';
 import { isDynamicMenuEnabled } from '../MenuBootstrap/featureFlag';
 import { NAV_CONFIG } from './Sidebar/navConfig';
 import { resolveRouteTab } from './routeTabResolver';
@@ -159,6 +160,7 @@ export default function AppShell() {
         <main className={styles.content} style={{ position: 'relative' }}>
           {effects3D && <ParticleCanvas />}
           {effects3D && <DynamicLightSource />}
+          <StorageProtectionBlockingBanner />
           {/*
             key={locale}：切换语言时强制重挂载路由内容子树。
             页面里大量表格列（DataTableColumn.title）通过 useMemo 缓存翻译文案，
