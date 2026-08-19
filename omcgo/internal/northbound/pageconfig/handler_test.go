@@ -344,9 +344,11 @@ func (r *fakeRepository) LoadDeviceSnapshotRows(context.Context, string, int) ([
 
 func (r *fakeRepository) LoadOMCInventoryRows(context.Context) ([]ExportDataRow, error) {
 	return []ExportDataRow{{
-		"inventory.omc.enb_online": "1",
-		"inventory.omc.ue_count":   "7",
-		"inventory.omc.version":    "xomc",
+		"inventory.omc.total_devices":         "4",
+		"inventory.omc.online_devices":        "2",
+		"inventory.omc.active_alarms":         "3",
+		"inventory.omc.current_connected_ues": "7",
+		"inventory.omc.version":               "xomc",
 	}}, nil
 }
 

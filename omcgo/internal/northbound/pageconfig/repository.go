@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/omcgo/omcgo/internal/buildinfo"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
@@ -35,6 +38,8 @@ const (
 	defaultFileProfileLegacyFormatAlignedConfigKey = "legacy_scene_format_aligned_v333"
 	defaultFileProfilePMTechPathConfigKey          = "pm_technology_path_aligned_v335"
 	defaultFileProfileLegacyPMProfileConfigKey     = "legacy_pm_profile_aligned_v328"
+	defaultInventoryProfileFieldsRevision          = "legacy_inventory_fields_aligned_v338_sources_v6"
+	defaultInventoryOMCName                        = "OMC 统一网管系统"
 )
 
 func NewPgRepository(pool *pgxpool.Pool) *PgRepository {
@@ -429,15 +434,39 @@ ON CONFLICT (code) DO NOTHING`,
 }
 
 func (r *PgRepository) insertDefaultInventoryProfile(ctx context.Context, profile InventoryProfile) error {
-	_, err := r.pool.Exec(ctx, `
+	fields := profile.Fields
+	if len(fields) == 0 {
+		fields = inventoryFieldConfigsForObject(profile.ObjectCode)
+	}
+	config, err := marshalDefaultInventoryProfileConfig(fields)
+	if err != nil {
+		return fmt.Errorf("marshal default northbound inventory profile config %s: %w", profile.Code, err)
+	}
+	_, err = r.pool.Exec(ctx, `
 INSERT INTO northbound_inventory_profiles (
   code, name, object_code, tech, period, start_minute, path_template,
-  file_name_template, compression_enabled, compression_format, enabled, status
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-ON CONFLICT (code) DO NOTHING`,
+  file_name_template, compression_enabled, compression_format, enabled, status, config
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+ON CONFLICT (code) DO UPDATE SET
+  name=EXCLUDED.name,
+  object_code=EXCLUDED.object_code,
+  tech=EXCLUDED.tech,
+  config=CASE
+    WHEN COALESCE(northbound_inventory_profiles.config->>'fields_customized', 'false') <> 'true'
+     AND COALESCE(northbound_inventory_profiles.config->>'default_fields_revision', '') <> $14
+    THEN EXCLUDED.config
+    ELSE northbound_inventory_profiles.config
+  END
+WHERE northbound_inventory_profiles.name IS DISTINCT FROM EXCLUDED.name
+   OR northbound_inventory_profiles.object_code IS DISTINCT FROM EXCLUDED.object_code
+   OR northbound_inventory_profiles.tech IS DISTINCT FROM EXCLUDED.tech
+   OR (
+     COALESCE(northbound_inventory_profiles.config->>'fields_customized', 'false') <> 'true'
+     AND COALESCE(northbound_inventory_profiles.config->>'default_fields_revision', '') <> $14
+   )`,
 		profile.Code, profile.Name, profile.ObjectCode, profile.Tech, profile.Period, profile.StartMinute,
 		profile.PathTemplate, profile.FileNameTemplate, profile.CompressionEnabled, profile.CompressionFormat,
-		profile.Enabled, profile.Status)
+		profile.Enabled, profile.Status, config, defaultInventoryProfileFieldsRevision)
 	if err != nil {
 		return fmt.Errorf("insert default northbound_inventory_profiles %s: %w", profile.Code, err)
 	}
@@ -554,7 +583,13 @@ func (r *PgRepository) UpdateInventoryProfile(ctx context.Context, idOrCode stri
 		return nil, err
 	}
 	merged := mergeInventoryProfile(*current, req)
-	config, err := marshalInventoryProfileConfig(merged.Fields)
+	revision := current.DefaultFieldsRevision
+	fieldsCustomized := current.FieldsCustomized
+	if req.Fields != nil {
+		revision = ""
+		fieldsCustomized = true
+	}
+	config, err := marshalInventoryProfileConfigWithMeta(merged.Fields, revision, fieldsCustomized)
 	if err != nil {
 		return nil, fmt.Errorf("marshal northbound inventory profile config: %w", err)
 	}
@@ -734,22 +769,29 @@ SELECT
   COALESCE(d.model_name, '') AS "device.model_name",
   COALESCE(d.product_class, '') AS "device.product_class",
   COALESCE(d.firmware_version, '') AS "device.firmware_version",
-  COALESCE(d.ip_address::text, '') AS "device.ip_address",
+  COALESCE(host(d.ip_address), '') AS "device.ip_address",
   COALESCE(d.site_name, '') AS "device.site_name",
   COALESCE(d.site_id, '') AS "device.site_id",
   COALESCE((
-    SELECT string_agg(DISTINCT dg.name, ',' ORDER BY dg.name)
+    SELECT string_agg(group_path, ',' ORDER BY group_path)
+    FROM (
+      SELECT DISTINCT CASE
+        WHEN parent.name IS NOT NULL AND parent.name <> '' THEN parent.name || ' / ' || dg.name
+        ELSE dg.name
+      END AS group_path
       FROM device_group_members dgm
       JOIN device_groups dg ON dg.id = dgm.group_id
+      LEFT JOIN device_groups parent ON parent.id = dg.parent_id
      WHERE dgm.device_id = d.id
+    ) device_group_paths
   ), '') AS "device_groups.name",
   COALESCE((SELECT p.product_name FROM products p WHERE p.id = d.product_id), '') AS "product.name",
-  COALESCE(d.last_inform_at::text, '') AS "device.last_inform_at",
+  COALESCE(to_char(d.last_inform_at, 'YYYY-MM-DD HH24:MI:SS'), '') AS "device.last_inform_at",
   COALESCE(d.is_online::text, '') AS "device.is_online",
   COALESCE(d.longitude::text, '') AS "device.longitude",
   COALESCE(d.latitude::text, '') AS "device.latitude",
   COALESCE(d.lifecycle_state, '') AS "device.lifecycle_state",
-  COALESCE(d.created_at::text, '') AS "device.created_at",
+  COALESCE(to_char(d.created_at, 'YYYY-MM-DD HH24:MI:SS'), '') AS "device.created_at",
   COALESCE(di.device_id::text, '') AS "device_info.device_id",
   COALESCE(di.device_name, '') AS "device_info.device_name",
   COALESCE(di.address, '') AS "device_info.address",
@@ -774,14 +816,14 @@ SELECT
   COALESCE(di.license_status, '') AS "device_info.license_status",
   COALESCE(di.mac, '') AS "device_info.mac",
   COALESCE(di.hardware_version, '') AS "device_info.hardware_version",
-  COALESCE(di.first_online_time::text, '') AS "device_info.first_online_time",
-  COALESCE(di.last_online_time::text, '') AS "device_info.last_online_time",
-  COALESCE(di.last_offline_time::text, '') AS "device_info.last_offline_time",
+  COALESCE(to_char(di.first_online_time, 'YYYY-MM-DD HH24:MI:SS'), '') AS "device_info.first_online_time",
+  COALESCE(to_char(di.last_online_time, 'YYYY-MM-DD HH24:MI:SS'), '') AS "device_info.last_online_time",
+  COALESCE(to_char(di.last_offline_time, 'YYYY-MM-DD HH24:MI:SS'), '') AS "device_info.last_offline_time",
   COALESCE(di.run_time::text, '') AS "device_info.run_time",
   COALESCE(di.creator, '') AS "device_info.creator",
   COALESCE(di.updater, '') AS "device_info.updater",
-  COALESCE(di.created_at::text, '') AS "device_info.created_at",
-  COALESCE(di.updated_at::text, '') AS "device_info.updated_at",
+  COALESCE(to_char(di.created_at, 'YYYY-MM-DD HH24:MI:SS'), '') AS "device_info.created_at",
+  COALESCE(to_char(di.updated_at, 'YYYY-MM-DD HH24:MI:SS'), '') AS "device_info.updated_at",
   COALESCE(di.tac, '') AS "device_info.tac",
   COALESCE(di.band, '') AS "device_info.band",
   COALESCE(di.ul_earfcn, '') AS "device_info.ul_earfcn",
@@ -804,6 +846,7 @@ SELECT
   COALESCE(di.ipa_unit_id, '') AS "device_info.ipa_unit_id",
   COALESCE(di.ue_count::text, '') AS "device_info.ue_count",
   COALESCE(di.active_alarm_count::text, '') AS "device_info.active_alarm_count",
+  COALESCE(active_alarms.active_alarm_count::text, '0') AS "inventory.device.active_alarm_count",
   COALESCE(di.name_sync_pending::text, '') AS "device_info.name_sync_pending",
   COALESCE(di.lmt_device_name, '') AS "device_info.lmt_device_name",
   COALESCE(di.highest_alarm_severity::text, '') AS "device_info.highest_alarm_severity",
@@ -835,9 +878,16 @@ SELECT
   COALESCE(nbp.t300, '') AS "device_param.T300",
   COALESCE(nbp.t301, '') AS "device_param.T301",
   COALESCE(nbp.t302, '') AS "device_param.T302",
+  COALESCE(nbp.gnb_id, '') AS "inventory.gnb.gnb_id",
   COALESCE(to_jsonb(di), '{}'::jsonb)::text AS "device_info.__json"
 FROM devices d
 LEFT JOIN device_info di ON di.device_id = d.id
+LEFT JOIN LATERAL (
+  SELECT COUNT(*) AS active_alarm_count
+  FROM alarms_active alarm_rows
+  WHERE alarm_rows.device_id = d.id
+    AND alarm_rows.status <> 'cleared'
+) active_alarms ON true
 LEFT JOIN LATERAL (
   SELECT
     COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.MAC.DRX.DRXEnabled'), '') AS drx_alg_switch,
@@ -896,9 +946,18 @@ LEFT JOIN LATERAL (
     COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RRCTimers.T311'), '') AS t311,
     COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RRCTimers.T300'), '') AS t300,
     COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RRCTimers.T301'), '') AS t301,
-    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RRCTimers.T302'), '') AS t302
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RRCTimers.T302'), '') AS t302,
+    COALESCE(
+      MAX(btrim(dp.parameter_value)) FILTER (WHERE lower(dp.parameter_path) LIKE 'device.services.fapservice.%.fapcontrol.nr.ran.common.gnbid'),
+      MAX(btrim(dp.parameter_value)) FILTER (WHERE lower(dp.parameter_path) LIKE 'device.services.fapservice.%.cellconfig.nr.ran.common.gnbid'),
+      MAX(btrim(dp.parameter_value)) FILTER (WHERE lower(dp.parameter_path) LIKE 'device.services.fapservice.%.cellconfig.%.nr.ran.common.gnbid'),
+      MAX(btrim(dp.parameter_value)) FILTER (WHERE dp.parameter_path = 'Device.X_CUCC.gNBId'),
+      ''
+    ) AS gnb_id
   FROM device_parameters dp
   WHERE dp.device_id = d.id
+    AND dp.parameter_value IS NOT NULL
+    AND btrim(dp.parameter_value) <> ''
 ) nbp ON true
 WHERE d.deleted_at IS NULL
   AND ($1 = '' OR UPPER(d.technology) = UPPER($1))
@@ -923,33 +982,204 @@ LIMIT $2`, normalizeDeviceTech(tech), normalizeLimit(limit))
 		flattenDeviceInfoJSON(row, row["device_info.__json"])
 		delete(row, "device_info.__json")
 		snapshotTime := time.Now().Format(time.RFC3339)
-		serialNumber := row["device.serial_number"]
-		opState := row["device_info.op_state"]
-		isOnline := row["device.is_online"]
-		ipAddress := row["device.ip_address"]
-		productClass := row["device.product_class"]
 		row["inventory.enb.snapshot_time"] = snapshotTime
 		row["inventory.gnb.snapshot_time"] = snapshotTime
 		row["inventory.gsm.snapshot_time"] = snapshotTime
 		row["inventory.omc.snapshot_time"] = snapshotTime
-		row["inventory.enb.serial_number"] = serialNumber
-		row["inventory.gnb.serial_number"] = serialNumber
-		row["inventory.gsm.serial_number"] = serialNumber
-		row["inventory.enb.cell_status"] = opState
-		row["inventory.gnb.cell_status"] = opState
-		row["inventory.gsm.cell_status"] = opState
-		row["inventory.enb.online_status"] = isOnline
-		row["inventory.gnb.online_status"] = isOnline
-		row["inventory.gsm.online_status"] = isOnline
-		row["inventory.enb.ip_address"] = ipAddress
-		row["inventory.gnb.ip_address"] = ipAddress
-		row["inventory.gsm.ip_address"] = ipAddress
-		row["inventory.enb.product_type"] = productClass
-		row["inventory.gnb.product_type"] = productClass
-		row["inventory.gsm.product_type"] = productClass
+		enrichInventoryDeviceRow(row)
 		out = append(out, row)
 	}
 	return out, rows.Err()
+}
+
+func enrichInventoryDeviceRow(row ExportDataRow) {
+	infoDeviceName := row["device_info.device_name"]
+	siteName := row["device.site_name"]
+	row["device_info.device_name"] = firstNonEmpty(infoDeviceName, siteName, row["device.serial_number"])
+	row["device.site_name"] = firstNonEmpty(siteName, infoDeviceName)
+
+	productName := firstNonEmpty(row["product.name"], row["device.product_class"])
+	status := legacyInventoryDeviceStatus(row["device.lifecycle_state"])
+	isOnline := legacyInventoryTruthy(row["device.is_online"])
+	for _, object := range []string{"enb", "gnb", "gsm"} {
+		prefix := "inventory." + object + "."
+		row[prefix+"cell_status"] = legacyInventoryCellStatus(row["device_info.op_state"], isOnline)
+		row[prefix+"sync_status"] = legacyInventorySyncStatus(row["device_info.sync_status"])
+		row[prefix+"rf_status"] = legacyInventoryRFStatus(row["device_info.rf_status"])
+		row[prefix+"mme_status"] = legacyInventoryCoreStatus(row["device_info.mme_status"])
+		row[prefix+"kpi_status"] = legacyInventoryKPIStatus(row["device_info.kpi_status"])
+		row[prefix+"system_uptime"] = legacyInventoryDuration(row["device_info.run_time"])
+		row[prefix+"accumulated_online_time"] = legacyInventoryDuration(row["device_info.cumulative_online_duration"])
+		row[prefix+"device_status"] = status
+		row[prefix+"product_name"] = productName
+	}
+	row["inventory.gnb.amf_status"] = legacyInventoryCoreStatus(row["device_info.mme_status"])
+	row["inventory.enb.online_status"] = legacyInventoryOnlineStatus(row["device.is_online"], true)
+	row["inventory.gnb.online_status"] = legacyInventoryOnlineStatus(row["device.is_online"], false)
+	row["inventory.gsm.online_status"] = legacyInventoryOnlineStatus(row["device.is_online"], false)
+	row["inventory.enb.cell_active_state"] = legacyInventoryCellActiveState(row["device_info.rf_status"])
+	row["inventory.gsm.cell_admin_state"] = legacyInventoryCellAdminState(row["device_info.rf_status"])
+}
+
+func legacyInventoryOnlineStatus(value string, upper bool) string {
+	if legacyInventoryTruthy(value) {
+		if upper {
+			return "ON"
+		}
+		return "On"
+	}
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	if upper {
+		return "OFF"
+	}
+	return "Off"
+}
+
+func legacyInventoryCellStatus(value string, isOnline bool) string {
+	if !isOnline {
+		return "Inactive"
+	}
+	if legacyInventoryTruthy(value) {
+		return "Active"
+	}
+	if strings.TrimSpace(value) != "" {
+		return "Inactive"
+	}
+	return ""
+}
+
+func legacyInventoryKPIStatus(value string) string {
+	trimmed := strings.TrimSpace(value)
+	normalized := strings.ToLower(trimmed)
+	switch normalized {
+	case "":
+		return ""
+	case "1", "true", "on", "normal", "enable", "enabled", "success", "up":
+		return "normal"
+	case "2", "--", "unknown":
+		return "--"
+	case "0", "false", "off", "broken", "disable", "disabled", "failed", "fail", "down":
+		return "broken"
+	default:
+		return trimmed
+	}
+}
+
+func legacyInventoryRFStatus(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "":
+		return ""
+	case "2", "--", "unknown":
+		return "--"
+	case "1", "true", "on", "active", "enable", "enabled":
+		return "ON"
+	default:
+		return "OFF"
+	}
+}
+
+func legacyInventoryCellActiveState(value string) string {
+	switch legacyInventoryRFStatus(value) {
+	case "ON":
+		return "ON"
+	case "OFF":
+		return "OFF"
+	case "--":
+		return "--"
+	default:
+		return ""
+	}
+}
+
+func legacyInventoryCellAdminState(value string) string {
+	switch legacyInventoryRFStatus(value) {
+	case "ON":
+		return "Unblock"
+	case "OFF":
+		return "Block"
+	case "--":
+		return "--"
+	default:
+		return ""
+	}
+}
+
+func legacyInventoryCoreStatus(value string) string {
+	trimmed := strings.TrimSpace(value)
+	normalized := strings.ToLower(trimmed)
+	switch normalized {
+	case "":
+		return ""
+	case "1", "connected", "connect", "normal", "up", "partial":
+		return "connected"
+	case "0", "false", "disconnected", "disconnect", "down":
+		return "disconnected"
+	case "2", "--":
+		return "--"
+	default:
+		return trimmed
+	}
+}
+
+func legacyInventorySyncStatus(value string) string {
+	trimmed := strings.TrimSpace(value)
+	normalized := strings.ToLower(trimmed)
+	switch normalized {
+	case "":
+		return ""
+	case "1", "synced", "synchronized", "gps synchronized", "locked", "lock":
+		return "GPS Synchronized"
+	case "2", "syncing", "synchronizing", "gps synchronizing", "disp", "disciplining", "holdover":
+		return "GPS Synchronizing"
+	case "0", "false", "unsynced", "unsynchronized", "not synchronized", "not_synchronized", "error", "failed", "unlocked":
+		return "Unsynchronized"
+	case "3", "--":
+		return "--"
+	default:
+		return trimmed
+	}
+}
+
+func legacyInventoryDeviceStatus(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "":
+		return ""
+	case "0", "scrap", "scrapped", "decommissioned":
+		return "Scrap"
+	case "1", "warehouse", "discovered":
+		return "Warehouse"
+	case "2", "install", "installed", "registered", "provisioning", "commissioned", "maintenance":
+		return "Install"
+	default:
+		return strings.TrimSpace(value)
+	}
+}
+
+func legacyInventoryDuration(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	seconds, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || seconds < 0 {
+		return value
+	}
+	days := seconds / 86400
+	seconds %= 86400
+	hours := seconds / 3600
+	seconds %= 3600
+	minutes := seconds / 60
+	seconds %= 60
+	return fmt.Sprintf("%dd %dh %dm %ds", days, hours, minutes, seconds)
+}
+
+func legacyInventoryTruthy(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	return normalized == "1" || normalized == "true" || normalized == "on" || normalized == "active" || normalized == "enable" || normalized == "enabled"
 }
 
 func exportDataValue(value any) string {
@@ -1008,25 +1238,100 @@ func exportJSONDataValue(value any) string {
 func (r *PgRepository) LoadOMCInventoryRows(ctx context.Context) ([]ExportDataRow, error) {
 	row := r.pool.QueryRow(ctx, `
 SELECT
-  COUNT(*) FILTER (WHERE UPPER(d.technology) = 'LTE' AND d.is_online)::text,
-  COUNT(*) FILTER (WHERE UPPER(d.technology) = 'LTE' AND COALESCE(di.op_state, '') = '1')::text,
-  COALESCE(string_agg(DISTINCT NULLIF(di.mme_status, ''), ',' ORDER BY NULLIF(di.mme_status, '')), ''),
-  COALESCE(SUM(COALESCE(di.ue_count, 0)), 0)::text
-FROM devices d
-LEFT JOIN device_info di ON di.device_id = d.id
-WHERE d.deleted_at IS NULL`)
-	var enbOnline, enbActive, mmeStatus, ueCount string
-	if err := row.Scan(&enbOnline, &enbActive, &mmeStatus, &ueCount); err != nil {
+  COALESCE(device_stats.total_devices, 0),
+  COALESCE(device_stats.online_devices, 0),
+  COALESCE(alarm_stats.active_alarms, 0),
+  COALESCE(device_stats.current_connected_ues, 0),
+  COALESCE((
+    SELECT sc.value
+    FROM sys_configs sc
+    WHERE sc.category = 'basic' AND sc.key = 'mrOMCName'
+    LIMIT 1
+  ), '')
+FROM (
+  SELECT
+    COUNT(*) AS total_devices,
+    COUNT(*) FILTER (WHERE d.is_online = TRUE) AS online_devices,
+    COALESCE(SUM(CASE WHEN d.is_online = TRUE THEN COALESCE(di.ue_count, 0) ELSE 0 END), 0) AS current_connected_ues
+  FROM devices d
+  LEFT JOIN device_info di ON di.device_id = d.id
+  WHERE d.deleted_at IS NULL
+) device_stats
+CROSS JOIN (
+  SELECT COUNT(*) AS active_alarms
+  FROM alarms_active
+) alarm_stats`)
+	var totalDevices, onlineDevices, activeAlarms, currentConnectedUEs int64
+	var omcName string
+	if err := row.Scan(&totalDevices, &onlineDevices, &activeAlarms, &currentConnectedUEs, &omcName); err != nil {
 		return nil, fmt.Errorf("query omc inventory rows: %w", err)
 	}
 	return []ExportDataRow{{
-		"inventory.omc.enb_online":    enbOnline,
-		"inventory.omc.enb_active":    enbActive,
-		"inventory.omc.mme_status":    mmeStatus,
-		"inventory.omc.ue_count":      ueCount,
-		"inventory.omc.version":       "xomc",
-		"inventory.omc.snapshot_time": time.Now().Format(time.RFC3339),
+		"inventory.omc.omc_name":              legacyInventoryOMCName(omcName),
+		"inventory.omc.total_devices":         strconv.FormatInt(totalDevices, 10),
+		"inventory.omc.online_devices":        strconv.FormatInt(onlineDevices, 10),
+		"inventory.omc.active_alarms":         strconv.FormatInt(activeAlarms, 10),
+		"inventory.omc.current_connected_ues": strconv.FormatInt(currentConnectedUEs, 10),
+		"inventory.omc.version":               legacyInventoryOMCVersion(),
+		"inventory.omc.snapshot_time":         time.Now().Format(time.RFC3339),
 	}}, nil
+}
+
+func legacyInventoryRatio(value, total int64) string {
+	return fmt.Sprintf("%d/%d", value, total)
+}
+
+func legacyInventoryOMCName(configured string) string {
+	return firstNonEmpty(
+		strings.TrimSpace(os.Getenv("OMC_NAME")),
+		strings.TrimSpace(os.Getenv("OMC_OMC_NAME")),
+		strings.TrimSpace(os.Getenv("MR_OMC_NAME")),
+		strings.TrimSpace(configured),
+		defaultInventoryOMCName,
+	)
+}
+
+func legacyInventoryActiveStandbyState() string {
+	state := strings.TrimSpace(firstNonEmpty(
+		os.Getenv("OMC_ACTIVE_STANDBY_STATE"),
+		os.Getenv("OMC_HOST_STATE"),
+		os.Getenv("HOST_STATE"),
+	))
+	if state != "" {
+		return strings.ToUpper(state)
+	}
+	deployMode := strings.TrimSpace(firstNonEmpty(
+		os.Getenv("OMC_DEPLOY_MODE"),
+		os.Getenv("DEPLOY_MODE"),
+		os.Getenv("MASTER_BACKUP_MODE"),
+	))
+	if deployMode == "" || deployMode == "0" {
+		return "SINGLE"
+	}
+	return "SINGLE"
+}
+
+func legacyInventoryOMCVersion() string {
+	version := strings.TrimSpace(buildinfo.ReleaseVersion)
+	if version == "" {
+		version = "dev"
+	}
+	return "OMC " + version
+}
+
+func legacyInventoryHardwareModel() string {
+	for _, path := range []string{
+		"/sys/class/dmi/id/product_name",
+		"/sys/devices/virtual/dmi/id/product_name",
+	} {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			if model := strings.TrimSpace(string(data)); model != "" {
+				return model
+			}
+		}
+	}
+	return ""
 }
 
 func (r *PgRepository) LoadPMMetricRows(ctx context.Context, req PMMetricQuery) ([]ExportDataRow, error) {
@@ -1220,11 +1525,28 @@ ORDER BY ordinal_position`)
 		if err := rows.Scan(&column, &dataType); err != nil {
 			return nil, fmt.Errorf("scan device_info field catalog: %w", err)
 		}
+		if isUnsupportedInventoryDeviceInfoField(filter.Domain, filter.ObjectCode, column) {
+			continue
+		}
 		if field, ok := optionalDeviceInfoFieldFromColumn(filter.Domain, filter.ObjectCode, column, dataType); ok {
 			out = append(out, field)
 		}
 	}
 	return out, rows.Err()
+}
+
+func isUnsupportedInventoryDeviceInfoField(domain Domain, objectCode, column string) bool {
+	if domain != DomainInventory {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(column)) {
+	case "kpi_status":
+		return true
+	case "mme_status":
+		return strings.EqualFold(objectCode, "GNB")
+	default:
+		return false
+	}
 }
 
 func (r *PgRepository) ValidatePMMetricPaths(ctx context.Context, metricPaths []string) ([]string, error) {
@@ -1615,7 +1937,7 @@ func scanInventoryProfile(row scanner) (*InventoryProfile, error) {
 	profile.CompressionFormat = CompressionFormat(compression)
 	profile.Status = ProfileStatus(status)
 	if len(configRaw) > 0 {
-		if err := unmarshalInventoryProfileConfig(configRaw, &profile.Fields); err != nil {
+		if err := unmarshalInventoryProfileConfig(configRaw, &profile); err != nil {
 			return nil, fmt.Errorf("unmarshal northbound inventory profile config: %w", err)
 		}
 	}
@@ -1623,19 +1945,35 @@ func scanInventoryProfile(row scanner) (*InventoryProfile, error) {
 }
 
 type inventoryProfileConfig struct {
-	Fields []InventoryFieldConfig `json:"fields"`
+	Fields                []InventoryFieldConfig `json:"fields"`
+	DefaultFieldsRevision string                 `json:"default_fields_revision,omitempty"`
+	FieldsCustomized      bool                   `json:"fields_customized,omitempty"`
+}
+
+func marshalDefaultInventoryProfileConfig(fields []InventoryFieldConfig) ([]byte, error) {
+	return marshalInventoryProfileConfigWithMeta(fields, defaultInventoryProfileFieldsRevision, false)
 }
 
 func marshalInventoryProfileConfig(fields []InventoryFieldConfig) ([]byte, error) {
-	return json.Marshal(inventoryProfileConfig{Fields: fields})
+	return marshalInventoryProfileConfigWithMeta(fields, "", true)
 }
 
-func unmarshalInventoryProfileConfig(raw []byte, fields *[]InventoryFieldConfig) error {
+func marshalInventoryProfileConfigWithMeta(fields []InventoryFieldConfig, revision string, customized bool) ([]byte, error) {
+	return json.Marshal(inventoryProfileConfig{
+		Fields:                fields,
+		DefaultFieldsRevision: strings.TrimSpace(revision),
+		FieldsCustomized:      customized,
+	})
+}
+
+func unmarshalInventoryProfileConfig(raw []byte, profile *InventoryProfile) error {
 	var config inventoryProfileConfig
 	if err := json.Unmarshal(raw, &config); err != nil {
 		return err
 	}
-	*fields = config.Fields
+	profile.Fields = config.Fields
+	profile.DefaultFieldsRevision = config.DefaultFieldsRevision
+	profile.FieldsCustomized = config.FieldsCustomized
 	return nil
 }
 

@@ -1232,84 +1232,150 @@ const extraFieldDefinitionsByDomainObject: Partial<Record<Domain, Record<string,
   },
 };
 
-const stationInventoryFieldDefinitions = [
-  ['Serial Number', 'device.serial_number', 'devices.serial_number', 'string', 'quote'],
-  ['Cell Status', 'device_info.op_state', 'device_info.op_state', 'string', 'quote'],
-  ['Online Status', 'device.is_online', 'devices.is_online', 'bool', 'enum'],
-  ['Alarms', 'device_info.active_alarm_count', 'device_info.active_alarm_count', 'number', 'number'],
-  ['Cell Name', 'device_info.device_name', 'device_info.device_name / devices.site_name', 'string', 'quote'],
-  ['Shop ID', 'device.site_id', 'devices.site_id', 'string', 'quote'],
-  ['IP Address', 'device.ip_address', 'devices.ip_address', 'string', 'quote'],
-  ['MAC Address', 'device_info.mac', 'device_info.mac', 'string', 'quote'],
-  ['ECI', 'device_info.eci', 'device_info.eci', 'string', 'preserve text'],
-  ['PCI', 'device_info.pci', 'device_info.pci', 'string', 'preserve text'],
-  ['Earfcn', 'device_info.freq_point', 'device_info.freq_point', 'number', 'preserve text'],
-  ['MME Status', 'device_info.mme_status', 'device_info.mme_status', 'string', 'quote'],
-  ['KPI Report Status', 'device_info.kpi_status', 'device_info.kpi_status', 'string', 'quote'],
-  ['Sync Status', 'device_info.sync_status', 'device_info.sync_status', 'string', 'quote'],
-  ['UE Count', 'device_info.ue_count', 'device_info.ue_count', 'number', 'number'],
-  ['Last Period Time', 'device.last_inform_at', 'devices.last_inform_at', 'datetime', 'preserve text'],
-  ['Product Type', 'device.product_class', 'devices.product_class', 'string', 'quote'],
-  ['Hardware Version', 'device_info.hardware_version', 'device_info.hardware_version', 'string', 'quote'],
-  ['Software Version', 'device.firmware_version', 'devices.firmware_version', 'string', 'quote'],
-  ['Device Group', 'device_groups.name', 'device_groups / device_group_members', 'string', 'quote'],
-  ['RF Status', 'device_info.rf_status', 'device_info.rf_status', 'string', 'quote'],
-  ['Satellites', 'device_info.gps_satellites', 'device_info.gps_satellites', 'number', 'number'],
-  ['Longitude', 'device.longitude', 'devices.longitude', 'number', 'number'],
-  ['Latitude', 'device.latitude', 'devices.latitude', 'number', 'number'],
-  ['Height', 'device_info.gps_height', 'device_info.gps_height', 'number', 'number'],
-  ['Duplex Mode', 'device_info.network_model', 'device_info.network_model', 'string', 'quote'],
-  ['IPsec Address', 'device_info.ipsec_addr', 'device_info.ipsec_addr', 'string', 'quote'],
-  ['PLMN', 'device_info.plmn', 'device_info.plmn', 'string', 'preserve text'],
-  ['First Online Time', 'device_info.first_online_time', 'device_info.first_online_time', 'datetime', 'preserve text'],
-  ['AMF Status', 'device_info.mme_status', 'device_info.mme_status as amf_status', 'string', 'quote'],
-  ['TAC', 'device_info.tac', 'device_info.tac', 'string', 'quote'],
-  ['Model Name', 'device.model_name', 'devices.model_name', 'string', 'quote'],
-  ['Manufacturer', 'device.manufacturer', 'devices.manufacturer', 'string', 'quote'],
-  ['Site Name', 'device.site_name', 'devices.site_name / device_info.device_name', 'string', 'quote'],
-  ['Installation Detailed Address', 'device_info.address', 'device_info.address', 'string', 'quote'],
-  ['Device Status', 'device.lifecycle_state', 'devices.lifecycle_state + devices.is_online', 'string', 'enum'],
-  ['First Period Time', 'device_info.first_online_time', 'device_info.first_online_time', 'datetime', 'preserve text'],
-  ['Product Name', 'product.name', 'products.name / devices.product_class', 'string', 'quote'],
-  ['System Uptime', 'device_info.run_time', 'device_info.run_time', 'number', 'number'],
-  ['Accumulated Online Time(s)', 'device_info.cumulative_online_duration', 'device_info.cumulative_online_duration', 'number', 'number'],
-  ['Bandwidth', 'device_info.bandwidth', 'device_info.bandwidth', 'number', 'number'],
-  ['Height(m)', 'device_info.gps_height', 'device_info.gps_height', 'number', 'number'],
-  ['eNB ID', 'device_info.enb_id', 'device_info.enb_id', 'string', 'quote'],
-  ['Cell ID', 'device_info.cell_id', 'device_info.cell_id', 'string', 'quote'],
-  ['Subframe Assignment', 'device_info.subframe_assignment', 'device_info.subframe_assignment', 'string', 'quote'],
-  ['Special Subframe Patterns', 'device_info.special_subframe', 'device_info.special_subframe', 'string', 'quote'],
-] satisfies Array<[string, string, string, string, string]>;
+type InventoryFieldDefinition = [string, string, string, string, string];
 
-const inventoryAliasByType: Record<InventoryType, Record<string, string>> = {
-  ENB: {},
-  GNB: {
-    'Cell Name': 'gNB Name',
-    ECI: 'NCI',
-    Earfcn: 'NR-ARFCN',
-    'MME Status': 'AMF Status',
-    'eNB ID': 'gNB ID',
-    'Subframe Assignment': 'Slot Assignment',
-    'Special Subframe Patterns': 'Special Slot Patterns',
-  },
-  GSM: {
-    'Cell Name': 'BTS Name',
-    ECI: 'CGI',
-    PCI: 'BSIC',
-    Earfcn: 'BCCH ARFCN',
-    'MME Status': 'BSC Status',
-    'eNB ID': 'BTS ID',
-    'Subframe Assignment': 'Channel Assignment',
-    'Special Subframe Patterns': 'Channel Pattern',
-  },
-  OMC: {},
-};
+const inventoryFieldDefinitionsByType = {
+  ENB: [
+    ['Serial Number', 'device.serial_number', 'devices.serial_number', 'string', 'quote'],
+    ['Cell Status', 'inventory.enb.cell_status', 'device_info.op_state', 'string', 'enum'],
+    ['Online Status', 'inventory.enb.online_status', 'devices.is_online', 'bool', 'enum'],
+    ['Alarms', 'inventory.device.active_alarm_count', 'alarms_active aggregate (status <> cleared)', 'number', 'number'],
+    ['Cell Name', 'device_info.device_name', 'device_info.device_name / devices.site_name', 'string', 'quote'],
+    ['IP Address', 'device.ip_address', 'devices.ip_address', 'string', 'quote'],
+    ['MAC Address', 'device_info.mac', 'device_info.mac', 'string', 'quote'],
+    ['ECI', 'device_info.eci', 'device_info.eci', 'string', 'preserve text'],
+    ['PCI', 'device_info.pci', 'device_info.pci', 'string', 'preserve text'],
+    ['Earfcn', 'device_info.freq_point', 'device_info.freq_point', 'number', 'preserve text'],
+    ['MME Status', 'inventory.enb.mme_status', 'device_info.mme_status', 'string', 'enum'],
+    ['Sync Status', 'inventory.enb.sync_status', 'device_info.sync_status', 'string', 'enum'],
+    ['UE Count', 'device_info.ue_count', 'device_info.ue_count', 'number', 'number'],
+    ['Last Period Time', 'device.last_inform_at', 'devices.last_inform_at', 'datetime', 'preserve text'],
+    ['Product Type', 'device.product_class', 'devices.product_class', 'string', 'quote'],
+    ['Hardware Version', 'device_info.hardware_version', 'device_info.hardware_version', 'string', 'quote'],
+    ['Software Version', 'device.firmware_version', 'devices.firmware_version', 'string', 'quote'],
+    ['Device Group', 'device_groups.name', 'device_group_members / device_groups', 'string', 'quote'],
+    ['RF Status', 'inventory.enb.rf_status', 'device_info.rf_status', 'string', 'enum'],
+    ['Satellites', 'device_info.gps_satellites', 'device_info.gps_satellites', 'number', 'number'],
+    ['Longitude', 'device.longitude', 'devices.longitude', 'number', 'number'],
+    ['Latitude', 'device.latitude', 'devices.latitude', 'number', 'number'],
+    ['Height', 'device_info.gps_height', 'device_info.gps_height', 'number', 'number'],
+    ['Duplex Mode', 'device_info.network_model', 'device_info.network_model', 'string', 'quote'],
+    ['IPsec Address', 'device_info.ipsec_addr', 'device_info.ipsec_addr', 'string', 'quote'],
+    ['PLMN', 'device_info.plmn', 'device_info.plmn', 'string', 'preserve text'],
+    ['First Online Time', 'device_info.first_online_time', 'device_info.first_online_time', 'datetime', 'preserve text'],
+    ['TAC', 'device_info.tac', 'device_info.tac', 'string', 'quote'],
+    ['Model Name', 'device.model_name', 'devices.model_name', 'string', 'quote'],
+    ['Cell Active State', 'inventory.enb.cell_active_state', 'device_info.rf_status', 'string', 'enum'],
+    ['Manufacturer', 'device.manufacturer', 'devices.manufacturer', 'string', 'quote'],
+    ['Device Power', 'device_info.transmit_power', 'device_info.transmit_power', 'number', 'number'],
+    ['OMC IP', 'runtime.local_host', 'runtime.local_host', 'string', 'quote'],
+    ['Installation Detailed Address', 'device_info.address', 'device_info.address', 'string', 'quote'],
+    ['Device Status', 'inventory.enb.device_status', 'devices.lifecycle_state', 'string', 'enum'],
+    ['First Period Time', 'device_info.first_online_time', 'device_info.first_online_time', 'datetime', 'preserve text'],
+    ['Product Name', 'inventory.enb.product_name', 'products.product_name / devices.product_class', 'string', 'quote'],
+    ['System Uptime', 'inventory.enb.system_uptime', 'device_info.run_time', 'number', 'number'],
+    ['Accumulated Online Time(s)', 'inventory.enb.accumulated_online_time', 'device_info.cumulative_online_duration', 'number', 'number'],
+    ['Bandwidth', 'device_info.bandwidth', 'device_info.bandwidth', 'number', 'number'],
+    ['Height(m)', 'device_info.gps_height', 'device_info.gps_height', 'number', 'number'],
+    ['txPower', 'device_info.transmit_power', 'device_info.transmit_power', 'number', 'number'],
+    ['eNB ID', 'device_info.enb_id', 'device_info.enb_id', 'string', 'quote'],
+    ['Cell ID', 'device_info.cell_id', 'device_info.cell_id', 'string', 'quote'],
+    ['Subframe Assignment', 'device_info.subframe_assignment', 'device_info.subframe_assignment', 'string', 'quote'],
+    ['Special Subframe Patterns', 'device_info.special_subframe', 'device_info.special_subframe', 'string', 'quote'],
+    ['Root Sequence Index', 'device_info.root_index', 'device_info.root_index', 'number', 'preserve text'],
+  ],
+  GNB: [
+    ['Online Status', 'inventory.gnb.online_status', 'devices.is_online', 'bool', 'enum'],
+    ['Alarms', 'inventory.device.active_alarm_count', 'alarms_active aggregate (status <> cleared)', 'number', 'number'],
+    ['Serial Number', 'device.serial_number', 'devices.serial_number', 'string', 'quote'],
+    ['Cell Name', 'device_info.device_name', 'device_info.device_name / devices.site_name', 'string', 'quote'],
+    ['IP Address', 'device.ip_address', 'devices.ip_address', 'string', 'quote'],
+    ['MAC Address', 'device_info.mac', 'device_info.mac', 'string', 'quote'],
+    ['NR Cell ID', 'device_info.cell_id', 'device_info.cell_id', 'string', 'preserve text'],
+    ['PCI', 'device_info.pci', 'device_info.pci', 'string', 'preserve text'],
+    ['Cell Status', 'inventory.gnb.cell_status', 'device_info.op_state', 'string', 'enum'],
+    ['Sync Status', 'inventory.gnb.sync_status', 'device_info.sync_status', 'string', 'enum'],
+    ['UE Count', 'device_info.ue_count', 'device_info.ue_count', 'number', 'number'],
+    ['System Uptime', 'inventory.gnb.system_uptime', 'device_info.run_time', 'number', 'number'],
+    ['Last Period Time', 'device.last_inform_at', 'devices.last_inform_at', 'datetime', 'preserve text'],
+    ['AMF Status', 'inventory.gnb.amf_status', 'device_info.mme_status (NR normalized AMF status)', 'string', 'enum'],
+    ['Duplex Mode', 'device_info.network_model', 'device_info.network_model', 'string', 'quote'],
+    ['Product Type', 'device.product_class', 'devices.product_class', 'string', 'quote'],
+    ['Product Name', 'inventory.gnb.product_name', 'products.product_name / devices.product_class', 'string', 'quote'],
+    ['gNB ID', 'inventory.gnb.gnb_id', 'device_parameters.Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBId', 'string', 'quote'],
+    ['BandIndicator', 'device_info.band', 'device_info.band', 'string', 'quote'],
+    ['Hardware Version', 'device_info.hardware_version', 'device_info.hardware_version', 'string', 'quote'],
+    ['Software Version', 'device.firmware_version', 'devices.firmware_version', 'string', 'quote'],
+    ['NR ARFCN UL', 'device_info.ul_earfcn', 'device_info.ul_earfcn', 'number', 'preserve text'],
+    ['NR ARFCN DL', 'device_info.freq_point', 'device_info.freq_point', 'number', 'preserve text'],
+    ['Device Group', 'device_groups.name', 'device_group_members / device_groups', 'string', 'quote'],
+    ['RF Status', 'inventory.gnb.rf_status', 'device_info.rf_status', 'string', 'enum'],
+    ['Satellites', 'device_info.gps_satellites', 'device_info.gps_satellites', 'number', 'number'],
+    ['Longitude', 'device.longitude', 'devices.longitude', 'number', 'number'],
+    ['Latitude', 'device.latitude', 'devices.latitude', 'number', 'number'],
+    ['First Period Time', 'device_info.first_online_time', 'device_info.first_online_time', 'datetime', 'preserve text'],
+    ['TAC', 'device_info.tac', 'device_info.tac', 'string', 'quote'],
+    ['Model Name', 'device.model_name', 'devices.model_name', 'string', 'quote'],
+    ['Manufacturer', 'device.manufacturer', 'devices.manufacturer', 'string', 'quote'],
+    ['Tx Power', 'device_info.transmit_power', 'device_info.transmit_power', 'number', 'number'],
+    ['OMC IP', 'runtime.local_host', 'runtime.local_host', 'string', 'quote'],
+    ['Installation Detailed Address', 'device_info.address', 'device_info.address', 'string', 'quote'],
+    ['Device Status', 'inventory.gnb.device_status', 'devices.lifecycle_state', 'string', 'enum'],
+  ],
+  GSM: [
+    ['Online Status', 'inventory.gsm.online_status', 'devices.is_online', 'bool', 'enum'],
+    ['Alarms', 'inventory.device.active_alarm_count', 'alarms_active aggregate (status <> cleared)', 'number', 'number'],
+    ['Serial Number', 'device.serial_number', 'devices.serial_number', 'string', 'quote'],
+    ['Cell Name', 'device_info.device_name', 'device_info.device_name / devices.site_name', 'string', 'quote'],
+    ['IP Address', 'device.ip_address', 'devices.ip_address', 'string', 'quote'],
+    ['MAC Address', 'device_info.mac', 'device_info.mac', 'string', 'quote'],
+    ['Cell Status', 'inventory.gsm.cell_status', 'device_info.op_state', 'string', 'enum'],
+    ['Sync Status', 'inventory.gsm.sync_status', 'device_info.sync_status', 'string', 'enum'],
+    ['UE Count', 'device_info.ue_count', 'device_info.ue_count', 'number', 'number'],
+    ['System Uptime', 'inventory.gsm.system_uptime', 'device_info.run_time', 'number', 'number'],
+    ['Last Period Time', 'device.last_inform_at', 'devices.last_inform_at', 'datetime', 'preserve text'],
+    ['Product Type', 'device.product_class', 'devices.product_class', 'string', 'quote'],
+    ['Product Name', 'inventory.gsm.product_name', 'products.product_name / devices.product_class', 'string', 'quote'],
+    ['Accumulated Online Time', 'inventory.gsm.accumulated_online_time', 'device_info.cumulative_online_duration', 'number', 'number'],
+    ['Ipa Unit Id', 'device_info.ipa_unit_id', 'device_info.ipa_unit_id', 'string', 'quote'],
+    ['Oml Remote Ip', 'device_info.oml_remote_ip', 'device_info.oml_remote_ip', 'string', 'quote'],
+    ['Oml Remote Ip Bak', 'device_info.oml_remote_ip_bak', 'device_info.oml_remote_ip_bak', 'string', 'quote'],
+    ['BSC Select', 'device_info.bsc_select', 'device_info.bsc_select', 'string', 'enum'],
+    ['LAC', 'device_info.lac', 'device_info.lac', 'string', 'quote'],
+    ['Earfcn', 'device_info.freq_point', 'device_info.freq_point', 'number', 'preserve text'],
+    ['Hardware Version', 'device_info.hardware_version', 'device_info.hardware_version', 'string', 'quote'],
+    ['Software Version', 'device.firmware_version', 'devices.firmware_version', 'string', 'quote'],
+    ['Device Group', 'device_groups.name', 'device_group_members / device_groups', 'string', 'quote'],
+    ['RF Status', 'inventory.gsm.rf_status', 'device_info.rf_status', 'string', 'enum'],
+    ['Satellites', 'device_info.gps_satellites', 'device_info.gps_satellites', 'number', 'number'],
+    ['Longitude', 'device.longitude', 'devices.longitude', 'number', 'number'],
+    ['Latitude', 'device.latitude', 'devices.latitude', 'number', 'number'],
+    ['Height', 'device_info.gps_height', 'device_info.gps_height', 'number', 'number'],
+    ['First Period Time', 'device_info.first_online_time', 'device_info.first_online_time', 'datetime', 'preserve text'],
+    ['Model Name', 'device.model_name', 'devices.model_name', 'string', 'quote'],
+    ['Cell Admin State', 'inventory.gsm.cell_admin_state', 'device_info.rf_status', 'string', 'enum'],
+    ['Manufacturer', 'device.manufacturer', 'devices.manufacturer', 'string', 'quote'],
+    ['Tx Power', 'device_info.transmit_power', 'device_info.transmit_power', 'number', 'number'],
+    ['OMC IP', 'runtime.local_host', 'runtime.local_host', 'string', 'quote'],
+    ['Installation Detailed Address', 'device_info.address', 'device_info.address', 'string', 'quote'],
+    ['Device Status', 'inventory.gsm.device_status', 'devices.lifecycle_state', 'string', 'enum'],
+  ],
+  OMC: [
+    ['OMC Name', 'inventory.omc.omc_name', 'sys_configs.basic.mrOMCName / env OMC_NAME / default display name', 'string', 'quote'],
+    ['OMC IP', 'runtime.local_host', 'runtime.local_host', 'string', 'quote'],
+    ['Total Devices', 'inventory.omc.total_devices', 'dashboard device list stats total', 'number', 'number'],
+    ['Online Devices', 'inventory.omc.online_devices', 'dashboard device list stats online_count', 'number', 'number'],
+    ['Active Alarms', 'inventory.omc.active_alarms', 'dashboard alarm_stats.total', 'number', 'number'],
+    ['Current Connected UEs', 'inventory.omc.current_connected_ues', 'dashboard device list stats current_ue_count', 'number', 'number'],
+    ['Version', 'inventory.omc.version', 'buildinfo.ReleaseVersion', 'string', 'quote'],
+  ],
+} satisfies Record<InventoryType, InventoryFieldDefinition[]>;
 
-function buildRadioInventoryFields(type: Exclude<InventoryType, 'OMC'>): InventoryField[] {
-  return stationInventoryFieldDefinitions.map(([column, exportKey, source, dataType, renderer], index) => ({
+function buildInventoryFields(type: InventoryType): InventoryField[] {
+  return inventoryFieldDefinitionsByType[type].map(([column, exportKey, source, dataType, renderer], index) => ({
     key: `${type.toLowerCase()}-${index + 1}`,
     template: type,
-    column: inventoryAliasByType[type][column] ?? column,
+    column,
     exportKey,
     source,
     dataType,
@@ -1318,30 +1384,7 @@ function buildRadioInventoryFields(type: Exclude<InventoryType, 'OMC'>): Invento
   }));
 }
 
-const stationInventoryFields: InventoryField[] = [
-  ...buildRadioInventoryFields('ENB'),
-  ...buildRadioInventoryFields('GNB'),
-  ...buildRadioInventoryFields('GSM'),
-];
-
-const omcInventoryFields: InventoryField[] = [
-  ['OMC', 'eNB online', 'inventory.omc.enb_online', 'devices.is_online aggregate', 'number', 'number'],
-  ['OMC', 'eNB active', 'inventory.omc.enb_active', 'device_info.op_state / lifecycle aggregate', 'number', 'number'],
-  ['OMC', 'MME status', 'inventory.omc.mme_status', 'device_info.mme_status aggregate', 'string', 'quote'],
-  ['OMC', 'UE Count', 'inventory.omc.ue_count', 'SUM(device_info.ue_count)', 'number', 'number'],
-  ['OMC', 'Version', 'inventory.omc.version', 'buildinfo.ReleaseVersion', 'string', 'quote'],
-].map(([template, column, exportKey, source, dataType, renderer], index) => ({
-  key: `omc-${index + 1}`,
-  template: template as InventoryType,
-  column,
-  exportKey,
-  source,
-  dataType,
-  renderer,
-  enabled: true,
-}));
-
-const inventoryFields = [...stationInventoryFields, ...omcInventoryFields];
+const inventoryFields = (['ENB', 'GNB', 'GSM', 'OMC'] as InventoryType[]).flatMap(buildInventoryFields);
 
 const inventoryTypeOptions: Array<{ label: string; value: InventoryType }> = [
   { label: 'eNB', value: 'ENB' },
@@ -1413,16 +1456,18 @@ const deviceInfoFieldDefinitions = [
 
 const deviceInfoInventoryFields: InventoryField[] = inventoryTypeOptions
   .filter((option) => option.value !== 'OMC')
-  .flatMap((option) => deviceInfoFieldDefinitions.map(([column, outputAlias, , dataType, renderer]) => ({
-    key: `${option.value.toLowerCase()}-device-info-${column}`,
-    template: option.value,
-    column: inventoryAliasByType[option.value][outputAlias] ?? outputAlias,
-    exportKey: `device_info.${column}`,
-    source: `device_info.${column}`,
-    dataType,
-    renderer,
-    enabled: true,
-  })));
+  .flatMap((option) => deviceInfoFieldDefinitions
+    .filter(([column]) => column !== 'kpi_status' && !(option.value === 'GNB' && column === 'mme_status'))
+    .map(([column, outputAlias, , dataType, renderer]) => ({
+      key: `${option.value.toLowerCase()}-device-info-${column}`,
+      template: option.value,
+      column: outputAlias,
+      exportKey: `device_info.${column}`,
+      source: `device_info.${column}`,
+      dataType,
+      renderer,
+      enabled: true,
+    })));
 
 const inventoryAvailableFields = [...inventoryFields, ...deviceInfoInventoryFields];
 
@@ -4577,6 +4622,9 @@ function runTechnologyLabel(run: NorthboundFileRun): string {
 }
 
 function runReportSubject(run: NorthboundFileRun): string {
+  if (run.domain === 'INVENTORY') {
+    return String(run.object_code ?? '').trim() || '-';
+  }
   const parts = [run.domain, run.object_code, runTechnologyLabel(run)].filter((part) => part && part !== '-');
   return parts.length > 0 ? parts.join(' / ') : '-';
 }

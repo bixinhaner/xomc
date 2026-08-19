@@ -149,22 +149,24 @@ type UpdateFileProfileRequest struct {
 }
 
 type InventoryProfile struct {
-	ID                 string                 `json:"id"`
-	Code               string                 `json:"code"`
-	Name               string                 `json:"name"`
-	ObjectCode         string                 `json:"object_code"`
-	Tech               string                 `json:"tech"`
-	Period             Period                 `json:"period"`
-	StartMinute        int                    `json:"start_minute"`
-	PathTemplate       string                 `json:"path_template"`
-	FileNameTemplate   string                 `json:"file_name_template"`
-	CompressionEnabled bool                   `json:"compression_enabled"`
-	CompressionFormat  CompressionFormat      `json:"compression_format,omitempty"`
-	Enabled            bool                   `json:"enabled"`
-	Status             ProfileStatus          `json:"status"`
-	Fields             []InventoryFieldConfig `json:"fields"`
-	CreatedAt          time.Time              `json:"created_at"`
-	UpdatedAt          time.Time              `json:"updated_at"`
+	ID                    string                 `json:"id"`
+	Code                  string                 `json:"code"`
+	Name                  string                 `json:"name"`
+	ObjectCode            string                 `json:"object_code"`
+	Tech                  string                 `json:"tech"`
+	Period                Period                 `json:"period"`
+	StartMinute           int                    `json:"start_minute"`
+	PathTemplate          string                 `json:"path_template"`
+	FileNameTemplate      string                 `json:"file_name_template"`
+	CompressionEnabled    bool                   `json:"compression_enabled"`
+	CompressionFormat     CompressionFormat      `json:"compression_format,omitempty"`
+	Enabled               bool                   `json:"enabled"`
+	Status                ProfileStatus          `json:"status"`
+	Fields                []InventoryFieldConfig `json:"fields"`
+	CreatedAt             time.Time              `json:"created_at"`
+	UpdatedAt             time.Time              `json:"updated_at"`
+	DefaultFieldsRevision string                 `json:"-"`
+	FieldsCustomized      bool                   `json:"-"`
 }
 
 // InventoryFieldConfig is the persisted field contract for one inventory
