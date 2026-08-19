@@ -3,6 +3,7 @@ package device
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -20,6 +21,7 @@ const (
 
 var ethernetInterfaceStatusPath = regexp.MustCompile(`^Device\.Ethernet\.Interface\.(\d+)\.Status$`)
 var ipInterfaceStatusPath = regexp.MustCompile(`^Device\.IP\.Interface\.(\d+)\.Status$`)
+var xcomMMEPoolFieldPath = regexp.MustCompile(`X_COM_MmePool\.MmePool(\d+)(List|Status)$`)
 
 // AssembleMMEPool builds MME pool entries from device_parameters with the MME prefix.
 // params should be the result of GetByPathPrefix("...MmePoolConfigParam.").
@@ -30,19 +32,37 @@ func AssembleMMEPool(params []model.DeviceParameter) []MMEEntry {
 		status string
 		plmnID string
 	}
-	grouped := make(map[int]*mmeRaw)
+	indexed := make(map[int]*mmeRaw)
+	xcom := make(map[int]*mmeRaw)
 
 	for _, p := range params {
 		idx, field := extractIndexAndField(p.ParameterPath, "MmePoolConfigParam.")
 		if idx == 0 {
+			matches := xcomMMEPoolFieldPath.FindStringSubmatch(p.ParameterPath)
+			if len(matches) != 3 {
+				continue
+			}
+			xcomIndex, err := strconv.Atoi(matches[1])
+			if err != nil || xcomIndex <= 0 {
+				continue
+			}
+			if xcom[xcomIndex] == nil {
+				xcom[xcomIndex] = &mmeRaw{}
+			}
+			switch matches[2] {
+			case "List":
+				xcom[xcomIndex].ip = p.ParameterValue
+			case "Status":
+				xcom[xcomIndex].status = p.ParameterValue
+			}
 			continue
 		}
-		if grouped[idx] == nil {
-			grouped[idx] = &mmeRaw{}
+		if indexed[idx] == nil {
+			indexed[idx] = &mmeRaw{}
 		}
 		switch {
 		case strings.HasSuffix(field, "MME1Status") || strings.HasSuffix(field, "MMEStatus"):
-			grouped[idx].status = p.ParameterValue
+			indexed[idx].status = p.ParameterValue
 		// MMEIp1 / MMEIp2: Baicells BaiBLQ 等设备实际上报路径
 		//   Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.{N}.MMEIp1
 		// MME1Address / MME1IP: 部分设备/早期固件使用的路径（保留向后兼容）
@@ -50,19 +70,44 @@ func AssembleMMEPool(params []model.DeviceParameter) []MMEEntry {
 			strings.HasSuffix(field, "MMEIp") ||
 			strings.HasSuffix(field, "MME1Address") ||
 			strings.HasSuffix(field, "MME1IP"):
-			grouped[idx].ip = p.ParameterValue
+			indexed[idx].ip = p.ParameterValue
 		case strings.HasSuffix(field, "PLMNID"):
-			grouped[idx].plmnID = p.ParameterValue
+			indexed[idx].plmnID = p.ParameterValue
 		}
 	}
 
-	var entries []MMEEntry
-	for idx, raw := range grouped {
+	// Indexed MME entries carry IP/PLMN detail and are preferred when they have
+	// connection-state values. X_COM is a product-specific fallback that reports
+	// two pool-level states rather than per-MME rows.
+	grouped := indexed
+	indexedHasStatus := false
+	for _, raw := range indexed {
+		if strings.TrimSpace(raw.status) != "" {
+			indexedHasStatus = true
+			break
+		}
+	}
+	if !indexedHasStatus && len(xcom) > 0 {
+		grouped = xcom
+	}
+
+	indices := make([]int, 0, len(grouped))
+	for idx := range grouped {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+
+	entries := make([]MMEEntry, 0, len(indices))
+	for _, idx := range indices {
+		raw := grouped[idx]
 		if raw.ip == "" && raw.status == "" {
 			continue
 		}
-		status := "inactive"
-		if raw.status == "1" {
+		status := ""
+		if strings.TrimSpace(raw.status) != "" {
+			status = "inactive"
+		}
+		if isConnectedMMEStatus(raw.status) {
 			status = "active"
 		}
 		entries = append(entries, MMEEntry{

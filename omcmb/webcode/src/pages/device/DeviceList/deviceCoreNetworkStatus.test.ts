@@ -6,6 +6,7 @@ import {
   bscLinkStatusForDevice,
   bscLinkStatusMessageIdForDevice,
   mmeStatusMessageIdForDevice,
+  mmePoolSummaryForDevice,
   mmeStatusForDevice,
 } from './deviceCoreNetworkStatus';
 
@@ -39,6 +40,38 @@ describe('设备列表核心网状态展示', () => {
     const lte = { ...device('eNB'), mmeStatus: 'disconnected' };
 
     expect(mmeStatusMessageIdForDevice(lte)).toBe('status.disconnected');
+  });
+
+  it('多 MME 中任一连接时汇总为已连接并保留每组计数', () => {
+    const lte = {
+      ...device('eNB'),
+      mmeStatus: 'disconnected',
+      mmePool: [
+        { index: 1, ip: '172.24.224.88', status: 'active', plmnId: '46068' },
+        { index: 2, ip: '172.24.224.91', status: 'inactive', plmnId: '46000' },
+      ],
+    };
+
+    expect(mmePoolSummaryForDevice(lte)).toEqual({
+      status: 'connected',
+      connectedCount: 1,
+      total: 2,
+    });
+  });
+
+  it('ENB_DEFAULT_098/181 使用设备级 Gateway 状态，不被池明细覆盖', () => {
+    const lte = {
+      ...device('eNB'),
+      productClass: 'ENB_DEFAULT_098',
+      mmeStatus: 'connected',
+      mmePool: [{ index: 1, ip: '10.0.0.1', status: 'inactive', plmnId: '46000' }],
+    };
+
+    expect(mmePoolSummaryForDevice(lte)).toEqual({
+      status: 'connected',
+      connectedCount: 0,
+      total: 0,
+    });
   });
 
   it('AMF 仅对 5G gNB 展示', () => {

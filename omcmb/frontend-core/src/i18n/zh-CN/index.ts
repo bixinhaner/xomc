@@ -913,6 +913,7 @@ const messages: Record<string, string> = {
   'status.disabled':       '已禁用',
   'status.connected':      '已连接',
   'status.disconnected':   '未连接',
+  'device.mmeConnectionRatio': '{connected}/{total}',
   'status.synchronized':   '已同步',
   'status.beidouSynchronized': '北斗已同步',
   'status.notSynchronized': '未同步',

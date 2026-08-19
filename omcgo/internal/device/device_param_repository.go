@@ -31,3 +31,10 @@ type DeviceParameterRepository interface {
 	// GetByFAPInstanceAndGroup 按 FAPService 实例 + 功能分组查询设备参数。
 	GetByFAPInstanceAndGroup(ctx context.Context, deviceID uuid.UUID, instance int, group string) ([]model.DeviceParameter, error)
 }
+
+// DeviceParameterGroupBatchReader provides optional list-page decoration without
+// widening DeviceParameterRepository and forcing unrelated implementations to
+// support batch reads.
+type DeviceParameterGroupBatchReader interface {
+	GetByDeviceIDsAndGroup(ctx context.Context, deviceIDs []uuid.UUID, group string) (map[uuid.UUID][]model.DeviceParameter, error)
+}

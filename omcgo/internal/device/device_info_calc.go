@@ -70,22 +70,14 @@ func CalcOpState(params map[string]string) string {
 
 // CalcMMEStatus computes the mme_status quick-query column from device_parameters.
 //
-// Priority:
-//  1. LTE strict path `Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus`
-//  2. For each pool instance, prefer the EPC path and fall back across legacy
-//     LTE/MLN variants (`MME1Status` or `MMEStatus`) when EPC is empty.
+// Sources:
+//   - Indexed LTE/MLN MME pool instances (`MME1Status` or `MMEStatus`).
+//   - The two vendor pool-level `X_COM_MmePool.MmePool{N}Status` values.
 //
 // Returns only device-level states: any active MME means connected; all observed
-// MMEs inactive means disconnected. The ambiguous "partial" state is normalized
-// to connected because the device still has a usable core-network connection.
+// MMEs inactive means disconnected. Gateway.MmeStatus is intentionally excluded:
+// despite its name, it is not an MME connection-status source.
 func CalcMMEStatus(params map[string]string) string {
-	if gatewayStatus := strings.TrimSpace(params["Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus"]); gatewayStatus != "" {
-		if isConnectedMMEStatus(gatewayStatus) || strings.EqualFold(gatewayStatus, "partial") {
-			return "connected"
-		}
-		return "disconnected"
-	}
-
 	hasStatus := false
 	for i := 1; i <= 16; i++ {
 		status := firstNonEmpty(
@@ -103,11 +95,66 @@ func CalcMMEStatus(params map[string]string) string {
 			return "connected"
 		}
 	}
+	for path, status := range params {
+		if !xcomMMEPoolStatusPath.MatchString(path) || strings.TrimSpace(status) == "" {
+			continue
+		}
+		hasStatus = true
+		if isConnectedMMEStatus(status) {
+			return "connected"
+		}
+	}
 	if hasStatus {
 		return "disconnected"
 	}
 	return ""
 }
+
+var gatewayMMEStatusProducts = map[string]struct{}{
+	"ENB_DEFAULT_098": {},
+	"ENB_DEFAULT_181": {},
+}
+
+var gatewayMMEStatusPath = regexp.MustCompile(
+	`^Device\.Services\.FAPService\.\d+\.FAPControl\.LTE\.Gateway\.MmeStatus$`,
+)
+
+func usesGatewayMMEStatus(productClass string) bool {
+	_, ok := gatewayMMEStatusProducts[strings.ToUpper(strings.TrimSpace(productClass))]
+	return ok
+}
+
+func calcGatewayMMEStatus(params map[string]string) string {
+	hasStatus := false
+	for path, status := range params {
+		if !gatewayMMEStatusPath.MatchString(path) || strings.TrimSpace(status) == "" {
+			continue
+		}
+		hasStatus = true
+		if isConnectedMMEStatus(status) || strings.EqualFold(strings.TrimSpace(status), "partial") {
+			return "connected"
+		}
+	}
+	if hasStatus {
+		return "disconnected"
+	}
+	return ""
+}
+
+// CalcMMEStatusForProduct selects the MME status source for products whose
+// parameter model does not expose pool-level status parameters.
+func CalcMMEStatusForProduct(params map[string]string, productClass string) string {
+	if usesGatewayMMEStatus(productClass) {
+		if status := calcGatewayMMEStatus(params); status != "" {
+			return status
+		}
+	}
+	return CalcMMEStatus(params)
+}
+
+var xcomMMEPoolStatusPath = regexp.MustCompile(
+	`^Device\.Services\.FAPService\.\d+\.FAPControl\.LTE\.Gateway\.X_COM_MmePool\.MmePool\d+Status$`,
+)
 
 func isConnectedMMEStatus(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
@@ -121,9 +168,15 @@ func isConnectedMMEStatus(status string) bool {
 // CalcCoreNetworkStatus computes the technology-appropriate core-network
 // quick-query status. LTE uses MME paths; NR uses the AMF status report.
 func CalcCoreNetworkStatus(params map[string]string, tech model.Technology) string {
+	return CalcCoreNetworkStatusForProduct(params, tech, "")
+}
+
+// CalcCoreNetworkStatusForProduct selects the technology- and product-specific
+// source used for the device_info core-network status projection.
+func CalcCoreNetworkStatusForProduct(params map[string]string, tech model.Technology, productClass string) string {
 	switch tech {
 	case model.TechLTE:
-		return CalcMMEStatus(params)
+		return CalcMMEStatusForProduct(params, productClass)
 	case model.TechNR:
 		return normalizeAMFStatus(params[amfsStatusPath])
 	default:

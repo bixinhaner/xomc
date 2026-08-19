@@ -127,6 +127,12 @@ interface BackendDevice {
   // 全部 inactive / 无 cell 数据 → "inactive"）。之前 T-0162 误以为后端不再透出此列。
   cell_status?: string;
   mme_status?: string;
+  mme_pool?: Array<{
+    index: number;
+    ip?: string;
+    status?: string;
+    plmn_id?: string;
+  }>;
   amf_status?: string;
   rf_status?: string;
   pm_report_status?: string;
@@ -677,6 +683,14 @@ function mapBackendDevice(bd: BackendDevice): Device {
     // device_info.mme_status 是后端按制式归一的核心网状态：LTE=MME，NR=AMF。
     // 这里按制式分流，避免 5G/2G 设备误显示 MME。
     mmeStatus: networkType === 'eNB' ? bd.mme_status || '' : '',
+    mmePool: networkType === 'eNB'
+      ? (bd.mme_pool || []).map((entry) => ({
+          index: entry.index,
+          ip: entry.ip || '',
+          status: entry.status || '',
+          plmnId: entry.plmn_id || '',
+        }))
+      : [],
     amfStatus: networkType === 'gNB' ? bd.amf_status || bd.mme_status || '' : '',
     rfStatus: bd.rf_status || '',
     pmReportStatus: bd.pm_report_status || '',
