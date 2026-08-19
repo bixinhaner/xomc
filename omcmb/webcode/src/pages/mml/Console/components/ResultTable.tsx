@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  Alert,
   Button,
   Card,
   Empty,
@@ -50,6 +51,7 @@ type StatusFilter = 'all' | 'success' | 'failed';
 const BASE_RESULT_COLUMNS_WIDTH = 190 + 110 + 120 + 150;
 const DYNAMIC_RESULT_COLUMN_WIDTH = 140;
 const TAIL_RESULT_COLUMNS_WIDTH = 104 + 104;
+const RESULT_COLUMN_LIMIT = 80;
 
 /** 状态 Tag；unverified 悬浮显示原因（只写/重启生效/查询失败，设计 §3.11.2）。 */
 function StatusTag({
@@ -99,8 +101,12 @@ export default function ResultTable({
     () => expandObjectPathColumns(columns, rows),
     [columns, rows],
   );
+  const visibleColumns = useMemo(
+    () => displayColumns.slice(0, RESULT_COLUMN_LIMIT),
+    [displayColumns],
+  );
   const tableScrollWidth = BASE_RESULT_COLUMNS_WIDTH
-    + displayColumns.length * DYNAMIC_RESULT_COLUMN_WIDTH
+    + visibleColumns.length * DYNAMIC_RESULT_COLUMN_WIDTH
     + TAIL_RESULT_COLUMNS_WIDTH;
 
   const handleExportAllCsv = (): void => {
@@ -238,7 +244,7 @@ export default function ResultTable({
       },
     ];
 
-    const dynamic: ColumnsType<ResultRow> = displayColumns.map((c) => ({
+    const dynamic: ColumnsType<ResultRow> = visibleColumns.map((c) => ({
       title: c.label,
       key: c.key,
       width: DYNAMIC_RESULT_COLUMN_WIDTH,
@@ -294,7 +300,7 @@ export default function ResultTable({
     return [...base, ...dynamic, ...tail];
     // commandId / 导出 mutation / 重新执行回调 / running 进依赖：切任务或对应状态变化时刷新「操作」列。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayColumns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables, onReexecute, running, t, canExportPerm, canExecutePerm]);
+  }, [visibleColumns, commandId, exportDeviceCsv.isPending, exportDeviceCsv.variables, onReexecute, running, t, canExportPerm, canExecutePerm]);
 
   return (
     <Card
@@ -365,6 +371,31 @@ export default function ResultTable({
               onChange={(e) => setSnKeyword(e.target.value)}
             />
           </Space>
+
+          {displayColumns.length > RESULT_COLUMN_LIMIT && (
+            <Alert
+              type="info"
+              showIcon
+              title={t('mml.consoleV2.result.columnLimitHint', {
+                limit: RESULT_COLUMN_LIMIT,
+                total: displayColumns.length,
+              })}
+              action={(
+                <Tooltip title={canExportPerm ? undefined : t('common.noPermission')}>
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<DownloadOutlined />}
+                    disabled={!canExportPerm}
+                    loading={exportCsv.isPending}
+                    onClick={handleExportAllCsv}
+                  >
+                    {t('mml.consoleV2.result.downloadFullResult')}
+                  </Button>
+                </Tooltip>
+              )}
+            />
+          )}
 
           <Table<ResultRow>
             rowKey="deviceSn"

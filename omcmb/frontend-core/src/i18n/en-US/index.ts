@@ -7457,6 +7457,8 @@ const messages: Record<string, string> = {
   'mml.consoleV2.result.filterSuccess':      'Success({count})',
   'mml.consoleV2.result.filterFailed':       'Failed({count})',
   'mml.consoleV2.result.snFilterPlaceholder': 'Filter by device SN',
+  'mml.consoleV2.result.columnLimitHint':    'This result contains {total} parameters. Only the first {limit} columns are shown; download the complete result for details.',
+  'mml.consoleV2.result.downloadFullResult': 'Download full result',
   'mml.consoleV2.result.totalRows':          '{count} rows in total',
   // ResultDetailModal
   'mml.consoleV2.detail.col.paramPath':      'Parameter Path',

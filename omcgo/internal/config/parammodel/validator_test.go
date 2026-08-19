@@ -137,6 +137,26 @@ func TestMappingValidator_ValidateAddObject_MatchesChildObjectTemplate(t *testin
 	assert.Nil(t, v.ValidateAddObject("Device.Ethernet.Interface.2.VlanInterface.", 0))
 }
 
+func TestMappingValidator_BTSCollectionUsesIndexedObjectCapability(t *testing.T) {
+	v := NewMappingValidator(mkSet([]ParamMapping{
+		{PrivatePath: "DeviceGSM.Bts.", EntryType: "object", Access: "READ_ONLY"},
+		{PrivatePath: "DeviceGSM.Bts.{i}.", EntryType: "object", Access: "READ_WRITE"},
+	}))
+
+	single := v.LookupObject("DeviceGSM.Bts.")
+	require.NotNil(t, single)
+	assert.Equal(t, "READ_ONLY", single.Access)
+
+	indexed := v.LookupObject("DeviceGSM.Bts.7.")
+	require.NotNil(t, indexed)
+	assert.Equal(t, "DeviceGSM.Bts.{i}.", indexed.PrivatePath)
+	assert.Equal(t, "READ_WRITE", indexed.Access)
+
+	assert.Nil(t, v.ValidateAddObject("DeviceGSM.Bts.", 0),
+		"AddObject on the collection must be authorized by DeviceGSM.Bts.{i}., not the single object")
+	assert.Nil(t, v.ValidateDeleteObject("DeviceGSM.Bts.7.", 0))
+}
+
 func TestMappingValidator_ValidateAddObject_NotWritable(t *testing.T) {
 	v := NewMappingValidator(mkSet([]ParamMapping{
 		{PrivatePath: "Dev.WiFi.", EntryType: "object", Access: "readOnly"},

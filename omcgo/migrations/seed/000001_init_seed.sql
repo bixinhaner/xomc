@@ -22328,6 +22328,58 @@ FROM refreshed r
 WHERE c.id = r.id;
 
 -- GSM writable and multi-instance operation commands.
+-- The imported DeviceGSM extension originally defaulted these configuration
+-- paths to READ_ONLY.  Keep structural Index/count paths read-only, while
+-- restoring the actual configuration leaves used by MOD commands.
+UPDATE public.standard_params
+SET access = 'READ_WRITE',
+    updated_at = now()
+WHERE entry_type = 'parameter'
+  AND (
+      standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.{i}.%'
+      OR standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.%'
+      OR standard_path LIKE 'DeviceGSM.Mgw.{i}.%'
+      OR standard_path LIKE 'DeviceGSM.Msc.{i}.%'
+      OR standard_path LIKE 'DeviceGSM.handover2.%'
+      OR standard_path IN (
+          'DeviceGSM.BscSelect',
+          'DeviceGSM.Encryption',
+          'DeviceGSM.HandoverAlgorithm',
+          'DeviceGSM.Hodec2CongestionCheck',
+          'DeviceGSM.IpaUnitId',
+          'DeviceGSM.Mcc',
+          'DeviceGSM.Mnc',
+          'DeviceGSM.NriBitLen',
+          'DeviceGSM.NriNullAdd',
+          'DeviceGSM.NriNullDel',
+          'DeviceGSM.OmlRemoteIp',
+          'DeviceGSM.OmlRemoteIpBak',
+          'DeviceGSM.TimerNetT3212',
+          'DeviceGSM.handover'
+      )
+  );
+
+UPDATE public.mml_command_sub_fields sf
+SET access_type = 'RW',
+    updated_at = now()
+FROM public.mml_commands c, public.standard_params sp
+WHERE sf.command_id = c.id
+  AND sf.standard_path_id = sp.id
+  AND sf.deprecated_at IS NULL
+  AND sp.access = 'READ_WRITE'
+  AND c.command_code IN (
+      'LST MML350_DEVICEGSM__BTS_TRX',
+      'LST MML350_DEVICEGSM__BTS_TRX_TS',
+      'LST MML350_DEVICEGSM__CS7INSTANCE',
+      'LST MML350_DEVICEGSM__CS7INSTANCE_AS',
+      'LST MML350_DEVICEGSM__CS7INSTANCE_ASP',
+      'LST MML350_DEVICEGSM__CS7INSTANCE_SCCPADDR',
+      'LST MML350_DEVICEGSM__GLOBAL',
+      'LST MML350_DEVICEGSM__HANDOVER2',
+      'LST MML350_DEVICEGSM__MGW',
+      'LST MML350_DEVICEGSM__MSC'
+  );
+
 WITH rw_lst AS (
     SELECT
         c.id AS lst_id,
@@ -22341,7 +22393,7 @@ WITH rw_lst AS (
         COALESCE(c.logical_name_i18n->>'en-US', c.command_name) AS logical_en,
         jsonb_agg(to_jsonb(sp.standard_path) ORDER BY sf.sort_order, sp.standard_path) AS target_paths
     FROM public.mml_commands c
-    JOIN public.mml_command_sub_fields sf ON sf.command_id = c.id AND sf.deprecated_at IS NULL AND sf.access_type = 'RW'
+    JOIN public.mml_command_sub_fields sf ON sf.command_id = c.id AND sf.deprecated_at IS NULL
     JOIN public.standard_params sp ON sp.id = sf.standard_path_id
     WHERE c.operation_type = 'LST'
       AND c.deprecated_at IS NULL
@@ -22354,8 +22406,17 @@ WITH rw_lst AS (
           'LST MML350_DEVICEGSM__CS7INSTANCE_AS',
           'LST MML350_DEVICEGSM__CS7INSTANCE_ASP',
           'LST MML350_DEVICEGSM__CS7INSTANCE_SCCPADDR',
+          'LST MML350_DEVICEGSM__GLOBAL',
+          'LST MML350_DEVICEGSM__HANDOVER2',
           'LST MML350_DEVICEGSM__MGW',
           'LST MML350_DEVICEGSM__MSC'
+      )
+      AND (
+          sp.access = 'READ_WRITE'
+          OR (
+              c.command_code = 'LST MML350_DEVICEGSM__BTS'
+              AND sp.standard_path LIKE 'DeviceGSM.Bts.{i}.%'
+          )
       )
     GROUP BY c.id, c.command_code, c.category, c.description, c.group_id, c.logical_name_i18n, c.command_name
 ), upserted_mod AS (
@@ -22415,8 +22476,14 @@ SELECT
     'RW',
     sf.is_supported
 FROM rw_lst r
-JOIN public.mml_command_sub_fields sf ON sf.command_id = r.lst_id AND sf.deprecated_at IS NULL AND sf.access_type = 'RW'
+JOIN public.mml_command_sub_fields sf ON sf.command_id = r.lst_id AND sf.deprecated_at IS NULL
+JOIN public.standard_params sp ON sp.id = sf.standard_path_id
 JOIN upserted_mod u ON u.command_code = r.mod_code
+WHERE sp.access = 'READ_WRITE'
+   OR (
+       r.lst_code = 'LST MML350_DEVICEGSM__BTS'
+       AND sp.standard_path LIKE 'DeviceGSM.Bts.{i}.%'
+   )
 ON CONFLICT (command_id, standard_path_id) DO UPDATE
 SET mml_code = EXCLUDED.mml_code,
     label_i18n = EXCLUDED.label_i18n,

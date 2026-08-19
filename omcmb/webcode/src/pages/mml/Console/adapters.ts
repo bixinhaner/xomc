@@ -518,13 +518,27 @@ function leafName(path: string): string {
   return path.split('.').filter(Boolean).pop() ?? path;
 }
 
+const pathTemplateMatcherCache = new Map<string, RegExp>();
+
+function pathTemplateMatcher(template: string): RegExp {
+  const cached = pathTemplateMatcherCache.get(template);
+  if (cached) return cached;
+  const source = template
+    .split('.')
+    .filter(Boolean)
+    .map((segment) => (
+      segment === '{i}'
+        ? '\\d+'
+        : segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    ))
+    .join('\\.');
+  const matcher = new RegExp(`^${source}$`);
+  pathTemplateMatcherCache.set(template, matcher);
+  return matcher;
+}
+
 function pathMatchesTemplate(path: string, template: string): boolean {
-  const pathSegments = path.split('.').filter(Boolean);
-  const templateSegments = template.split('.').filter(Boolean);
-  if (pathSegments.length !== templateSegments.length) return false;
-  return templateSegments.every((segment, index) => (
-    segment === '{i}' ? /^\d+$/.test(pathSegments[index] ?? '') : segment === pathSegments[index]
-  ));
+  return pathTemplateMatcher(template).test(path);
 }
 
 function resultPathMatchesColumn(path: string, column: ResultColumn): boolean {
@@ -635,8 +649,39 @@ function parseOptionsForColumns(columns: ResultColumn[]): ParseMmlResultOptions 
   if (!columns.some((column) => column.selectedPathTemplates?.length)) {
     return {};
   }
+
+  const exactPaths = new Set<string>();
+  const leafPaths = new Set<string>();
+  const objectRules = columns
+    .filter((column) => column.path.endsWith('.'))
+    .map((column) => {
+      const templates = column.selectedPathTemplates ?? [];
+      const matchersByLeaf = templates.length > 0 ? new Map<string, RegExp[]>() : null;
+      templates.forEach((template) => {
+        const leaf = leafName(template);
+        const matchers = matchersByLeaf?.get(leaf) ?? [];
+        matchers.push(pathTemplateMatcher(template));
+        matchersByLeaf?.set(leaf, matchers);
+      });
+      return { prefix: column.path, matchersByLeaf };
+    });
+  columns.forEach((column) => {
+    if (column.path.endsWith('.')) return;
+    exactPaths.add(column.path);
+    leafPaths.add(leafName(column.path));
+  });
+
   return {
-    includeParam: (param) => columns.some((column) => resultPathMatchesColumn(param.name, column)),
+    includeParam: (param) => {
+      const path = param.name;
+      const leaf = leafName(path);
+      if (exactPaths.has(path) || leafPaths.has(leaf)) return true;
+      return objectRules.some(({ prefix, matchersByLeaf }) => {
+        if (path === prefix || !path.startsWith(prefix)) return false;
+        if (!matchersByLeaf) return true;
+        return matchersByLeaf.get(leaf)?.some((matcher) => matcher.test(path)) ?? false;
+      });
+    },
   };
 }
 

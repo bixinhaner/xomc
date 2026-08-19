@@ -119,6 +119,38 @@ describe('ResultTable', () => {
     expect(tables.every((table) => table.style.tableLayout === 'fixed')).toBe(true);
   });
 
+  it('shows only the first 80 oversized object result columns and prompts for full download', () => {
+    const paths = Array.from(
+      { length: 100 },
+      (_value, index) => `DeviceGSM.Bts.${index + 1}.Band`,
+    );
+    const { container } = render(
+      <ResultTable
+        execMeta={{ operationType: 'LST', read: true, label: 'LST BTS' }}
+        commandId="command-large-object"
+        columns={[{ key: 'bts', label: 'BTS', path: 'DeviceGSM.Bts.' }]}
+        rows={[{
+          ...row,
+          cells: Object.fromEntries(paths.map((path) => [path, 'GSM900'])),
+        }]}
+        running={false}
+        hasExecuted
+      />,
+    );
+
+    const headers = Array.from(container.querySelectorAll('thead th'))
+      .map((header) => header.textContent?.trim());
+    expect(headers).toHaveLength(86); // 4 base + 80 params + 2 timestamps
+    expect(headers).toContain('Band [Bts.1]');
+    expect(headers).toContain('Band [Bts.80]');
+    expect(headers).not.toContain('Band [Bts.81]');
+    expect(container).toHaveTextContent('mml.consoleV2.result.columnLimitHint');
+    expect(screen.getByRole('button', {
+      name: /mml\.consoleV2\.result\.downloadFullResult/,
+    })).toBeEnabled();
+    expect(container.querySelector('.ant-pagination-item-2')).toBeNull();
+  });
+
   it('falls back to the selected command metadata when a MOD readback row has no command fields', () => {
     const { container } = render(
       <ResultTable

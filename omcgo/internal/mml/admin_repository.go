@@ -319,6 +319,7 @@ func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, comman
 	minValueExpr := "sp.min_value"
 	maxValueExpr := "sp.max_value"
 	valueTypeExpr := "COALESCE(sp.data_type, 'string')"
+	accessTypeExpr := "COALESCE(sp.access, 'READ_ONLY')"
 	enumValuesExpr := "NULL::text"
 	enumLabelsExpr := "NULL::text"
 	isSupportedExpr := `(
@@ -331,7 +332,7 @@ func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, comman
 	if paramModelID != nil {
 		modelMappingJoin = `
 LEFT JOIN LATERAL (
-	    SELECT pm.default_value, pm.validation_pattern, pm.data_type,
+	    SELECT pm.default_value, pm.validation_pattern, pm.data_type, pm.access,
            pm.min_value, pm.max_value, pm.enum_values, pm.enum_labels
       FROM param_mappings pm
      WHERE pm.standard_path = sp.standard_path
@@ -346,6 +347,7 @@ LEFT JOIN LATERAL (
 		minValueExpr = "COALESCE(model_pm.min_value, sp.min_value)"
 		maxValueExpr = "COALESCE(model_pm.max_value, sp.max_value)"
 		valueTypeExpr = "COALESCE(model_pm.data_type, sp.data_type, 'string')"
+		accessTypeExpr = "COALESCE(model_pm.access, sp.access, 'READ_ONLY')"
 		enumValuesExpr = "model_pm.enum_values"
 		enumLabelsExpr = "model_pm.enum_labels"
 		paramModelFilter = `
@@ -375,7 +377,7 @@ SELECT
     csf.default_selected, csf.is_required, csf.sort_order, csf.created_at, csf.updated_at,
     sp.standard_path                      AS tr069_path,
     ` + valueTypeExpr + `                AS value_type,
-    COALESCE(sp.access, 'READ_ONLY')      AS access_type,
+    ` + accessTypeExpr + `               AS access_type,
     (sp.entry_type = 'object')            AS is_object,
     false                                 AS supports_add,
     false                                 AS supports_delete,
