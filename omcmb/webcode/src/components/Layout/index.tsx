@@ -16,6 +16,7 @@ import Sidebar from './Sidebar';
 import TabBar from './TabBar';
 import TaskPanel from './TaskPanel';
 import QuickSettingsSyncWatcher from './QuickSettingsSyncWatcher';
+import StorageProtectionBlockingBanner from './StorageProtectionBlockingBanner';
 import { isDynamicMenuEnabled } from '../MenuBootstrap/featureFlag';
 import { NAV_CONFIG } from './Sidebar/navConfig';
 import { resolveRouteTab } from './routeTabResolver';
@@ -35,6 +36,8 @@ export default function AppShell() {
   const dynamicMenus = useMenuStore((s) => s.flatMenus);
   const currentUser = useUserStore((s) => s.currentUser);
   const [agentOpen, setAgentOpen] = useState(false);
+  const [storageProtectionBlocked, setStorageProtectionBlocked] = useState(false);
+  const [storageProtectionBannerCollapsed, setStorageProtectionBannerCollapsed] = useState(false);
   const agentVisibility = useAgentVisibilityConfig();
   const agentVisible = agentVisibility.data?.visible === true;
 
@@ -145,6 +148,8 @@ export default function AppShell() {
           <Header
             agentVisible={agentVisible}
             agentOpen={agentOpen}
+            storageProtectionBlocked={storageProtectionBlocked && storageProtectionBannerCollapsed}
+            onStorageProtectionClick={() => setStorageProtectionBannerCollapsed(false)}
             onAgentToggle={() => {
               if (agentVisible) setAgentOpen((open) => !open);
             }}
@@ -159,6 +164,11 @@ export default function AppShell() {
         <main className={styles.content} style={{ position: 'relative' }}>
           {effects3D && <ParticleCanvas />}
           {effects3D && <DynamicLightSource />}
+          <StorageProtectionBlockingBanner
+            collapsed={storageProtectionBannerCollapsed}
+            onCollapsedChange={setStorageProtectionBannerCollapsed}
+            onBlockedChange={setStorageProtectionBlocked}
+          />
           {/*
             key={locale}：切换语言时强制重挂载路由内容子树。
             页面里大量表格列（DataTableColumn.title）通过 useMemo 缓存翻译文案，

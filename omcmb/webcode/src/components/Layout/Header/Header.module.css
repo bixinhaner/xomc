@@ -213,6 +213,29 @@
   text-align: center;
 }
 
+.storageBlockPill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid #ff7875;
+  border-radius: 9999px;
+  background: #a8071a;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.storageBlockPill:hover {
+  border-color: #ffa39e;
+  background: #cf1322;
+}
+
 /* Timezone selector — Linear subtle button style */
 .timezoneBtn {
   display: flex;
