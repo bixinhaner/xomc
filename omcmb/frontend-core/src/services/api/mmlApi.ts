@@ -22,7 +22,6 @@ import type {
   StructuredExecuteRequest,
   StructuredStatement,
   CommandCompatibility,
-  FlatGroupTreeResponse,
 } from '../../types/mmlConsole';
 
 // ---------------------------------------------------------------------------
@@ -1622,35 +1621,6 @@ export const mmlApi = {
     // 后端响应可能是 { tree: [...] } 或 [...] 形态；兼容两种
     const arr = Array.isArray(data) ? data : (data?.tree ?? []);
     return arr.map(mapGroupTreeNode);
-  },
-
-  /**
-   * Task #9: GET /mml/group-tree?format=flat&lang=&product_class=&device_sn= — 扁平化命令分组树。
-   *
-   * 与 buildGroupTree 区别：
-   *   - 后端预聚合为「分组 → 命令叶子」两层；不返回 ltree children/sub_fields
-   *   - 命令直接携带 object_path（LST=string[]、MOD=ModParamPath[]、ADD/RMV=string）
-   *   - command.name 已含操作前缀（"LST/MOD/ADD/RMV <中文名>"）
-   *
-   * 注意：axios 全局拦截器会做 snake→camel；为保持后端契约（path/type/min/max/max_length
-   * 等关键字段在 ModParamPath 内是 spec 定义的 wire 名），此方法使用泛型断言
-   * 避免拦截器对 object_path 内嵌字段的转换破坏类型。如果业务后续依赖 max_length
-   * 等下划线字段被转 camel，调用方应在消费层做兼容；本层保持透传。
-   */
-  async buildGroupTreeFlat(
-    lang: string = 'zh-CN',
-    productClass?: string,
-    deviceKey?: string,
-  ): Promise<FlatGroupTreeResponse> {
-    const params: Record<string, string> = { format: 'flat', lang };
-    if (productClass) params.product_class = productClass;
-    if (deviceKey) params.device_sn = deviceKey;
-    const { data } = await http.get<FlatGroupTreeResponse>('/mml/group-tree', {
-      params,
-    });
-    return {
-      groups: Array.isArray(data?.groups) ? data.groups : [],
-    };
   },
 
   /**
