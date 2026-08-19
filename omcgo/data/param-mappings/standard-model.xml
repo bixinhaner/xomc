@@ -1862,7 +1862,7 @@
         <param standardPath="Device.Time.NTPServer4" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Time.NTPServer5" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.WebConfig.WanVisitEnable" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.BscSelect" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.BscSelect" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="DeviceGSM.Bts.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="DeviceGSM.Bts.Trx.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="DeviceGSM.Bts.{i}.Band" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
@@ -1888,10 +1888,10 @@
         <param standardPath="DeviceGSM.Bts.{i}.RachCellBarred" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="DeviceGSM.Bts.{i}.Si2quaterNeighborListAdd" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param standardPath="DeviceGSM.Bts.{i}.Si2quaterNeighborListDel" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Bts.{i}.Trx.{i}.Arfcn" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Bts.{i}.Trx.{i}.MaxPowerRed" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Bts.{i}.Trx.{i}.RfLocked" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.PhyChanConfig" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Bts.{i}.Trx.{i}.Arfcn" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Bts.{i}.Trx.{i}.MaxPowerRed" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Bts.{i}.Trx.{i}.RfLocked" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.PhyChanConfig" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="DeviceGSM.Bts.{i}.handover" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param standardPath="DeviceGSM.Bts.{i}.handover1.maximum.distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
@@ -1924,83 +1924,83 @@
         <param standardPath="DeviceGSM.Cs7Instance.ForAs.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="DeviceGSM.Cs7Instance.ForAsp.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="DeviceGSM.Cs7Instance.ForSccpAddr.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.RoutingKey" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.TrafficMode" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.addAspName" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.delAspName" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.AspRole" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalIp" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalPort" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Protocol" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemoteIp" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemotePort" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.SctpRole" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.NetworkIndicator" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.PointCode" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.PointCodeFormat" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.PointCode" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.RoutingIndicator" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.SubsystemNumber" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Cs7Instance.{i}.XuaRkmRoutingKeyAllocation" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Encryption" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.HandoverAlgorithm" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Hodec2CongestionCheck" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.IpaUnitId" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Mcc" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Mgw.{i}.MgwEndpointDomain" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Mgw.{i}.MgwLocalPort" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Mgw.{i}.MgwRemoteIp" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Mgw.{i}.MgwRemotePort" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Mnc" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.AllowEmergency" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.Amr10_2" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.Amr12_2" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.Amr4_75" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.Amr5_15" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.Amr5_90" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.Amr6_70" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.Amr7_40" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.Amr7_95" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.AmrPayload" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.AspProtocol" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.AttachProportion" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.LclsMismatch" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.LclsMode" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.MscAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.MscCodecList" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.NriAdd" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.Msc.{i}.NriDel" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.NriBitLen" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.NriNullAdd" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.NriNullDel" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.OmlRemoteIp" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.OmlRemoteIpBak" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.TimerNetT3212" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.afs-bias.rxlev" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.afs-bias.rxqual" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.assignment" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.max-handovers" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.maximum.distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.min-free-slots.tch-f" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.min-free-slots.tch-h" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.min.rxlev" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.min.rxqual" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.penalty-time.failed-assignment" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.penalty-time.failed-ho" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.penalty-time.low-rxqual-assignment" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.penalty-time.low-rxqual-ho" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.penalty-time.max-distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.power.budget.hysteresis" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.power.budget.interval" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.retries" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.tdma-measurement" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.window.rxlev.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.window.rxlev.neighbor.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="DeviceGSM.handover2.window.rxqual.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.Name" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.RoutingKey" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.TrafficMode" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.addAspName" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.delAspName" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.AspRole" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalIp" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalPort" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Name" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Protocol" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemoteIp" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemotePort" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.SctpRole" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.NetworkIndicator" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.PointCode" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.PointCodeFormat" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.Name" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.PointCode" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.RoutingIndicator" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.SubsystemNumber" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Cs7Instance.{i}.XuaRkmRoutingKeyAllocation" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Encryption" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.HandoverAlgorithm" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Hodec2CongestionCheck" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.IpaUnitId" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Mcc" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Mgw.{i}.MgwEndpointDomain" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Mgw.{i}.MgwLocalPort" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Mgw.{i}.MgwRemoteIp" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Mgw.{i}.MgwRemotePort" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Mnc" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.AllowEmergency" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.Amr10_2" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.Amr12_2" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.Amr4_75" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.Amr5_15" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.Amr5_90" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.Amr6_70" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.Amr7_40" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.Amr7_95" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.AmrPayload" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.AspProtocol" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.AttachProportion" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.LclsMismatch" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.LclsMode" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.MscAddr" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.MscCodecList" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.NriAdd" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.Msc.{i}.NriDel" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.NriBitLen" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.NriNullAdd" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.NriNullDel" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.OmlRemoteIp" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.OmlRemoteIpBak" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.TimerNetT3212" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.afs-bias.rxlev" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.afs-bias.rxqual" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.assignment" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.max-handovers" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.maximum.distance" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.min-free-slots.tch-f" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.min-free-slots.tch-h" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.min.rxlev" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.min.rxqual" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.penalty-time.failed-assignment" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.penalty-time.failed-ho" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.penalty-time.low-rxqual-assignment" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.penalty-time.low-rxqual-ho" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.penalty-time.max-distance" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.power.budget.hysteresis" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.power.budget.interval" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.retries" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.tdma-measurement" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.window.rxlev.averaging" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.window.rxlev.neighbor.averaging" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="DeviceGSM.handover2.window.rxqual.averaging" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="InternetGatewayDevice.Time.NTPServer3" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="InternetGatewayDevice.Time.NTPServer5" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="boardconf.HALOD.HALOD_ENB1_IP" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>

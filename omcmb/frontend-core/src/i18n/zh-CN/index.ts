@@ -7488,6 +7488,8 @@ const messages: Record<string, string> = {
   'mml.consoleV2.result.filterSuccess':      '成功({count})',
   'mml.consoleV2.result.filterFailed':       '失败({count})',
   'mml.consoleV2.result.snFilterPlaceholder': '按设备 SN 过滤',
+  'mml.consoleV2.result.columnLimitHint':    '结果共 {total} 个参数，列表仅展示前 {limit} 列，请下载完整结果查看详情。',
+  'mml.consoleV2.result.downloadFullResult': '下载完整结果',
   'mml.consoleV2.result.totalRows':          '共 {count} 行',
   // ResultDetailModal
   'mml.consoleV2.detail.col.paramPath':      '参数路径',

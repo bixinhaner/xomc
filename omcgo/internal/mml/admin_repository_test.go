@@ -76,6 +76,7 @@ func Test_AdminRepository_SQLIncludesModelValueRules(t *testing.T) {
 	assert.Contains(t, src, "COALESCE(model_pm.min_value, sp.min_value)")
 	assert.Contains(t, src, "COALESCE(model_pm.max_value, sp.max_value)")
 	assert.Contains(t, src, "COALESCE(model_pm.data_type, sp.data_type, 'string')")
+	assert.Contains(t, src, "COALESCE(model_pm.access, sp.access, 'READ_ONLY')")
 	assert.Contains(t, src, "model_pm.enum_values")
 	assert.Contains(t, src, "model_pm.enum_labels")
 	assert.Contains(t, src, "ORDER BY (pm.source = 'custom') DESC")
@@ -245,6 +246,36 @@ func Test_ListEnrichedByCommand_ModelTypeOverridesStandardType(t *testing.T) {
 	assert.Equal(t, "U_INT", rows[0].ValueType)
 	assert.EqualValues(t, 22, *rows[0].MinValue)
 	assert.EqualValues(t, 32, *rows[0].MaxValue)
+}
+
+func Test_ListEnrichedByCommand_ModelAccessOverridesStandardAccess(t *testing.T) {
+	pool := newMMLTestPool(t)
+	if pool == nil {
+		return
+	}
+	ctx := context.Background()
+	fx := newMMLFixture(t, pool)
+	defer fx.cleanup()
+
+	commandID := fx.insertCommand("MOD_MODEL_ACCESS", "chapter:ACCESS")
+	standardPath := "DeviceGSM.Bts.{i}." + uuid.NewString()
+	fx.insertSubField(commandID, standardPath, true, 1)
+	paramModelID := fx.insertParamModel()
+	mappingID := fx.insertParamMapping(paramModelID, standardPath, true, true)
+
+	_, err := pool.Exec(ctx,
+		`UPDATE standard_params SET access = 'READ_ONLY' WHERE standard_path = $1`, standardPath)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx,
+		`UPDATE param_mappings SET access = 'READ_WRITE' WHERE id = $1`, mappingID)
+	require.NoError(t, err)
+
+	repo := NewPgSubFieldRepository(pool)
+	rows, err := repo.ListEnrichedByCommand(ctx, commandID, &paramModelID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, AccessTypeReadWrite, rows[0].AccessType,
+		"product mapping access must drive MOD availability")
 }
 
 // T-0176-PR-E：MarkUnsupportedByStandardPath 写入真值源迁到 param_mappings；

@@ -163,4 +163,14 @@ func TestAnnotateCommand(t *testing.T) {
 	}
 }
 
+func TestSupportsObjectCollectionSeparatesSingleAndMultiInstanceBTS(t *testing.T) {
+	singleOnly := newSupportedSet(true, "DeviceGSM.Bts.")
+	assert.False(t, singleOnly.SupportsObjectCollection("DeviceGSM.Bts."),
+		"the unindexed single object must not authorize ADD/RMV")
+
+	withMulti := newSupportedSet(true, "DeviceGSM.Bts.", "DeviceGSM.Bts.{i}.")
+	assert.True(t, withMulti.SupportsObjectCollection("DeviceGSM.Bts."),
+		"the indexed object template authorizes ADD/RMV on its collection")
+}
+
 func ptrBool(b bool) *bool { return &b }

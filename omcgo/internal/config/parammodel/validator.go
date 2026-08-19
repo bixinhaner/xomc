@@ -94,6 +94,36 @@ func (v *MappingValidator) LookupObject(privatePath string) *ParamMapping {
 	return nil
 }
 
+// lookupObjectCollection 按 AddObject 的集合路径优先查找其多实例模板。
+// 例如 DeviceGSM.Bts. 必须由 DeviceGSM.Bts.{i}. 授权，不能误用同名的
+// 无索引单实例对象 DeviceGSM.Bts.。旧模型若只声明集合路径，调用方仍可回退到
+// LookupObject，保持兼容。
+func (v *MappingValidator) lookupObjectCollection(collectionPath string) *ParamMapping {
+	if v == nil {
+		return nil
+	}
+	collectionPath = strings.TrimSpace(collectionPath)
+	if collectionPath == "" {
+		return nil
+	}
+	if !strings.HasSuffix(collectionPath, ".") {
+		collectionPath += "."
+	}
+	templatePath := collectionPath
+	if !strings.HasSuffix(templatePath, ".{i}.") {
+		templatePath += "{i}."
+	}
+	if m, ok := v.byPrivateExact[templatePath]; ok && m.EntryType == "object" {
+		cp := m
+		return &cp
+	}
+	if m, ok := v.byPrivateNorm[normalizeInstancePath(templatePath)]; ok && m.EntryType == "object" {
+		cp := m
+		return &cp
+	}
+	return nil
+}
+
 func objectLookupCandidates(privatePath string) []string {
 	trimmed := strings.TrimSpace(privatePath)
 	if trimmed == "" {
@@ -168,7 +198,10 @@ func (v *MappingValidator) ValidateAddObject(objectPrefix string, _ int) *Mappin
 	if v == nil {
 		return nil
 	}
-	m := v.LookupObject(objectPrefix)
+	m := v.lookupObjectCollection(objectPrefix)
+	if m == nil {
+		m = v.LookupObject(objectPrefix)
+	}
 	if m == nil {
 		return &MappingValidationError{Path: objectPrefix, Code: "not_found", Message: "object not found in mapping"}
 	}
@@ -186,7 +219,10 @@ func (v *MappingValidator) ValidateDeleteObject(objectPrefix string, _ int) *Map
 	if v == nil {
 		return nil
 	}
-	m := v.LookupObject(objectPrefix)
+	m := v.lookupObjectCollection(objectPrefix)
+	if m == nil {
+		m = v.LookupObject(objectPrefix)
+	}
 	if m == nil {
 		return &MappingValidationError{Path: objectPrefix, Code: "not_found", Message: "object not found in mapping"}
 	}

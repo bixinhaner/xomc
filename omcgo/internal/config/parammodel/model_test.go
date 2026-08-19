@@ -185,6 +185,103 @@ func TestBuiltinBaiBNQDynamicNRMappingsDoNotHaveFixedInstanceAliases(t *testing.
 	}
 }
 
+func TestBuiltinBSCSeparatesSingleAndMultiInstanceBTSObjects(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BSC.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	objects := make(map[string]xmlParamEntry, len(doc.Objects))
+	for _, object := range doc.Objects {
+		objects[object.StandardPath] = object
+	}
+
+	single, ok := objects["DeviceGSM.Bts."]
+	require.True(t, ok, "BSC must keep the unindexed single-instance BTS object")
+	assert.Equal(t, "DeviceGSM.Bts.", single.Name)
+	assert.Equal(t, "READ_ONLY", single.Access)
+
+	multi, ok := objects["DeviceGSM.Bts.{i}."]
+	require.True(t, ok, "BSC must declare the indexed multi-instance BTS object independently")
+	assert.Equal(t, "DeviceGSM.Bts.{i}.", multi.Name)
+	assert.Equal(t, "READ_WRITE", multi.Access)
+}
+
+func TestBuiltinBSCGSMCommandObjectsExposeExpectedOperations(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BSC.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	objects := make(map[string]xmlParamEntry, len(doc.Objects))
+	for _, object := range doc.Objects {
+		objects[object.StandardPath] = object
+	}
+	for _, path := range []string{
+		"DeviceGSM.Bts.{i}.",
+		"DeviceGSM.Bts.{i}.Trx.{i}.",
+		"DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.",
+		"DeviceGSM.Cs7Instance.{i}.",
+		"DeviceGSM.Cs7Instance.{i}.As.{i}.",
+		"DeviceGSM.Cs7Instance.{i}.Asp.{i}.",
+		"DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.",
+		"DeviceGSM.Mgw.{i}.",
+		"DeviceGSM.Msc.{i}.",
+	} {
+		object, ok := objects[path]
+		require.True(t, ok, "BSC must declare multi-instance object %s", path)
+		assert.Equal(t, "READ_WRITE", object.Access, path)
+	}
+
+	params := make(map[string]xmlParamEntry, len(doc.Params))
+	for _, param := range doc.Params {
+		params[param.StandardPath] = param
+	}
+	for _, path := range []string{
+		"DeviceGSM.Bts.{i}.Trx.{i}.Arfcn",
+		"DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.PhyChanConfig",
+		"DeviceGSM.Cs7Instance.{i}.PointCode",
+		"DeviceGSM.Cs7Instance.{i}.As.{i}.Name",
+		"DeviceGSM.Cs7Instance.{i}.Asp.{i}.Name",
+		"DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.Name",
+		"DeviceGSM.Mgw.{i}.MgwRemoteIp",
+		"DeviceGSM.Msc.{i}.MscAddr",
+		"DeviceGSM.Mcc",
+		"DeviceGSM.handover2.assignment",
+	} {
+		param, ok := params[path]
+		require.True(t, ok, "BSC must contain GSM command parameter %s", path)
+		assert.Equal(t, "READ_WRITE", param.Access, path)
+	}
+}
+
+func TestBuiltinBSCNetworkCommandParametersAreWritable(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BSC.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	params := make(map[string]xmlParamEntry, len(doc.Params))
+	for _, param := range doc.Params {
+		params[param.StandardPath] = param
+	}
+	for _, path := range []string{
+		"Device.DeviceInfo.HOST_CONFIG_DNS1",
+		"Device.DeviceInfo.HOST_CONFIG_DNS2",
+		"Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress",
+	} {
+		param, ok := params[path]
+		require.True(t, ok, "BSC must contain network command parameter %s", path)
+		assert.Equal(t, "READ_WRITE", param.Access, path)
+	}
+}
+
 func TestBMNeighborListHasPrivateArfcnAlias(t *testing.T) {
 	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BM.xml")
 	body, err := os.ReadFile(xmlPath)

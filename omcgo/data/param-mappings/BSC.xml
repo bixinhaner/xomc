@@ -1,17 +1,15 @@
 <?xml version="1.0" ?>
-<parameterModel paramModel="BSC" totalEntries="229">
+<parameterModel paramModel="BSC" totalEntries="239">
     <objects>
         <object name="Device.FaultMgmt.CurrentAlarm." standardPath="Device.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.ExpeditedEvent." standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE." standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity." standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity." access="READ_ONLY" changeApplies="Immediate"/>
-        <!-- BSC 多实例对象：允许 QuickSettings 表前端启用 AddObject / DeleteObject 操作。
-             注：path 形态为「容器路径（不含内层实例号 {i}）」，与 device_param_handler.buildObjectSchema
-             派生的 objPrefix（截到 Segment.，e.g. "DeviceGSM.Bts.1.Trx."）一致；
-             多写一层 .{i}. 会因 LookupObject 归一化后键不匹配导致 canAdd/canDelete 永远 false。
+        <!-- BSC 多实例对象：实例模板必须包含末尾 {i}.；AddObject/DeleteObject 使用去掉
+             末尾 {i}. 后的集合路径。MappingValidator 与 MML 目录过滤均按该规则识别。
 
-             - Trx.        每 BTS 下 N 个收发信机：osmo-bsc 真按 TR-181 子对象上报
-               `Trx.{i}.{Arfcn,RfLocked,MaxPowerRed}`，标准 AddObject / SPV / DeleteObject 路径可直接工作。
+             - Trx / Ts 每个父实例下均可有多个子实例，标准
+               AddObject / SPV / DeleteObject 路径可直接工作。
 
              - Neighbor4G / Neighbor2G **不在此声明**：osmo-bsc 不上报 `Neighbor{4G,2G}.{i}.<leaf>` 子对象，
                整张邻区列表打包成 BTS 父对象单标量 `Si2quaterNeighborListAdd` / `NeighborCgiAdd`。
@@ -21,11 +19,18 @@
                         同时把字符串反解析为 `Neighbor4G.{i}.<leaf>` 子参数登记入 DB。
                在任何一项落地前不在此暴露 READ_WRITE 容器，避免前端 schema 返回 can_add=true
                但点击实际无效（无 standard <param>、无设备 AddObject 入口）。-->
-        <!-- DeviceGSM.Bts. 多实例根容器：用于「新增 BTS」(AddObject)。
-             osmo-bsc 设备允许在该路径下 AddObject/DeleteObject 来增删 BTS 实例。
-             不声明会导致 MappingValidator.ValidateAddObject 返回 not_found，POST /objects/add 直接 400。 -->
-        <object name="DeviceGSM.Bts." standardPath="DeviceGSM.Bts." access="READ_WRITE" changeApplies="Immediate"/>
-        <object name="DeviceGSM.Bts.{i}.Trx." standardPath="DeviceGSM.Bts.{i}.Trx." access="READ_WRITE" changeApplies="Immediate"/>
+        <!-- DeviceGSM.Bts. 是无索引的单实例对象；DeviceGSM.Bts.{i}. 才是允许增删改的
+             BTS 多实例对象。两者必须独立声明，不能把单实例路径当作多实例容器能力。 -->
+        <object name="DeviceGSM.Bts." standardPath="DeviceGSM.Bts." access="READ_ONLY" changeApplies="Immediate"/>
+        <object name="DeviceGSM.Bts.{i}." standardPath="DeviceGSM.Bts.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="DeviceGSM.Bts.{i}.Trx.{i}." standardPath="DeviceGSM.Bts.{i}.Trx.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}." standardPath="DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="DeviceGSM.Cs7Instance.{i}." standardPath="DeviceGSM.Cs7Instance.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="DeviceGSM.Cs7Instance.{i}.As.{i}." standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="DeviceGSM.Cs7Instance.{i}.Asp.{i}." standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}." standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="DeviceGSM.Mgw.{i}." standardPath="DeviceGSM.Mgw.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="DeviceGSM.Msc.{i}." standardPath="DeviceGSM.Msc.{i}." access="READ_WRITE" changeApplies="Immediate"/>
     </objects>
     <parameters>
         <param name="Device.DeviceInfo.AntennaInfo.Height" standardPath="Device.DeviceInfo.AntennaInfo.Height" access="READ_WRITE" type="INT" changeApplies="Immediate"/>
@@ -62,7 +67,7 @@
         <param name="Device.FaultMgmt.ExpeditedEvent.{i}.SpecificProblem" standardPath="Device.FaultMgmt.ExpeditedEvent.{i}.SpecificProblem" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="128"/>
         <param name="Device.HaltReason.DetailReason" standardPath="Device.HaltReason.DetailReason" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.HaltReason.MainReason" standardPath="Device.HaltReason.MainReason" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress" standardPath="Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16"/>
+        <param name="Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress" standardPath="Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="16"/>
         <param name="Device.LogMgmt.Password" standardPath="Device.LogMgmt.Password" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.LogMgmt.PeriodicUploadEnable" standardPath="Device.LogMgmt.PeriodicUploadEnable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.LogMgmt.PeriodicUploadInterval" standardPath="Device.LogMgmt.PeriodicUploadInterval" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
@@ -85,8 +90,8 @@
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Version" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Version" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.SoftwareCtrl.SystemBackupVersion" standardPath="Device.SoftwareCtrl.SystemBackupVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <!-- 以下参数来源：MySQL small_cell_param，MongoDB 中无对应映射 -->
-        <param name="Device.DeviceInfo.HOST_CONFIG_DNS1" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS1" access="READ_ONLY" type="STRING" changeApplies="Immediate" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
-        <param name="Device.DeviceInfo.HOST_CONFIG_DNS2" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS2" access="READ_ONLY" type="STRING" changeApplies="Immediate" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
+        <param name="Device.DeviceInfo.HOST_CONFIG_DNS1" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS1" access="READ_WRITE" type="STRING" changeApplies="Immediate" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
+        <param name="Device.DeviceInfo.HOST_CONFIG_DNS2" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS2" access="READ_WRITE" type="STRING" changeApplies="Immediate" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
         <param name="Device.DeviceInfo.ROUTE_CONFIG1_GW" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_GW" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
         <param name="Device.DeviceInfo.ROUTE_CONFIG1_NETADDR" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_NETADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
         <param name="Device.DeviceInfo.ROUTE_CONFIG1_NETMASK" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
@@ -152,7 +157,7 @@
         <param name="DeviceGSM.Bts.{i}.Trx.{i}.Arfcn" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.Arfcn" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="1023"/>
         <param name="DeviceGSM.Bts.{i}.Trx.{i}.MaxPowerRed" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.MaxPowerRed" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="100"/>
         <param name="DeviceGSM.Bts.{i}.Trx.{i}.RfLocked" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.RfLocked" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Unlocked,Locked"/>
-        <param name="DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.PhyChanConfig" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.PhyChanConfig" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="NONE,CCCH,CCCH+SDCCH4,TCH/F,TCH/H,SDCCH8,PDCH,TCH/F_PDCH,UNKNOWN,CCCH+SDCCH4+CBCH,SDCCH8+CBCH,TCH/F_TCH/H_PDCH" enumLabels="NONE,CCCH,CCCH+SDCCH4,TCH/F,TCH/H,SDCCH8,PDCH,TCH/F_PDCH,UNKNOWN,CCCH+SDCCH4+CBCH,SDCCH8+CBCH,TCH/F_TCH/H_PDCH"/>
+        <param name="DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.PhyChanConfig" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.PhyChanConfig" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="NONE,CCCH,CCCH+SDCCH4,TCH/F,TCH/H,SDCCH8,PDCH,TCH/F_PDCH,UNKNOWN,CCCH+SDCCH4+CBCH,SDCCH8+CBCH,TCH/F_TCH/H_PDCH" enumLabels="NONE,CCCH,CCCH+SDCCH4,TCH/F,TCH/H,SDCCH8,PDCH,TCH/F_PDCH,UNKNOWN,CCCH+SDCCH4+CBCH,SDCCH8+CBCH,TCH/F_TCH/H_PDCH"/>
         <param name="DeviceGSM.Bts.{i}.handover" standardPath="DeviceGSM.Bts.{i}.handover" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Disabled,Enable" defaultValue="1"/>
         <param name="DeviceGSM.Bts.{i}.handover1.maximum.distance" standardPath="DeviceGSM.Bts.{i}.handover1.maximum.distance" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="9999" defaultValue="9999"/>
         <param name="DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis" standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="999" defaultValue="3"/>
@@ -185,79 +190,79 @@
         <param name="DeviceGSM.Cs7Instance.ForAs.Index" standardPath="DeviceGSM.Cs7Instance.ForAs.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="16"/>
         <param name="DeviceGSM.Cs7Instance.ForAsp.Index" standardPath="DeviceGSM.Cs7Instance.ForAsp.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="16"/>
         <param name="DeviceGSM.Cs7Instance.ForSccpAddr.Index" standardPath="DeviceGSM.Cs7Instance.ForSccpAddr.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="16"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.As.{i}.Name" standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.As.{i}.RoutingKey" standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.RoutingKey" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="24" validationPattern="/^\d+-\d+$/"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.As.{i}.TrafficMode" standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.TrafficMode" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="broadcast,loadshare,override,round-robin" enumLabels="broadcast,loadshare,override,round-robin"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.As.{i}.addAspName" standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.addAspName" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="24" defaultValue="aif"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.As.{i}.delAspName" standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.delAspName" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="24" defaultValue="aif"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.AspRole" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.AspRole" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="sg,asp,ipsp" enumLabels="sg,asp,ipsp"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalIp" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalIp" access="READ_ONLY" type="STRING" changeApplies="Immediate" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalPort" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalPort" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Name" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Protocol" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Protocol" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="m3ua" enumLabels="m3ua"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemoteIp" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemoteIp" access="READ_ONLY" type="STRING" changeApplies="Immediate" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemotePort" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemotePort" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.SctpRole" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.SctpRole" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="client,server" enumLabels="client,server"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.NetworkIndicator" standardPath="DeviceGSM.Cs7Instance.{i}.NetworkIndicator" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="international,spare,national,reserved" enumLabels="international,spare,national,reserved"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.PointCode" standardPath="DeviceGSM.Cs7Instance.{i}.PointCode" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.PointCodeFormat" standardPath="DeviceGSM.Cs7Instance.{i}.PointCodeFormat" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="24"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.Name" standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.PointCode" standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.PointCode" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.RoutingIndicator" standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.RoutingIndicator" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="GT,PC,IP" enumLabels="GT,PC,IP"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.SubsystemNumber" standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.SubsystemNumber" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="4294967295"/>
-        <param name="DeviceGSM.Cs7Instance.{i}.XuaRkmRoutingKeyAllocation" standardPath="DeviceGSM.Cs7Instance.{i}.XuaRkmRoutingKeyAllocation" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="dynamic-permitted,static-only" enumLabels="dynamic-permitted,static-only"/>
-        <param name="DeviceGSM.Encryption" standardPath="DeviceGSM.Encryption" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="1"/>
-        <param name="DeviceGSM.HandoverAlgorithm" standardPath="DeviceGSM.HandoverAlgorithm" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="1,2" enumLabels="1,2"/>
-        <param name="DeviceGSM.Hodec2CongestionCheck" standardPath="DeviceGSM.Hodec2CongestionCheck" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="32"/>
-        <param name="DeviceGSM.Mcc" standardPath="DeviceGSM.Mcc" access="READ_ONLY" type="STRING" changeApplies="Immediate" validationPattern="/^(?!000)[0-9]{3}$/"/>
-        <param name="DeviceGSM.Mgw.{i}.MgwEndpointDomain" standardPath="DeviceGSM.Mgw.{i}.MgwEndpointDomain" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="512"/>
-        <param name="DeviceGSM.Mgw.{i}.MgwLocalPort" standardPath="DeviceGSM.Mgw.{i}.MgwLocalPort" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
-        <param name="DeviceGSM.Mgw.{i}.MgwRemoteIp" standardPath="DeviceGSM.Mgw.{i}.MgwRemoteIp" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="256" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
-        <param name="DeviceGSM.Mgw.{i}.MgwRemotePort" standardPath="DeviceGSM.Mgw.{i}.MgwRemotePort" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
-        <param name="DeviceGSM.Mnc" standardPath="DeviceGSM.Mnc" access="READ_ONLY" type="STRING" changeApplies="Immediate" validationPattern="/^[0-9]{2,3}$/"/>
-        <param name="DeviceGSM.Msc.{i}.AllowEmergency" standardPath="DeviceGSM.Msc.{i}.AllowEmergency" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="allow,deny" enumLabels="allow,deny"/>
-        <param name="DeviceGSM.Msc.{i}.Amr10_2" standardPath="DeviceGSM.Msc.{i}.Amr10_2" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
-        <param name="DeviceGSM.Msc.{i}.Amr12_2" standardPath="DeviceGSM.Msc.{i}.Amr12_2" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
-        <param name="DeviceGSM.Msc.{i}.Amr4_75" standardPath="DeviceGSM.Msc.{i}.Amr4_75" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
-        <param name="DeviceGSM.Msc.{i}.Amr5_15" standardPath="DeviceGSM.Msc.{i}.Amr5_15" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
-        <param name="DeviceGSM.Msc.{i}.Amr5_90" standardPath="DeviceGSM.Msc.{i}.Amr5_90" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
-        <param name="DeviceGSM.Msc.{i}.Amr6_70" standardPath="DeviceGSM.Msc.{i}.Amr6_70" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
-        <param name="DeviceGSM.Msc.{i}.Amr7_40" standardPath="DeviceGSM.Msc.{i}.Amr7_40" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
-        <param name="DeviceGSM.Msc.{i}.Amr7_95" standardPath="DeviceGSM.Msc.{i}.Amr7_95" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
-        <param name="DeviceGSM.Msc.{i}.AmrPayload" standardPath="DeviceGSM.Msc.{i}.AmrPayload" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="octet-aligned,bandwidth-efficient" enumLabels="octet-aligned,bandwidth-efficient"/>
-        <param name="DeviceGSM.Msc.{i}.AspProtocol" standardPath="DeviceGSM.Msc.{i}.AspProtocol" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="m3ua" enumLabels="m3ua"/>
-        <param name="DeviceGSM.Msc.{i}.AttachProportion" standardPath="DeviceGSM.Msc.{i}.AttachProportion" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="100"/>
-        <param name="DeviceGSM.Msc.{i}.LclsMismatch" standardPath="DeviceGSM.Msc.{i}.LclsMismatch" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
-        <param name="DeviceGSM.Msc.{i}.LclsMode" standardPath="DeviceGSM.Msc.{i}.LclsMode" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="disabled,mgw-loop,bts-loop" enumLabels="disabled,mgw-loop,bts-loop"/>
-        <param name="DeviceGSM.Msc.{i}.MscAddr" standardPath="DeviceGSM.Msc.{i}.MscAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="10"/>
-        <param name="DeviceGSM.Msc.{i}.MscCodecList" standardPath="DeviceGSM.Msc.{i}.MscCodecList" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="32"/>
-        <param name="DeviceGSM.Msc.{i}.NriAdd" standardPath="DeviceGSM.Msc.{i}.NriAdd" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="10" validationPattern="/^\d+(-\d+)?$/"/>
-        <param name="DeviceGSM.Msc.{i}.NriDel" standardPath="DeviceGSM.Msc.{i}.NriDel" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="10" validationPattern="/^\d+(-\d+)?$/"/>
-        <param name="DeviceGSM.NriBitLen" standardPath="DeviceGSM.NriBitLen" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="15"/>
-        <param name="DeviceGSM.NriNullAdd" standardPath="DeviceGSM.NriNullAdd" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16" validationPattern="/^\d+(-\d+)?$/"/>
-        <param name="DeviceGSM.NriNullDel" standardPath="DeviceGSM.NriNullDel" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16" validationPattern="/^\d+(-\d+)?$/"/>
-        <param name="DeviceGSM.TimerNetT3212" standardPath="DeviceGSM.TimerNetT3212" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="2147483647" defaultValue="10"/>
-        <param name="DeviceGSM.handover" standardPath="DeviceGSM.handover" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Disabled,Enable"/>
-        <param name="DeviceGSM.handover2.afs-bias.rxlev" standardPath="DeviceGSM.handover2.afs-bias.rxlev" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="20"/>
-        <param name="DeviceGSM.handover2.afs-bias.rxqual" standardPath="DeviceGSM.handover2.afs-bias.rxqual" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="7"/>
-        <param name="DeviceGSM.handover2.assignment" standardPath="DeviceGSM.handover2.assignment" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Disabled,Enable"/>
-        <param name="DeviceGSM.handover2.max-handovers" standardPath="DeviceGSM.handover2.max-handovers" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="9999"/>
-        <param name="DeviceGSM.handover2.maximum.distance" standardPath="DeviceGSM.handover2.maximum.distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
-        <param name="DeviceGSM.handover2.min-free-slots.tch-f" standardPath="DeviceGSM.handover2.min-free-slots.tch-f" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
-        <param name="DeviceGSM.handover2.min-free-slots.tch-h" standardPath="DeviceGSM.handover2.min-free-slots.tch-h" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
-        <param name="DeviceGSM.handover2.min.rxlev" standardPath="DeviceGSM.handover2.min.rxlev" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="-110" max="-50"/>
-        <param name="DeviceGSM.handover2.min.rxqual" standardPath="DeviceGSM.handover2.min.rxqual" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="7"/>
-        <param name="DeviceGSM.handover2.penalty-time.failed-assignment" standardPath="DeviceGSM.handover2.penalty-time.failed-assignment" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
-        <param name="DeviceGSM.handover2.penalty-time.failed-ho" standardPath="DeviceGSM.handover2.penalty-time.failed-ho" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
-        <param name="DeviceGSM.handover2.penalty-time.low-rxqual-assignment" standardPath="DeviceGSM.handover2.penalty-time.low-rxqual-assignment" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
-        <param name="DeviceGSM.handover2.penalty-time.low-rxqual-ho" standardPath="DeviceGSM.handover2.penalty-time.low-rxqual-ho" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
-        <param name="DeviceGSM.handover2.penalty-time.max-distance" standardPath="DeviceGSM.handover2.penalty-time.max-distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
-        <param name="DeviceGSM.handover2.power.budget.hysteresis" standardPath="DeviceGSM.handover2.power.budget.hysteresis" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="999"/>
-        <param name="DeviceGSM.handover2.power.budget.interval" standardPath="DeviceGSM.handover2.power.budget.interval" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="99"/>
-        <param name="DeviceGSM.handover2.retries" standardPath="DeviceGSM.handover2.retries" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="9"/>
-        <param name="DeviceGSM.handover2.tdma-measurement" standardPath="DeviceGSM.handover2.tdma-measurement" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="auto,full,subset,default" enumLabels="auto,full,subset,default"/>
-        <param name="DeviceGSM.handover2.window.rxlev.averaging" standardPath="DeviceGSM.handover2.window.rxlev.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
-        <param name="DeviceGSM.handover2.window.rxlev.neighbor.averaging" standardPath="DeviceGSM.handover2.window.rxlev.neighbor.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
-        <param name="DeviceGSM.handover2.window.rxqual.averaging" standardPath="DeviceGSM.handover2.window.rxqual.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.As.{i}.Name" standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.Name" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="16"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.As.{i}.RoutingKey" standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.RoutingKey" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="24" validationPattern="/^\d+-\d+$/"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.As.{i}.TrafficMode" standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.TrafficMode" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="broadcast,loadshare,override,round-robin" enumLabels="broadcast,loadshare,override,round-robin"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.As.{i}.addAspName" standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.addAspName" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="24" defaultValue="aif"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.As.{i}.delAspName" standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.delAspName" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="24" defaultValue="aif"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.AspRole" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.AspRole" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="sg,asp,ipsp" enumLabels="sg,asp,ipsp"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalIp" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalIp" access="READ_WRITE" type="STRING" changeApplies="Immediate" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalPort" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalPort" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Name" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Name" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="16"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Protocol" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Protocol" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="m3ua" enumLabels="m3ua"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemoteIp" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemoteIp" access="READ_WRITE" type="STRING" changeApplies="Immediate" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemotePort" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemotePort" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.SctpRole" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.SctpRole" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="client,server" enumLabels="client,server"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.NetworkIndicator" standardPath="DeviceGSM.Cs7Instance.{i}.NetworkIndicator" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="international,spare,national,reserved" enumLabels="international,spare,national,reserved"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.PointCode" standardPath="DeviceGSM.Cs7Instance.{i}.PointCode" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.PointCodeFormat" standardPath="DeviceGSM.Cs7Instance.{i}.PointCodeFormat" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="24"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.Name" standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.Name" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="16"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.PointCode" standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.PointCode" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.RoutingIndicator" standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.RoutingIndicator" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="GT,PC,IP" enumLabels="GT,PC,IP"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.SubsystemNumber" standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.SubsystemNumber" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="4294967295"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.XuaRkmRoutingKeyAllocation" standardPath="DeviceGSM.Cs7Instance.{i}.XuaRkmRoutingKeyAllocation" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="dynamic-permitted,static-only" enumLabels="dynamic-permitted,static-only"/>
+        <param name="DeviceGSM.Encryption" standardPath="DeviceGSM.Encryption" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="1"/>
+        <param name="DeviceGSM.HandoverAlgorithm" standardPath="DeviceGSM.HandoverAlgorithm" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="1,2" enumLabels="1,2"/>
+        <param name="DeviceGSM.Hodec2CongestionCheck" standardPath="DeviceGSM.Hodec2CongestionCheck" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="32"/>
+        <param name="DeviceGSM.Mcc" standardPath="DeviceGSM.Mcc" access="READ_WRITE" type="STRING" changeApplies="Immediate" validationPattern="/^(?!000)[0-9]{3}$/"/>
+        <param name="DeviceGSM.Mgw.{i}.MgwEndpointDomain" standardPath="DeviceGSM.Mgw.{i}.MgwEndpointDomain" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="512"/>
+        <param name="DeviceGSM.Mgw.{i}.MgwLocalPort" standardPath="DeviceGSM.Mgw.{i}.MgwLocalPort" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
+        <param name="DeviceGSM.Mgw.{i}.MgwRemoteIp" standardPath="DeviceGSM.Mgw.{i}.MgwRemoteIp" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
+        <param name="DeviceGSM.Mgw.{i}.MgwRemotePort" standardPath="DeviceGSM.Mgw.{i}.MgwRemotePort" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="65535"/>
+        <param name="DeviceGSM.Mnc" standardPath="DeviceGSM.Mnc" access="READ_WRITE" type="STRING" changeApplies="Immediate" validationPattern="/^[0-9]{2,3}$/"/>
+        <param name="DeviceGSM.Msc.{i}.AllowEmergency" standardPath="DeviceGSM.Msc.{i}.AllowEmergency" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="allow,deny" enumLabels="allow,deny"/>
+        <param name="DeviceGSM.Msc.{i}.Amr10_2" standardPath="DeviceGSM.Msc.{i}.Amr10_2" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
+        <param name="DeviceGSM.Msc.{i}.Amr12_2" standardPath="DeviceGSM.Msc.{i}.Amr12_2" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
+        <param name="DeviceGSM.Msc.{i}.Amr4_75" standardPath="DeviceGSM.Msc.{i}.Amr4_75" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
+        <param name="DeviceGSM.Msc.{i}.Amr5_15" standardPath="DeviceGSM.Msc.{i}.Amr5_15" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
+        <param name="DeviceGSM.Msc.{i}.Amr5_90" standardPath="DeviceGSM.Msc.{i}.Amr5_90" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
+        <param name="DeviceGSM.Msc.{i}.Amr6_70" standardPath="DeviceGSM.Msc.{i}.Amr6_70" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
+        <param name="DeviceGSM.Msc.{i}.Amr7_40" standardPath="DeviceGSM.Msc.{i}.Amr7_40" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
+        <param name="DeviceGSM.Msc.{i}.Amr7_95" standardPath="DeviceGSM.Msc.{i}.Amr7_95" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
+        <param name="DeviceGSM.Msc.{i}.AmrPayload" standardPath="DeviceGSM.Msc.{i}.AmrPayload" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="octet-aligned,bandwidth-efficient" enumLabels="octet-aligned,bandwidth-efficient"/>
+        <param name="DeviceGSM.Msc.{i}.AspProtocol" standardPath="DeviceGSM.Msc.{i}.AspProtocol" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="m3ua" enumLabels="m3ua"/>
+        <param name="DeviceGSM.Msc.{i}.AttachProportion" standardPath="DeviceGSM.Msc.{i}.AttachProportion" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="100"/>
+        <param name="DeviceGSM.Msc.{i}.LclsMismatch" standardPath="DeviceGSM.Msc.{i}.LclsMismatch" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="allowed,forbidden" enumLabels="allowed,forbidden"/>
+        <param name="DeviceGSM.Msc.{i}.LclsMode" standardPath="DeviceGSM.Msc.{i}.LclsMode" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="disabled,mgw-loop,bts-loop" enumLabels="disabled,mgw-loop,bts-loop"/>
+        <param name="DeviceGSM.Msc.{i}.MscAddr" standardPath="DeviceGSM.Msc.{i}.MscAddr" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="10"/>
+        <param name="DeviceGSM.Msc.{i}.MscCodecList" standardPath="DeviceGSM.Msc.{i}.MscCodecList" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="32"/>
+        <param name="DeviceGSM.Msc.{i}.NriAdd" standardPath="DeviceGSM.Msc.{i}.NriAdd" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="10" validationPattern="/^\d+(-\d+)?$/"/>
+        <param name="DeviceGSM.Msc.{i}.NriDel" standardPath="DeviceGSM.Msc.{i}.NriDel" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="10" validationPattern="/^\d+(-\d+)?$/"/>
+        <param name="DeviceGSM.NriBitLen" standardPath="DeviceGSM.NriBitLen" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="15"/>
+        <param name="DeviceGSM.NriNullAdd" standardPath="DeviceGSM.NriNullAdd" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="16" validationPattern="/^\d+(-\d+)?$/"/>
+        <param name="DeviceGSM.NriNullDel" standardPath="DeviceGSM.NriNullDel" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="16" validationPattern="/^\d+(-\d+)?$/"/>
+        <param name="DeviceGSM.TimerNetT3212" standardPath="DeviceGSM.TimerNetT3212" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="2147483647" defaultValue="10"/>
+        <param name="DeviceGSM.handover" standardPath="DeviceGSM.handover" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Disabled,Enable"/>
+        <param name="DeviceGSM.handover2.afs-bias.rxlev" standardPath="DeviceGSM.handover2.afs-bias.rxlev" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="20"/>
+        <param name="DeviceGSM.handover2.afs-bias.rxqual" standardPath="DeviceGSM.handover2.afs-bias.rxqual" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="7"/>
+        <param name="DeviceGSM.handover2.assignment" standardPath="DeviceGSM.handover2.assignment" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Disabled,Enable"/>
+        <param name="DeviceGSM.handover2.max-handovers" standardPath="DeviceGSM.handover2.max-handovers" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="9999"/>
+        <param name="DeviceGSM.handover2.maximum.distance" standardPath="DeviceGSM.handover2.maximum.distance" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
+        <param name="DeviceGSM.handover2.min-free-slots.tch-f" standardPath="DeviceGSM.handover2.min-free-slots.tch-f" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
+        <param name="DeviceGSM.handover2.min-free-slots.tch-h" standardPath="DeviceGSM.handover2.min-free-slots.tch-h" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
+        <param name="DeviceGSM.handover2.min.rxlev" standardPath="DeviceGSM.handover2.min.rxlev" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="-110" max="-50"/>
+        <param name="DeviceGSM.handover2.min.rxqual" standardPath="DeviceGSM.handover2.min.rxqual" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="7"/>
+        <param name="DeviceGSM.handover2.penalty-time.failed-assignment" standardPath="DeviceGSM.handover2.penalty-time.failed-assignment" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
+        <param name="DeviceGSM.handover2.penalty-time.failed-ho" standardPath="DeviceGSM.handover2.penalty-time.failed-ho" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
+        <param name="DeviceGSM.handover2.penalty-time.low-rxqual-assignment" standardPath="DeviceGSM.handover2.penalty-time.low-rxqual-assignment" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
+        <param name="DeviceGSM.handover2.penalty-time.low-rxqual-ho" standardPath="DeviceGSM.handover2.penalty-time.low-rxqual-ho" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
+        <param name="DeviceGSM.handover2.penalty-time.max-distance" standardPath="DeviceGSM.handover2.penalty-time.max-distance" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="99999"/>
+        <param name="DeviceGSM.handover2.power.budget.hysteresis" standardPath="DeviceGSM.handover2.power.budget.hysteresis" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="999"/>
+        <param name="DeviceGSM.handover2.power.budget.interval" standardPath="DeviceGSM.handover2.power.budget.interval" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="99"/>
+        <param name="DeviceGSM.handover2.retries" standardPath="DeviceGSM.handover2.retries" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="9"/>
+        <param name="DeviceGSM.handover2.tdma-measurement" standardPath="DeviceGSM.handover2.tdma-measurement" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="auto,full,subset,default" enumLabels="auto,full,subset,default"/>
+        <param name="DeviceGSM.handover2.window.rxlev.averaging" standardPath="DeviceGSM.handover2.window.rxlev.averaging" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
+        <param name="DeviceGSM.handover2.window.rxlev.neighbor.averaging" standardPath="DeviceGSM.handover2.window.rxlev.neighbor.averaging" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
+        <param name="DeviceGSM.handover2.window.rxqual.averaging" standardPath="DeviceGSM.handover2.window.rxqual.averaging" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
     </parameters>
 </parameterModel>
