@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<products totalProducts="16" totalPatterns="60" generatedAt="2026-07-31">
+<products totalProducts="17" totalPatterns="61" generatedAt="2026-08-19">
   <!-- ============ 1. BLQ 产品 ============ -->
   <product name="BLQ" vendor="Baicells" tech="4G" radioModes="SC">
     <description>Baicells BLQ</description>
@@ -234,6 +234,18 @@
     <alarm neType="ENB" />
     <patterns>
       <pattern globalOrder="29">femto_au</pattern>
+    </patterns>
+  </product>
+  <!-- ============ 17. ImsCore 产品（核心网，非无线：tech/indicator 留空） ============ -->
+  <product name="ImsCore" vendor="Baicells" tech="" radioModes="">
+    <description>ImsCore core network element</description>
+    <paramModel>IMSCORE</paramModel>
+    <enableFileType11>true</enableFileType11>
+    <deviceAttrsOverride access="true" min_value="false" max_value="false" change_applies="true" data_type="false" />
+    <indicator deviceType="" platform="" />
+    <alarm neType="IMSCORE" />
+    <patterns>
+      <pattern globalOrder="61">^ImsCore$</pattern>
     </patterns>
   </product>
 </products>

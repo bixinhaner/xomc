@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  IMSCORE paramModel 快速设置（核心网 ImsCore 接入）。
+  需求来源: imscore_quicksetting.csv（名称 / 重启生效 / 中文名 / 英文名）。
+
+  结构：
+    1. 基本配置        单实例 form - Device.ImsCore.BaseConfig.* 16 字段
+    2. TAL 信息配置    多实例 table - Device.ImsCore.TalInfoConfig.{i}.{leaf} 7 字段
+    3. 核心网信息配置  多实例 table - Device.ImsCore.CoreInfoConfig.{i}.{leaf} 4 字段
+
+  重启生效口径（changeApplies 真值源在 param-mappings/IMSCORE.xml，前端按 schema 展示标记）：
+    - BaseConfig 中标"重启生效"的 14 个参数: HOST_IPv4/CNET_INTERFACE/TLA_IPv4/DNET_INTERFACE/
+      SNET_INTERFACE/APN_NAME/PDN_IPv4/PDN_IPv6/PLMN_POOL/RINGTONE_LANGUAGE/WEB_SERV_PORT/
+      SYN_SERVER/Web_HSS_IP/HTTPS_LOGIN_FLAG；LOG_LEVEL/WEB_LOG_LEVEL 立即生效。
+    - TalInfoConfig 增加实例/删除实例/修改/删除全部都需要重启（对象级 RebootRequired）。
+    - CoreInfoConfig 需求未标注重启口径，按立即生效处理。
+
+  字段类型/范围不在本 XML 硬编码，由 enrichGroups 从参数模型合并 + 设备 schema 推导。
+-->
+<quickSettings paramModel="IMSCORE">
+
+  <!-- ============ 1. 基本配置（单实例表单，16 字段，3 列布局自动） ============ -->
+  <group id="imscore-base-config" titleZh="基本配置" titleEn="Base Config">
+    <param name="HOST_IPv4" titleZh="NG/S1-C IPv4 地址" titleEn="NG/S1-C IPV4"
+           standardPath="Device.ImsCore.BaseConfig.HOST_IPv4"/>
+    <param name="CNET_INTERFACE" titleZh="NG/S1-C 网络接口" titleEn="NG/S1-C NET Interface"
+           standardPath="Device.ImsCore.BaseConfig.CNET_INTERFACE"/>
+    <param name="TLA_IPv4" titleZh="N3/S1-U IPv4 地址" titleEn="N3/S1-U IPv4"
+           standardPath="Device.ImsCore.BaseConfig.TLA_IPv4"/>
+    <param name="DNET_INTERFACE" titleZh="N3/S1-U 网络接口" titleEn="N3/S1-U NET Interface"
+           standardPath="Device.ImsCore.BaseConfig.DNET_INTERFACE"/>
+    <param name="SNET_INTERFACE" titleZh="N6/SGI 网络接口" titleEn="N6/SGI NET Interface"
+           standardPath="Device.ImsCore.BaseConfig.SNET_INTERFACE"/>
+    <param name="APN_NAME" titleZh="DNN/APN 名称" titleEn="DNN/APN"
+           standardPath="Device.ImsCore.BaseConfig.APN_NAME"/>
+    <param name="PDN_IPv4" titleZh="PDN动态IPv4地址池" titleEn="PDN Dynamic IPv4 Pool"
+           standardPath="Device.ImsCore.BaseConfig.PDN_IPv4"/>
+    <param name="PDN_IPv6" titleZh="PDN IPv6 前缀" titleEn="PDN IPv6 Prefix"
+           standardPath="Device.ImsCore.BaseConfig.PDN_IPv6"/>
+    <param name="PLMN_POOL" titleZh="PLMN池" titleEn="PLMN Pool"
+           standardPath="Device.ImsCore.BaseConfig.PLMN_POOL"/>
+    <param name="LOG_LEVEL" titleZh="日志级别" titleEn="Log Level"
+           standardPath="Device.ImsCore.BaseConfig.LOG_LEVEL"/>
+    <param name="RINGTONE_LANGUAGE" titleZh="铃声语言" titleEn="Ringtone Language"
+           standardPath="Device.ImsCore.BaseConfig.RINGTONE_LANGUAGE"/>
+    <param name="WEB_SERV_PORT" titleZh="Web服务器端口" titleEn="Web Server Port"
+           standardPath="Device.ImsCore.BaseConfig.WEB_SERV_PORT"/>
+    <param name="WEB_LOG_LEVEL" titleZh="Web日志级别" titleEn="Web Log Level"
+           standardPath="Device.ImsCore.BaseConfig.WEB_LOG_LEVEL"/>
+    <param name="SYN_SERVER" titleZh="SYN服务器设置" titleEn="SYN Server Set"
+           standardPath="Device.ImsCore.BaseConfig.SYN_SERVER"/>
+    <param name="Web_HSS_IP" titleZh="Web HSS IP设置" titleEn="Web HSS IP Set"
+           standardPath="Device.ImsCore.BaseConfig.Web_HSS_IP"/>
+    <param name="HTTPS_LOGIN_FLAG" titleZh="使用 HTTPS 登录" titleEn="Https Login Flag"
+           standardPath="Device.ImsCore.BaseConfig.HTTPS_LOGIN_FLAG"/>
+  </group>
+
+  <!-- ============ 2. TAL 信息配置（多实例表，增/删/改均需重启生效） ============ -->
+  <group id="imscore-tal-info" titleZh="TAL 信息配置" titleEn="TAL Info Config"
+         multiInstance="true" objectPath="Device.ImsCore.TalInfoConfig.{i}.">
+    <param name="TAL"        titleZh="TAL"         titleEn="TAL"         leaf="TAL"/>
+    <param name="TAC"        titleZh="TAC"         titleEn="TAC"         leaf="TAC"/>
+    <param name="MSC_IP"     titleZh="MSC IP地址"   titleEn="MSC_IP"      leaf="MSC_IP"/>
+    <param name="AGENT_IP"   titleZh="AGENT IP地址" titleEn="AGENT_IP"    leaf="AGENT_IP"/>
+    <param name="AGENT_PORT" titleZh="AGENT 端口号" titleEn="AGENT_PORT"  leaf="AGENT_PORT"/>
+    <param name="LAC"        titleZh="LAC"         titleEn="LAC"         leaf="LAC"/>
+    <param name="NAME"       titleZh="名称"        titleEn="NAME"        leaf="NAME"/>
+  </group>
+
+  <!-- ============ 3. 核心网信息配置（多实例表） ============ -->
+  <group id="imscore-core-info" titleZh="核心网信息配置" titleEn="Core Info Config"
+         multiInstance="true" objectPath="Device.ImsCore.CoreInfoConfig.{i}.">
+    <param name="CORE_SYN_IP" titleZh="核心网同步IP" titleEn="CORE_SYN_IP" leaf="CORE_SYN_IP"/>
+    <param name="S1_U_IP"     titleZh="S1_U IP"      titleEn="S1_U_IP"     leaf="S1_U_IP"/>
+    <param name="MME_GROUP"   titleZh="MME组"        titleEn="MME_GROUP"   leaf="MME_GROUP"/>
+    <param name="MME_CODE"    titleZh="MME代码"      titleEn="MME_CODE"    leaf="MME_CODE"/>
+  </group>
+
+</quickSettings>
