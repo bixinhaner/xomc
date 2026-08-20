@@ -27951,8 +27951,8 @@ WHERE sf.command_id = c.id
 -- Every multi-instance ADD must expose the writable fields of its MOD counterpart.
 -- AddObject creates only the row; values entered in the console are applied by the
 -- existing AddObject -> SetParameterValues compound flow after the new instance
--- number is returned. Limit the copy to direct children of target_object so a
--- parent ADD never absorbs fields from nested child tables.
+-- number is returned. Include singleton descendants of the created instance,
+-- but reject paths with another {i} so a parent ADD never absorbs a child table.
 INSERT INTO public.mml_command_sub_fields (
     command_id, standard_path_id, mml_code, label_i18n, default_selected,
     is_required, sort_order, access_type, is_supported
@@ -27983,10 +27983,10 @@ WHERE add.operation_type = 'ADD'
   AND add.target_object IS NOT NULL
   AND add.target_object <> ''
   AND source_sp.standard_path !~ '\{i\}$'
-  AND regexp_replace(
-          regexp_replace(source_sp.standard_path, '[^.]+$', ''),
-          '\{i\}\.', '', 'g'
-      ) = regexp_replace(add.target_object, '\{i\}\.', '', 'g')
+  AND regexp_replace(source_sp.standard_path, '\{i\}\.', '', 'g')
+      LIKE regexp_replace(add.target_object, '\{i\}\.', '', 'g') || '%'
+  AND regexp_count(source_sp.standard_path, '\{i\}')
+      = regexp_count(add.target_object, '\{i\}') + 1
 ON CONFLICT (command_id, standard_path_id) DO UPDATE
 SET deprecated_at = NULL,
     updated_at = now();
@@ -28019,10 +28019,10 @@ JOIN public.standard_params candidate_sp
   ON candidate_sp.entry_type = 'parameter'
  AND candidate_sp.access = 'READ_WRITE'
  AND candidate_sp.standard_path !~ '\{i\}$'
- AND regexp_replace(
-         regexp_replace(candidate_sp.standard_path, '[^.]+$', ''),
-         '\{i\}\.', '', 'g'
-     ) = regexp_replace(add.target_object, '\{i\}\.', '', 'g')
+ AND regexp_replace(candidate_sp.standard_path, '\{i\}\.', '', 'g')
+     LIKE regexp_replace(add.target_object, '\{i\}\.', '', 'g') || '%'
+ AND regexp_count(candidate_sp.standard_path, '\{i\}')
+     = regexp_count(add.target_object, '\{i\}') + 1
 WHERE add.operation_type = 'ADD'
   AND add.deprecated_at IS NULL
   AND add.target_object IS NOT NULL
@@ -28064,6 +28064,363 @@ UPDATE public.mml_commands
 SET deprecated_at = COALESCE(deprecated_at, now()),
     updated_at = now()
 WHERE command_code IN ('ADD MR_MGMT_CONFIG', 'RMV MR_MGMT_CONFIG');
+
+-- Keepalived/VRRP: restore HA write commands and permission-driven bindings.
+INSERT INTO public.standard_params (
+	standard_path, entry_type, access, data_type, change_applies, description
+)
+VALUES (
+	'Device.KeepalivedMgmt.VrrpMgmt.{i}.', 'object', 'READ_WRITE', NULL,
+	'Immediate', 'VRRP multi-instance object'
+)
+ON CONFLICT (standard_path) DO UPDATE
+SET entry_type = 'object',
+	access = 'READ_WRITE',
+	change_applies = 'Immediate',
+	description = EXCLUDED.description,
+	updated_at = NOW();
+
+INSERT INTO public.param_mappings (
+	param_model_id, standard_path, private_path, entry_type, access,
+	change_applies, is_storable, is_active, is_supported, source
+)
+SELECT pm.id,
+	'Device.KeepalivedMgmt.VrrpMgmt.{i}.',
+	'Device.KeepalivedMgmt.VrrpMgmt.{i}.',
+	'object', 'READ_WRITE', 'Immediate', true, true, true, 'builtin'
+FROM public.param_models pm
+WHERE pm.name = 'BSC'
+ON CONFLICT (param_model_id, private_path) DO UPDATE
+SET standard_path = EXCLUDED.standard_path,
+	entry_type = 'object',
+	access = 'READ_WRITE',
+	change_applies = 'Immediate',
+	is_active = true,
+	is_supported = true,
+	source = 'builtin',
+	updated_at = NOW();
+
+UPDATE public.param_models pm
+SET total_entries = stats.total_entries,
+	total_objects = stats.total_objects,
+	total_params = stats.total_params,
+	updated_at = NOW()
+FROM (
+	SELECT param_model_id,
+		COUNT(*) FILTER (WHERE is_active) AS total_entries,
+		COUNT(*) FILTER (WHERE is_active AND entry_type = 'object') AS total_objects,
+		COUNT(*) FILTER (WHERE is_active AND entry_type = 'parameter') AS total_params
+	FROM public.param_mappings
+	GROUP BY param_model_id
+) stats
+WHERE pm.id = stats.param_model_id
+  AND pm.name = 'BSC';
+
+WITH desired_params(standard_path, access, data_type) AS (
+	VALUES
+		('Device.KeepalivedMgmt.CounterCheck', 'READ_WRITE', 'U_INT'),
+		('Device.KeepalivedMgmt.Enable', 'READ_WRITE', 'U_INT'),
+		('Device.KeepalivedMgmt.LocalUplinkIpAddr', 'READ_ONLY', 'STRING'),
+		('Device.KeepalivedMgmt.ManualSwitch', 'READ_WRITE', 'U_INT'),
+		('Device.KeepalivedMgmt.MaxVrrpEntries', 'READ_ONLY', 'U_INT'),
+		('Device.KeepalivedMgmt.RemoteUplinkIpAddr', 'READ_ONLY', 'STRING'),
+		('Device.KeepalivedMgmt.RouterId', 'READ_WRITE', 'STRING'),
+		('Device.KeepalivedMgmt.SecondTimeout', 'READ_WRITE', 'U_INT'),
+		('Device.KeepalivedMgmt.VrrpMgmt.Index', 'READ_ONLY', 'U_INT'),
+		('Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt', 'READ_WRITE', 'U_INT'),
+		('Device.KeepalivedMgmt.VrrpMgmt.{i}.DstIpAddr', 'READ_ONLY', 'STRING'),
+		('Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable', 'READ_WRITE', 'U_INT'),
+		('Device.KeepalivedMgmt.VrrpMgmt.{i}.Interface', 'READ_WRITE', 'STRING'),
+		('Device.KeepalivedMgmt.VrrpMgmt.{i}.MaxVirtualIpEntries', 'READ_ONLY', 'U_INT'),
+		('Device.KeepalivedMgmt.VrrpMgmt.{i}.Name', 'READ_WRITE', 'STRING'),
+		('Device.KeepalivedMgmt.VrrpMgmt.{i}.Priority', 'READ_WRITE', 'U_INT'),
+		('Device.KeepalivedMgmt.VrrpMgmt.{i}.SrcIpAddr', 'READ_ONLY', 'STRING'),
+		('Device.KeepalivedMgmt.VrrpMgmt.{i}.State', 'READ_WRITE', 'STRING'),
+		('Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.IP', 'READ_ONLY', 'STRING'),
+		('Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface', 'READ_WRITE', 'STRING'),
+		('Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Label', 'READ_WRITE', 'U_INT'),
+		('Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.NetmaskPrefix', 'READ_WRITE', 'U_INT'),
+		('Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpNumberOfEntries', 'READ_ONLY', 'U_INT'),
+		('Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualRouterId', 'READ_WRITE', 'U_INT'),
+		('Device.KeepalivedMgmt.VrrpNumberOfEntries', 'READ_ONLY', 'U_INT')
+), updated_standard_params AS (
+	UPDATE public.standard_params sp
+	SET access = p.access,
+		data_type = p.data_type,
+		updated_at = NOW()
+	FROM desired_params p
+	WHERE sp.standard_path = p.standard_path
+	  AND sp.entry_type = 'parameter'
+	RETURNING sp.id
+)
+UPDATE public.param_mappings mapping
+SET access = p.access,
+	data_type = p.data_type,
+	updated_at = NOW()
+FROM desired_params p
+JOIN public.param_models pm ON pm.name = 'BSC'
+WHERE mapping.param_model_id = pm.id
+  AND mapping.standard_path = p.standard_path
+  AND mapping.entry_type = 'parameter'
+  AND mapping.is_active;
+
+WITH desired_commands(command_code, command_name, logical_name, operation_type, rpc_method, target_object) AS (
+	VALUES
+		('MOD MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT', '修改热备配置', '热备配置', 'MOD', 'SetParameterValues', NULL::varchar),
+		('MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', '修改VRRP实例', 'VRRP实例', 'MOD', 'SetParameterValues', NULL::varchar),
+		('ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', '添加VRRP实例', 'VRRP实例', 'ADD', 'AddObject', 'Device.KeepalivedMgmt.VrrpMgmt.'),
+		('RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', '删除VRRP实例', 'VRRP实例', 'RMV', 'DeleteObject', 'Device.KeepalivedMgmt.VrrpMgmt.')
+)
+INSERT INTO public.mml_commands (
+	command_name, command_code, category, description, rpc_method,
+	operation_type, target_paths, target_object, tree_node_refs, group_id,
+	command_name_i18n, logical_name_i18n, source, catalog_protected,
+	platform_tags, help_doc, notes
+)
+SELECT
+	d.command_name,
+	d.command_code,
+	'mml-350-20260704',
+	'主备热备配置操作',
+	d.rpc_method,
+	d.operation_type,
+	CASE WHEN d.target_object IS NULL THEN '[]'::jsonb ELSE jsonb_build_array(d.target_object) END,
+	d.target_object,
+	CASE WHEN d.target_object IS NULL THEN '[]'::jsonb ELSE jsonb_build_array(d.target_object) END,
+	g.id,
+	jsonb_build_object('zh-CN', d.command_name, 'en-US',
+		CASE d.operation_type
+			WHEN 'MOD' THEN CASE WHEN d.command_code LIKE '%KEEPALIVEDMGMT' THEN 'Modify HA Configuration' ELSE 'Modify VRRP Instances' END
+			WHEN 'ADD' THEN 'Add VRRP Instance'
+			ELSE 'Delete VRRP Instance'
+		END),
+	jsonb_build_object('zh-CN', d.logical_name, 'en-US',
+		CASE WHEN d.command_code LIKE '%KEEPALIVEDMGMT' THEN 'HA Configuration' ELSE 'VRRP Instances' END),
+	'admin',
+	false,
+	'{}'::jsonb,
+	'',
+	''
+FROM desired_commands d
+JOIN public.mml_command_groups g
+  ON g.param_version = 'cmcc-td-lte-v2.3'
+ AND g.group_code = 'MML350_G_DEVICE_KEEPALIVEDMGMT'
+ AND g.source = 'admin'
+ AND g.deleted_at IS NULL
+ AND g.deprecated_at IS NULL
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name,
+	category = EXCLUDED.category,
+	description = EXCLUDED.description,
+	rpc_method = EXCLUDED.rpc_method,
+	operation_type = EXCLUDED.operation_type,
+	target_object = EXCLUDED.target_object,
+	group_id = EXCLUDED.group_id,
+	command_name_i18n = EXCLUDED.command_name_i18n,
+	logical_name_i18n = EXCLUDED.logical_name_i18n,
+	source = 'admin',
+	catalog_protected = false,
+	deprecated_at = NULL,
+	updated_at = NOW();
+
+WITH field_paths(command_code, standard_path, source_order) AS (
+	VALUES
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT', 'Device.KeepalivedMgmt.CounterCheck', 1),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT', 'Device.KeepalivedMgmt.Enable', 2),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT', 'Device.KeepalivedMgmt.LocalUplinkIpAddr', 3),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT', 'Device.KeepalivedMgmt.ManualSwitch', 4),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT', 'Device.KeepalivedMgmt.MaxVrrpEntries', 5),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT', 'Device.KeepalivedMgmt.RemoteUplinkIpAddr', 6),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT', 'Device.KeepalivedMgmt.RouterId', 7),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT', 'Device.KeepalivedMgmt.SecondTimeout', 8),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT', 'Device.KeepalivedMgmt.VrrpNumberOfEntries', 9),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.Index', 1),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt', 2),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.DstIpAddr', 3),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable', 4),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.Interface', 5),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.MaxVirtualIpEntries', 6),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.Name', 7),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.Priority', 8),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.SrcIpAddr', 9),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.State', 10),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.IP', 11),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface', 12),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Label', 13),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.NetmaskPrefix', 14),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpNumberOfEntries', 15),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualRouterId', 16)
+), command_fields AS (
+	SELECT command_code, standard_path, source_order
+	FROM field_paths
+	UNION ALL
+	SELECT 'MOD MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT', fp.standard_path, fp.source_order
+	FROM field_paths fp
+	JOIN public.param_models pm ON pm.name = 'BSC'
+	JOIN public.param_mappings bpm ON bpm.param_model_id = pm.id
+	 AND bpm.standard_path = fp.standard_path
+	 AND bpm.entry_type = 'parameter'
+	 AND bpm.is_active
+	 AND bpm.is_supported
+	WHERE fp.command_code = 'LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT'
+	  AND bpm.access = 'READ_WRITE'
+	UNION ALL
+	SELECT 'MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', fp.standard_path, fp.source_order
+	FROM field_paths fp
+	JOIN public.param_models pm ON pm.name = 'BSC'
+	JOIN public.param_mappings bpm ON bpm.param_model_id = pm.id
+	 AND bpm.standard_path = fp.standard_path
+	 AND bpm.entry_type = 'parameter'
+	 AND bpm.is_active
+	 AND bpm.is_supported
+	WHERE fp.command_code = 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT'
+	  AND bpm.access = 'READ_WRITE'
+	UNION ALL
+	SELECT 'ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', fp.standard_path, fp.source_order
+	FROM field_paths fp
+	JOIN public.param_models pm ON pm.name = 'BSC'
+	JOIN public.param_mappings bpm ON bpm.param_model_id = pm.id
+	 AND bpm.standard_path = fp.standard_path
+	 AND bpm.entry_type = 'parameter'
+	 AND bpm.is_active
+	 AND bpm.is_supported
+	WHERE fp.command_code = 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT'
+	  AND bpm.access = 'READ_WRITE'
+	  AND regexp_count(fp.standard_path, '\{i\}') = 1
+), prepared AS (
+	SELECT
+		cf.command_code,
+		cf.standard_path,
+		ROW_NUMBER() OVER (PARTITION BY cf.command_code ORDER BY cf.source_order) AS sort_order,
+		CASE
+			WHEN cf.standard_path LIKE '%.VirtualIpList.%Interface' THEN 'VIRTUAL_IP_INTERFACE'
+			ELSE regexp_replace(upper(cf.standard_path), '^.*\\.', '')
+		END AS mml_code
+	FROM command_fields cf
+)
+INSERT INTO public.mml_command_sub_fields (
+	command_id, standard_path_id, mml_code, label_i18n,
+	default_selected, is_required, sort_order, access_type, is_supported
+)
+SELECT c.id,
+	   sp.id,
+	   p.mml_code,
+	   jsonb_build_object('zh-CN', p.mml_code, 'en-US', p.mml_code),
+	   true,
+	   c.operation_type = 'MOD',
+	   p.sort_order,
+	   CASE WHEN sp.access = 'READ_WRITE' THEN 'RW' ELSE 'RO' END,
+	   true
+FROM prepared p
+JOIN public.mml_commands c ON c.command_code = p.command_code AND c.deprecated_at IS NULL
+JOIN public.standard_params sp ON sp.standard_path = p.standard_path AND sp.entry_type = 'parameter'
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+	label_i18n = EXCLUDED.label_i18n,
+	default_selected = EXCLUDED.default_selected,
+	is_required = EXCLUDED.is_required,
+	sort_order = EXCLUDED.sort_order,
+	access_type = EXCLUDED.access_type,
+	is_supported = true,
+	deprecated_at = NULL,
+	updated_at = NOW();
+
+UPDATE public.mml_command_sub_fields sf
+SET deprecated_at = COALESCE(sf.deprecated_at, NOW()),
+	updated_at = NOW()
+FROM public.mml_commands c
+WHERE c.id = sf.command_id
+	AND c.command_code IN (
+		'MOD MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT',
+		'MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
+		'ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
+		'RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT'
+	)
+	AND (
+		c.operation_type = 'RMV'
+		OR NOT EXISTS (
+			SELECT 1
+			FROM public.standard_params bound_sp
+			JOIN public.param_models pm ON pm.name = 'BSC'
+			JOIN public.param_mappings bpm ON bpm.param_model_id = pm.id
+			 AND bpm.standard_path = bound_sp.standard_path
+			 AND bpm.entry_type = 'parameter'
+			 AND bpm.is_active
+			 AND bpm.is_supported
+			WHERE bound_sp.id = sf.standard_path_id
+			  AND bpm.access = 'READ_WRITE'
+		)
+		OR (
+			c.operation_type = 'ADD'
+			AND EXISTS (
+				SELECT 1 FROM public.standard_params bound_sp
+				WHERE bound_sp.id = sf.standard_path_id
+				  AND regexp_count(bound_sp.standard_path, '\{i\}') <> 1
+			)
+		)
+	)
+  AND sf.deprecated_at IS NULL;
+
+UPDATE public.mml_command_groups
+SET group_name_zh = '主备热备',
+	group_name_en = 'High Availability',
+	name_i18n = '{"zh-CN":"主备热备","en-US":"High Availability"}'::jsonb,
+	updated_at = NOW()
+WHERE param_version = 'cmcc-td-lte-v2.3'
+  AND group_code = 'MML350_G_DEVICE_KEEPALIVEDMGMT'
+  AND source = 'admin';
+
+UPDATE public.mml_commands
+SET command_name = CASE command_code
+		WHEN 'LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT' THEN '查询热备配置'
+		WHEN 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT' THEN '查询VRRP实例'
+		ELSE command_name
+	END,
+	command_name_i18n = CASE command_code
+		WHEN 'LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT' THEN '{"zh-CN":"查询热备配置","en-US":"Query HA Configuration"}'::jsonb
+		WHEN 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT' THEN '{"zh-CN":"查询VRRP实例","en-US":"Query VRRP Instances"}'::jsonb
+		ELSE command_name_i18n
+	END,
+	logical_name_i18n = CASE command_code
+		WHEN 'LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT' THEN '{"zh-CN":"热备配置","en-US":"HA Configuration"}'::jsonb
+		WHEN 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT' THEN '{"zh-CN":"VRRP实例","en-US":"VRRP Instances"}'::jsonb
+		ELSE logical_name_i18n
+	END,
+	updated_at = NOW()
+WHERE command_code IN (
+	'LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT',
+	'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT'
+)
+  AND source = 'admin';
+
+WITH refreshed AS (
+	SELECT c.id,
+		   CASE
+			   WHEN c.operation_type IN ('ADD', 'RMV') AND COALESCE(c.target_object, '') <> ''
+				   THEN jsonb_build_array(c.target_object)
+			   ELSE COALESCE(jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path)
+							 FILTER (WHERE sp.standard_path IS NOT NULL), '[]'::jsonb)
+		   END AS paths
+	FROM public.mml_commands c
+	LEFT JOIN public.mml_command_sub_fields sf
+	  ON sf.command_id = c.id AND sf.deprecated_at IS NULL
+	LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+	WHERE c.command_code IN (
+		'LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT',
+		'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
+		'MOD MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT',
+		'MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
+		'ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
+		'RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT'
+	)
+	GROUP BY c.id, c.operation_type, c.target_object
+)
+UPDATE public.mml_commands c
+SET target_paths = r.paths,
+	tree_node_refs = r.paths,
+	updated_at = NOW()
+FROM refreshed r
+WHERE c.id = r.id;
 
 COMMIT;
 

@@ -200,7 +200,7 @@ func lookupStandardParamIDs(
 	// 收集所有 sub_field 关联用 leaf path（去重）。
 	pathSet := make(map[string]struct{})
 	for _, c := range cmds {
-		if !c.IsListOrModify() {
+		if !c.HasSubFields() {
 			continue
 		}
 		for _, p := range c.SubFields {
@@ -320,7 +320,7 @@ func upsertDerivedCommands(
 ) (map[string]string, error) {
 	out := make(map[string]string, len(cmds))
 	for i, c := range cmds {
-		// target_paths：LST/MOD 取 sub_fields 的 path 序列；ADD/RMV 空数组
+		// target_paths：LST 为全部字段，MOD/ADD 为 sub_fields 的可写字段，RMV 为空
 		var paths []string
 		for _, p := range c.SubFields {
 			paths = append(paths, p.Path)
@@ -399,7 +399,7 @@ func upsertDerivedCommands(
 
 // upsertCommandSubFields 写 mml_command_sub_fields。
 //
-// 仅 LST / MOD 写（ADD/RMV 是 object 操作无 sub_field）。
+// LST 写全部字段，MOD/ADD 写 RW 字段，RMV 不写 sub_field。
 //
 // 关键点（migration 000113）：standard_path_id FK → standard_params(id)。
 // 走 (command_id, standard_path_id) UNIQUE 做 UPSERT；同时填 mml_code（path 末段）—
@@ -421,7 +421,7 @@ func upsertCommandSubFields(
 	count := 0
 	skipped := 0
 	for _, c := range cmds {
-		if !c.IsListOrModify() || len(c.SubFields) == 0 {
+		if !c.HasSubFields() || len(c.SubFields) == 0 {
 			continue
 		}
 		cmdID, ok := cmdIDs[c.CommandCode]

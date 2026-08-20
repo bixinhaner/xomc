@@ -29,7 +29,7 @@ type CommandSpec struct {
 	OperationType string   // LST / MOD / ADD / RMV
 	RPCMethod     string   // GetParameterValues 等
 	GroupPath     string   // 关联 group path（运行时 lookup mml_command_groups.path → id）
-	TargetPaths   []string // LST/MOD 时填；ADD/RMV 时空
+	TargetPaths   []string // LST 为全部参数；MOD/ADD 为可写参数；RMV 为空
 	TargetObject  string   // ADD/RMV 时填；LST/MOD 时空
 }
 
@@ -53,14 +53,21 @@ func genForGroup(g GroupSpec) []CommandSpec {
 		return nil
 	}
 
-	// 收集所有 path 与 writable path
+	// 收集所有 path、writable path，以及 ADD 可在新实例上直接设置的 writable path。
+	// ADD 的复合执行只创建当前对象的一层实例；子对象中的另一个 {i} 必须由其
+	// 自己的 ADD 命令处理，不能混入父对象的 SetParameterValues。
 	allPaths := make([]string, 0, len(g.Params))
 	rwPaths := make([]string, 0, len(g.Params))
+	addRWPaths := make([]string, 0, len(g.Params))
+	addInstanceDepth := strings.Count(g.Path, "{i}") + 1
 	hasWritable := false
 	for _, p := range g.Params {
 		allPaths = append(allPaths, p.StandardPath)
 		if p.IsWritable() {
 			rwPaths = append(rwPaths, p.StandardPath)
+			if strings.Count(p.StandardPath, "{i}") == addInstanceDepth {
+				addRWPaths = append(addRWPaths, p.StandardPath)
+			}
 			hasWritable = true
 		}
 	}
@@ -112,6 +119,7 @@ func genForGroup(g GroupSpec) []CommandSpec {
 				OperationType: OpADD,
 				RPCMethod:     RPCAddObject,
 				GroupPath:     g.Path,
+				TargetPaths:   addRWPaths,
 				TargetObject:  targetObject,
 			},
 			CommandSpec{

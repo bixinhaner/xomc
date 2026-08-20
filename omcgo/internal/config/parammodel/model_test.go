@@ -259,6 +259,26 @@ func TestBuiltinBSCGSMCommandObjectsExposeExpectedOperations(t *testing.T) {
 	}
 }
 
+func TestBuiltinBSCKeepalivedVRRPObjectIsWritable(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BSC.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	const objectPath = "Device.KeepalivedMgmt.VrrpMgmt.{i}."
+	for _, object := range doc.Objects {
+		if object.StandardPath != objectPath {
+			continue
+		}
+		assert.Equal(t, objectPath, object.Name)
+		assert.Equal(t, "READ_WRITE", object.Access)
+		return
+	}
+	t.Fatalf("BSC must declare writable VRRP multi-instance object %s", objectPath)
+}
+
 func TestBuiltinBSCNetworkCommandParametersAreWritable(t *testing.T) {
 	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BSC.xml")
 	body, err := os.ReadFile(xmlPath)

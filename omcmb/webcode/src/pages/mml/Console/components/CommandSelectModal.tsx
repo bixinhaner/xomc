@@ -294,18 +294,21 @@ export default function CommandSelectModal({
     [selectedCustom, customPathDefs, hiddenPaths],
   );
 
-  // ADD/RMV 以「目标对象路径」(target_object)下发 RPC(AddObject/DeleteObject)，无参数 PATH；
-  // 仅标准命令带 target_object。有 target_object 即可「确定选择」，不受 paramPaths 为空限制。
+  // ADD/RMV 以「目标对象路径」(target_object)下发 RPC(AddObject/DeleteObject)；
+  // ADD 可同时携带可编辑参数，RMV 通常无参数。只要有 target_object 即可确定选择。
   const selOp = selectedEntry?.command.operationType;
   const selTargetObject = selectedEntry?.command.targetObject?.trim() ?? '';
-  const isAddRmvWithObject =
-    !isCustomSelected && (selOp === 'ADD' || selOp === 'RMV') && selTargetObject !== '';
+  const isAddWithObject = !isCustomSelected && selOp === 'ADD' && selTargetObject !== '';
+  const isRmvWithObject = !isCustomSelected && selOp === 'RMV' && selTargetObject !== '';
 
   // 统一的「当前选中命令的可执行参数路径」+ 加载态（右侧预览与确定按钮共用）。
-  const paramPaths = isCustomSelected ? customParamPaths : subFieldsToParamPaths(visibleSubFields);
+  const commandSubFields = isAddWithObject
+    ? visibleSubFields.filter((sf) => sf.accessType === 'READ_WRITE')
+    : visibleSubFields;
+  const paramPaths = isCustomSelected ? customParamPaths : subFieldsToParamPaths(commandSubFields);
   const pathsLoading =
-    (!isAddRmvWithObject && unsupportedPathsPending) ||
-    (isCustomSelected ? customPathsLoading : subFieldsLoading);
+    (!isAddWithObject && !isRmvWithObject && unsupportedPathsPending) ||
+    (isRmvWithObject ? false : (isCustomSelected ? customPathsLoading : subFieldsLoading));
   const hasSelection = !!selectedEntry || !!selectedCustom;
   const selectedOperation = selectedCustom?.operationType ?? selectedEntry?.command.operationType;
   const usesPathSelection = commandUsesPathSelection(selectedOperation);
@@ -322,11 +325,11 @@ export default function CommandSelectModal({
     setDraftPathKeys(pathKeys);
   };
 
-  // §需求 3：LST/MOD 无可执行 PATH → 禁用；ADD/RMV 看 target_object。
+  // §需求 3：LST/MOD 无可执行 PATH → 禁用；ADD/RMV 以 target_object 为准。
   const okDisabled =
     !hasSelection ||
     pathsLoading ||
-    (isAddRmvWithObject ? false : paramPaths.length === 0) ||
+    (isRmvWithObject ? false : paramPaths.length === 0) ||
     (usesPathSelection && effectiveDraftPathKeys.length === 0);
 
   const handleOk = (): void => {
@@ -341,10 +344,10 @@ export default function CommandSelectModal({
       return;
     }
     if (!selectedEntry || !subFields) return;
-    // ADD/RMV 以 target_object 执行(允许空 paramPaths)；LST/MOD 需有可执行 PATH。
-    if (!isAddRmvWithObject && paramPaths.length === 0) return;
+    // ADD 以 target_object 搭配可写 paramPaths 执行；RMV 仅以 target_object 执行。
+    if (!isRmvWithObject && paramPaths.length === 0) return;
     onConfirm(
-      mapCommandItem(selectedEntry.groupName, selectedEntry.command, visibleSubFields),
+      mapCommandItem(selectedEntry.groupName, selectedEntry.command, commandSubFields),
       usesPathSelection ? effectiveDraftPathKeys : [],
     );
   };
@@ -369,7 +372,7 @@ export default function CommandSelectModal({
       onOk={handleOk}
       okText={t('mml.consoleV2.cmdSelect.okText')}
       cancelText={t('common.cancel')}
-      // §需求 3：LST/MOD 无可执行 PATH 时禁用「确定选择」；ADD/RMV 看 target_object（§需求 1）。
+      // §需求 3：LST/MOD/ADD 无可执行 PATH 时禁用；RMV 看 target_object（§需求 1）。
       okButtonProps={{ disabled: okDisabled }}
       destroyOnHidden
     >
@@ -417,14 +420,14 @@ export default function CommandSelectModal({
             <Space orientation="vertical" size={10} style={{ width: '100%' }}>
               {pathsLoading ? (
                 <Spin size="small" />
-              ) : isAddRmvWithObject ? (
+              ) : isRmvWithObject ? (
                 <>
-                  {/* §需求 1：ADD/RMV 无参数 PATH，展示执行 RPC 的「目标对象路径」提醒用户。 */}
+                  {/* §需求 1：RMV 无参数 PATH，展示执行 RPC 的「目标对象路径」提醒用户。 */}
                   <Text strong>{t('mml.consoleV2.cmdSelect.targetObjectPath')}</Text>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {t('mml.consoleV2.cmdSelect.addRmvHint', {
                       op: selOp,
-                      rpc: selOp === 'ADD' ? 'AddObject' : 'DeleteObject',
+                      rpc: 'DeleteObject',
                     })}
                   </Text>
                   <Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
@@ -433,6 +436,17 @@ export default function CommandSelectModal({
                 </>
               ) : (
                 <>
+                  {isAddWithObject && (
+                    <>
+                      <Text strong>{t('mml.consoleV2.cmdSelect.targetObjectPath')}</Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {t('mml.consoleV2.cmdSelect.addRmvHint', { op: selOp, rpc: 'AddObject' })}
+                      </Text>
+                      <Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                        {selTargetObject}
+                      </Text>
+                    </>
+                  )}
                   <Text strong>{t('mml.consoleV2.cmdSelect.paramPathCount', { count: visiblePathCount })}</Text>
                   {visiblePathCount === 0 ? (
                     <Text type="secondary">{t('mml.consoleV2.cmdSelect.noParamPath')}</Text>

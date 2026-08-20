@@ -97,7 +97,7 @@ func TestManagementServerSSLStatusPathsAreGlobalReadOnlyMMLParams(t *testing.T) 
 // TestSmokeSeedDerivation: 在 cmcc_tdlte_v23.json 上验证：
 //   - 18 chapter / 71 command / 616 param 数量精确匹配
 //     （RRCTimers 的 10 个 LTE 计时器参数已归入专用 RRC 计时器命令，避免 FAP_SERVICE 重复）
-//   - LST 总生成；MOD 仅在含 RW 时；ADD/RMV 双门槛
+//   - LST 总生成；MOD/ADD 仅在含 RW 时；RMV 与 ADD 成对生成
 //   - logical_code 全集唯一
 func TestSmokeSeedDerivation(t *testing.T) {
 	_, thisFile, _, _ := runtime.Caller(0)
@@ -236,6 +236,21 @@ func TestNonCreatableExclusion(t *testing.T) {
 		}
 	}
 
+	// ADD 与 MOD 使用同一组可编辑参数，避免新增对象后弹窗只有 target_object。
+	for _, c := range derived {
+		if c.OperationType != OpADD {
+			continue
+		}
+		if len(c.SubFields) == 0 {
+			t.Errorf("ADD %s has zero RW sub_fields", c.CommandCode)
+		}
+		for _, p := range c.SubFields {
+			if !p.IsWritable() {
+				t.Errorf("ADD %s contains non-writable path %s", c.CommandCode, p.Path)
+			}
+		}
+	}
+
 	// 输出 ADD/RMV 的 command_code 列表（手测验证）
 	var addList []string
 	for _, c := range derived {
@@ -246,4 +261,43 @@ func TestNonCreatableExclusion(t *testing.T) {
 	sort.Strings(addList)
 	t.Logf("ADD commands (%d):\n  %s", len(addList), strings.Join(addList, "\n  "))
 	_ = fmt.Sprintf
+}
+
+func TestDeriveCommandsFromSeed_ADDExcludesNestedInstanceFields(t *testing.T) {
+	seed := &SeedRoot{
+		Groups: []SeedGroup{{
+			Code: "HA",
+			Name: "主备热备",
+			Commands: []SeedCommand{{
+				ObjectPath: "Device.KeepalivedMgmt.VrrpMgmt.{i}.",
+				Name:       "VRRP实例",
+				Params: []SeedParam{
+					{Path: "Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt", Access: AccessRW},
+					{Path: "Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface", Access: AccessRW},
+				},
+			}},
+		}},
+	}
+
+	for _, command := range DeriveCommandsFromSeed(seed) {
+		if command.OperationType == OpADD {
+			if got, want := command.SubFields, []SeedParam{seed.Groups[0].Commands[0].Params[0]}; !equalSeedParams(got, want) {
+				t.Fatalf("ADD sub-fields = %#v, want only direct fields %#v", got, want)
+			}
+			return
+		}
+	}
+	t.Fatal("missing ADD command")
+}
+
+func equalSeedParams(got, want []SeedParam) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i].Path != want[i].Path || got[i].Access != want[i].Access {
+			return false
+		}
+	}
+	return true
 }

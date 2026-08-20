@@ -378,23 +378,50 @@ describe('CommandSelectModal', () => {
     ).toBeInTheDocument();
   });
 
-  it.each([
-    ['ADD', '新增用户', 'add-1', 'AddObject'],
-    ['RMV', '删除用户', 'rmv-1', 'DeleteObject'],
-  ])('keeps target-object behavior for %s commands', async (_operation, displayName, id, rpc) => {
+  it('shows all writable sub-fields for ADD alongside its target object', async () => {
     const onConfirm = vi.fn();
     renderModal({ onConfirm, value: null, selectedPathKeys: [] });
     fireEvent.click(document.querySelector('.ant-tree-switcher')!);
-    fireEvent.click(await screen.findByText(displayName));
+    fireEvent.click(await screen.findByText('新增用户'));
 
     expect(await screen.findByText('mml.consoleV2.cmdSelect.targetObjectPath')).toBeInTheDocument();
     expect(screen.getByText('Device.Users.User.')).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(rpc))).toBeInTheDocument();
+    expect(screen.getByText('mml.consoleV2.cmdSelect.paramPathCount:{"count":3}')).toBeInTheDocument();
+    expect(screen.getByText('Device.Info.Name')).toBeInTheDocument();
+    expect(screen.getByText('Device.Info.Model')).toBeInTheDocument();
+    expect(screen.queryByText('Device.Info.Serial')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'mml.consoleV2.cmdSelect.okText' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'mml.consoleV2.cmdSelect.okText' }));
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'add-1',
+        targetObject: 'Device.Users.User.',
+        paramPaths: expect.arrayContaining([
+          expect.objectContaining({ path: 'Device.Info.Name', writable: true }),
+        ]),
+      }),
+      [],
+    );
+  });
+
+  it('keeps target-object behavior for RMV commands', async () => {
+    const onConfirm = vi.fn();
+    renderModal({ onConfirm, value: null, selectedPathKeys: [] });
+    fireEvent.click(document.querySelector('.ant-tree-switcher')!);
+    fireEvent.click(await screen.findByText('删除用户'));
+
+    expect(await screen.findByText('mml.consoleV2.cmdSelect.targetObjectPath')).toBeInTheDocument();
+    expect(screen.getByText('Device.Users.User.')).toBeInTheDocument();
+    expect(screen.getByText(/DeleteObject/)).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /Name/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'mml.consoleV2.cmdSelect.okText' })).toBeEnabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'mml.consoleV2.cmdSelect.okText' }));
-    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ id, targetObject: 'Device.Users.User.' }), []);
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'rmv-1', targetObject: 'Device.Users.User.' }),
+      [],
+    );
   });
 
   it('keeps standard ADD target-object confirmation available when unsupported Paths fail without data', async () => {

@@ -1,10 +1,11 @@
 <?xml version="1.0" ?>
-<parameterModel paramModel="BSC" totalEntries="239">
+<parameterModel paramModel="BSC" totalEntries="240">
     <objects>
         <object name="Device.FaultMgmt.CurrentAlarm." standardPath="Device.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.ExpeditedEvent." standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE." standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity." standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity." access="READ_ONLY" changeApplies="Immediate"/>
+        <object name="Device.KeepalivedMgmt.VrrpMgmt.{i}." standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <!-- BSC 多实例对象：实例模板必须包含末尾 {i}.；AddObject/DeleteObject 使用去掉
              末尾 {i}. 后的集合路径。MappingValidator 与 MML 目录过滤均按该规则识别。
 
@@ -101,28 +102,28 @@
         <param name="Device.DeviceInfo.ROUTE_CONFIG2_NETMASK" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
         <param name="Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB" access="READ_WRITE" type="U_INT" changeApplies="Immediate" enumValues="1,0" enumLabels="Enable,Disable"/>
         <param name="Device.DeviceInfo.X_COM_MME_Status" standardPath="Device.DeviceInfo.X_COM_MME_Status" access="READ_ONLY" type="U_INT" changeApplies="Immediate" enumValues="0,1" enumLabels="OFF,ON"/>
-        <param name="Device.KeepalivedMgmt.CounterCheck" standardPath="Device.KeepalivedMgmt.CounterCheck" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
-        <param name="Device.KeepalivedMgmt.Enable" standardPath="Device.KeepalivedMgmt.Enable" access="READ_ONLY" type="U_INT" changeApplies="Immediate" enumValues="0,1" enumLabels="OFF,ON"/>
-        <param name="Device.KeepalivedMgmt.ManualSwitch" standardPath="Device.KeepalivedMgmt.ManualSwitch" access="READ_ONLY" type="U_INT" changeApplies="Immediate" enumValues="0,1" enumLabels="Auto,Manual"/>
+        <param name="Device.KeepalivedMgmt.CounterCheck" standardPath="Device.KeepalivedMgmt.CounterCheck" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
+        <param name="Device.KeepalivedMgmt.Enable" standardPath="Device.KeepalivedMgmt.Enable" access="READ_WRITE" type="U_INT" changeApplies="Immediate" enumValues="0,1" enumLabels="OFF,ON"/>
+        <param name="Device.KeepalivedMgmt.ManualSwitch" standardPath="Device.KeepalivedMgmt.ManualSwitch" access="READ_WRITE" type="U_INT" changeApplies="Immediate" enumValues="0,1" enumLabels="Auto,Manual"/>
         <param name="Device.KeepalivedMgmt.MaxVrrpEntries" standardPath="Device.KeepalivedMgmt.MaxVrrpEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="4"/>
         <param name="Device.KeepalivedMgmt.RemoteUplinkIpAddr" standardPath="Device.KeepalivedMgmt.RemoteUplinkIpAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
-        <param name="Device.KeepalivedMgmt.RouterId" standardPath="Device.KeepalivedMgmt.RouterId" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16"/>
-        <param name="Device.KeepalivedMgmt.SecondTimeout" standardPath="Device.KeepalivedMgmt.SecondTimeout" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="1200"/>
-        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="3600"/>
+        <param name="Device.KeepalivedMgmt.RouterId" standardPath="Device.KeepalivedMgmt.RouterId" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="16"/>
+        <param name="Device.KeepalivedMgmt.SecondTimeout" standardPath="Device.KeepalivedMgmt.SecondTimeout" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="1200"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="3600"/>
         <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.DstIpAddr" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.DstIpAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
-        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable" access="READ_ONLY" type="U_INT" changeApplies="Immediate" enumValues="0,1" enumLabels="OFF,ON"/>
-        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Interface" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Interface" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="64"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable" access="READ_WRITE" type="U_INT" changeApplies="Immediate" enumValues="0,1" enumLabels="OFF,ON"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Interface" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Interface" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="64"/>
         <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.MaxVirtualIpEntries" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.MaxVirtualIpEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="2"/>
-        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Name" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16"/>
-        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Priority" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Priority" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="254"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Name" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Name" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="16"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Priority" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Priority" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="254"/>
         <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.SrcIpAddr" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.SrcIpAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
-        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.State" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.State" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="MASTER,BACKUP" enumLabels="MASTER,BACKUP"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.State" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.State" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="MASTER,BACKUP" enumLabels="MASTER,BACKUP"/>
         <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.IP" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.IP" access="READ_ONLY" type="STRING" changeApplies="Immediate" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
-        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="64"/>
-        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Label" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Label" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="2"/>
-        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.NetmaskPrefix" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.NetmaskPrefix" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="32"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="64"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Label" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Label" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="1" max="2"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.NetmaskPrefix" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.NetmaskPrefix" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="32"/>
         <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpNumberOfEntries" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpNumberOfEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="2"/>
-        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualRouterId" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualRouterId" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="255"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualRouterId" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualRouterId" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="255"/>
         <param name="Device.KeepalivedMgmt.VrrpNumberOfEntries" standardPath="Device.KeepalivedMgmt.VrrpNumberOfEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="4"/>
         <param name="DeviceGSM.Bts.Index" standardPath="DeviceGSM.Bts.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="256"/>
         <param name="DeviceGSM.Bts.Trx.Index" standardPath="DeviceGSM.Bts.Trx.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="8"/>
