@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"go.uber.org/zap"
@@ -16,9 +17,25 @@ const (
 	aggregationRawStreamName    = "PM_AGG_15M"
 	aggregationHourlyStreamName = "PM_AGG_HOURLY"
 	aggregationDailyStreamName  = "PM_AGG_DAILY"
+	recoveryPageSize            = uint64(1000)
+	recoveryTerminalBatchLimit  = 512
+	recoveryRuntimeCleanupLimit = uint64(256)
+	recoveryRuntimeCleanupTime  = 10 * time.Second
 )
 
 type recoverySource string
+
+type recoveryTerminal struct {
+	status string
+	reason string
+}
+
+type RecoveryVersionStateLoader interface {
+	LoadRecoveryVersionStates(
+		ctx context.Context,
+		versionIDs []uuid.UUID,
+	) (map[uuid.UUID]RecoveryVersionState, error)
+}
 
 const (
 	recoveryRaw15m      recoverySource = "raw_15m"
@@ -35,6 +52,7 @@ type Recovery struct {
 	matcher  *Matcher
 	rollups  *RollupOutboxRepository
 	outbox   *OutboxRepository
+	versions RecoveryVersionStateLoader
 	logger   *zap.Logger
 }
 
@@ -49,18 +67,32 @@ func NewRecovery(
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Recovery{
+	recovery := &Recovery{
 		js: js, windows: windows, store: store, snapshot: snapshot,
 		matcher: matcher, rollups: NewRollupOutboxRepository(windows.pool),
 		outbox: NewOutboxRepository(windows.pool), logger: logger,
 	}
+	if snapshot != nil {
+		recovery.versions, _ = snapshot.loader.(RecoveryVersionStateLoader)
+	}
+	return recovery
 }
 
 func (r *Recovery) RestoreActiveWindows(ctx context.Context) error {
+	if r.snapshot == nil {
+		return errors.New("PM aggregation recovery task snapshot is nil")
+	}
+	if r.versions == nil {
+		return errors.New("PM aggregation recovery version-state loader is nil")
+	}
+	if err := r.snapshot.Refresh(ctx); err != nil {
+		return fmt.Errorf("refresh PM aggregation tasks before recovery: %w", err)
+	}
+	current := r.snapshot.Current()
 	var restoreErrors []error
 	var cursor *WindowKey
 	missing := make(map[recoverySource][]WindowKey)
-	const pageSize = uint64(1000)
+	terminalRemaining := recoveryTerminalBatchLimit
 	// 大数据升级恢复时活跃窗口以十万计，本扫描 = 每页一条查询、可能持续数十分钟。
 	// 每 progressEveryPages 页打一次进度；收尾摘要仅在实际耗时超过阈值时输出
 	// （周期性 Run 的稳态扫描只有一两页，保持静默避免刷屏）。
@@ -69,19 +101,40 @@ func (r *Recovery) RestoreActiveWindows(ctx context.Context) error {
 	restoreStart := time.Now()
 	pages, scanned := 0, 0
 	for {
-		active, err := r.windows.ListActiveAfter(ctx, cursor, pageSize)
+		active, err := r.windows.ListActiveAfter(ctx, cursor, recoveryPageSize)
 		if err != nil {
 			return errors.Join(append(restoreErrors, err)...)
 		}
 		pages++
 		scanned += len(active)
+		versionIDs := make([]uuid.UUID, 0, len(active))
+		for _, record := range active {
+			version := current.ByVersion[record.Key.TaskVersionID]
+			if version != nil && (version.DevicePipeline || version.DeviceRollup) {
+				continue
+			}
+			versionIDs = append(versionIDs, record.Key.TaskVersionID)
+		}
+		versionStates, err := r.versions.LoadRecoveryVersionStates(ctx, versionIDs)
+		if err != nil {
+			return errors.Join(append(restoreErrors, err)...)
+		}
 		if pages%progressEveryPages == 0 {
 			r.logger.Info("PM aggregation active-window restore in progress",
 				zap.Int("pages", pages),
 				zap.Int("scanned_windows", scanned),
 				zap.Duration("elapsed", time.Since(restoreStart)))
 		}
+		terminals := make(map[recoveryTerminal][]WindowRecord)
 		for _, record := range active {
+			terminal, invalid := recoveryTerminalFor(record.Key, current, versionStates)
+			if invalid {
+				if terminalRemaining > 0 {
+					terminals[terminal] = append(terminals[terminal], record)
+					terminalRemaining--
+				}
+				continue
+			}
 			exists, existsErr := r.store.Exists(ctx, record.Key)
 			if existsErr != nil {
 				restoreErrors = append(restoreErrors, existsErr)
@@ -95,7 +148,7 @@ func (r *Recovery) RestoreActiveWindows(ctx context.Context) error {
 			if exists {
 				continue
 			}
-			source, sourceErr := r.recoverySourceFor(record.Key)
+			source, sourceErr := recoverySourceForSnapshot(record.Key, current)
 			if sourceErr != nil {
 				restoreErrors = append(restoreErrors, sourceErr)
 				_ = r.windows.MarkFailed(ctx, record.Key, sourceErr)
@@ -103,11 +156,29 @@ func (r *Recovery) RestoreActiveWindows(ctx context.Context) error {
 			}
 			missing[source] = append(missing[source], record.Key)
 		}
-		if len(active) < int(pageSize) {
+		for terminal, records := range terminals {
+			updated, terminalErr := r.windows.MarkRecoveryTerminalBatch(
+				ctx, records, terminal.status, terminal.reason,
+			)
+			if terminalErr != nil {
+				restoreErrors = append(restoreErrors, terminalErr)
+				continue
+			}
+			if updated > 0 {
+				r.logger.Warn("PM aggregation recovery isolated invalid task windows",
+					zap.String("status", terminal.status),
+					zap.String("reason", terminal.reason),
+					zap.Int64("windows", updated))
+			}
+		}
+		if len(active) < int(recoveryPageSize) {
 			break
 		}
 		last := active[len(active)-1].Key
 		cursor = &last
+	}
+	if cleanupErr := r.cleanupRecoveryRuntime(ctx); cleanupErr != nil {
+		restoreErrors = append(restoreErrors, cleanupErr)
 	}
 	if elapsed := time.Since(restoreStart); elapsed > restoreSummaryLogThreshold {
 		missingTotal := 0
@@ -145,6 +216,97 @@ func (r *Recovery) RestoreActiveWindows(ctx context.Context) error {
 		}
 	}
 	return errors.Join(restoreErrors...)
+}
+
+func recoveryTerminalFor(
+	key WindowKey,
+	snapshot *TaskSnapshot,
+	states map[uuid.UUID]RecoveryVersionState,
+) (recoveryTerminal, bool) {
+	if snapshot == nil {
+		return recoveryTerminal{status: "orphaned", reason: "task snapshot missing"}, true
+	}
+	version := snapshot.ByVersion[key.TaskVersionID]
+	if version != nil && (version.DevicePipeline || version.DeviceRollup) {
+		return recoveryTerminalForState(key, RecoveryVersionState{
+			TaskID: version.TaskID, TaskEnabled: version.TaskEnabled,
+			TaskDeletedAt: version.TaskDeletedAt, VersionID: version.VersionID,
+			VersionEnabled: version.Enabled, EffectiveFrom: version.EffectiveFrom,
+			EffectiveTo: version.EffectiveTo, PlannedEndAt: version.PlannedEndAt,
+		})
+	}
+	state, exists := states[key.TaskVersionID]
+	if !exists {
+		return recoveryTerminal{status: "orphaned", reason: "task version missing from primary database"}, true
+	}
+	return recoveryTerminalForState(key, state)
+}
+
+func recoveryTerminalForState(
+	key WindowKey,
+	state RecoveryVersionState,
+) (recoveryTerminal, bool) {
+	if state.TaskID != key.TaskID {
+		return recoveryTerminal{status: "orphaned", reason: "task identity does not match task version"}, true
+	}
+	if state.TaskDeletedAt != nil {
+		return recoveryTerminal{status: "retired", reason: "task was deleted"}, true
+	}
+	if !state.TaskEnabled {
+		return recoveryTerminal{status: "retired", reason: "task is disabled"}, true
+	}
+	if !state.VersionEnabled {
+		return recoveryTerminal{status: "retired", reason: "task version is disabled"}, true
+	}
+	if state.PlannedEndAt != nil && !key.Start.Before(*state.PlannedEndAt) {
+		return recoveryTerminal{status: "retired", reason: "task planned end was reached"}, true
+	}
+	if !state.EffectiveFrom.IsZero() && !key.End.After(state.EffectiveFrom) {
+		return recoveryTerminal{status: "retired", reason: "window is before task version effective range"}, true
+	}
+	if state.EffectiveTo != nil && !key.Start.Before(*state.EffectiveTo) {
+		return recoveryTerminal{status: "retired", reason: "window is after task version effective range"}, true
+	}
+	return recoveryTerminal{}, false
+}
+
+func (r *Recovery) cleanupRecoveryRuntime(ctx context.Context) error {
+	pending, err := r.windows.ListRecoveryRuntimeCleanupPending(
+		ctx, recoveryRuntimeCleanupLimit,
+	)
+	if err != nil || len(pending) == 0 {
+		return err
+	}
+	cleanupCtx, cancel := context.WithTimeout(ctx, recoveryRuntimeCleanupTime)
+	defer cancel()
+	started := time.Now()
+	cleaned := make([]WindowKey, 0, len(pending))
+	versionIDs := make([]uuid.UUID, 0, len(pending))
+	var cleanupErr error
+	for _, record := range pending {
+		if err := r.store.DeleteState(cleanupCtx, record.Key); err != nil {
+			cleanupErr = err
+			break
+		}
+		cleaned = append(cleaned, record.Key)
+		versionIDs = append(versionIDs, record.Key.TaskVersionID)
+	}
+	if cleanupErr == nil {
+		cleanupErr = r.store.DeleteVersionDefinitions(cleanupCtx, versionIDs)
+	}
+	if cleanupErr == nil && len(cleaned) > 0 {
+		if _, err := r.windows.MarkRecoveryRuntimeCleaned(ctx, cleaned); err != nil {
+			cleanupErr = err
+		}
+	}
+	r.logger.Info("PM aggregation recovery runtime cleanup completed",
+		zap.Int("selected_windows", len(pending)),
+		zap.Int("cleaned_windows", len(cleaned)),
+		zap.Duration("duration", time.Since(started)))
+	if cleanupErr != nil {
+		return fmt.Errorf("clean PM aggregation recovery runtime: %w", cleanupErr)
+	}
+	return nil
 }
 
 func (r *Recovery) Run(ctx context.Context, interval time.Duration) {
@@ -277,10 +439,31 @@ func replayDurableDeviceHourSources(
 }
 
 func (r *Recovery) recoverySourceFor(key WindowKey) (recoverySource, error) {
-	current := r.snapshot.Current()
-	if current == nil {
-		return "", fmt.Errorf("PM aggregation task snapshot missing")
+	if r.snapshot == nil {
+		return "", errors.New("PM aggregation task version is not recoverable: task snapshot missing")
 	}
+	current := r.snapshot.Current()
+	version := current.ByVersion[key.TaskVersionID]
+	if version == nil {
+		return "", errors.New("PM aggregation task version is not recoverable: task version missing from snapshot")
+	}
+	if terminal, invalid := recoveryTerminalForState(key, RecoveryVersionState{
+		TaskID: version.TaskID, TaskEnabled: version.TaskEnabled,
+		TaskDeletedAt: version.TaskDeletedAt, VersionID: version.VersionID,
+		VersionEnabled: version.Enabled, EffectiveFrom: version.EffectiveFrom,
+		EffectiveTo: version.EffectiveTo, PlannedEndAt: version.PlannedEndAt,
+	}); invalid {
+		return "", fmt.Errorf(
+			"PM aggregation task version is not recoverable: %s", terminal.reason,
+		)
+	}
+	return recoverySourceForSnapshot(key, current)
+}
+
+func recoverySourceForSnapshot(
+	key WindowKey,
+	current *TaskSnapshot,
+) (recoverySource, error) {
 	version := current.ByVersion[key.TaskVersionID]
 	switch key.Granularity {
 	case GranularityHourly:

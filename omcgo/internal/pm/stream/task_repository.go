@@ -521,6 +521,47 @@ func (r *PgProgressTaskLoader) LoadVersionsByID(
 	return r.repository.loadTaskVersions(ctx, query, args, false)
 }
 
+func (r *PgTaskRepository) LoadRecoveryVersionStates(
+	ctx context.Context,
+	versionIDs []uuid.UUID,
+) (map[uuid.UUID]RecoveryVersionState, error) {
+	ids := normalizeTaskVersionIDs(versionIDs)
+	states := make(map[uuid.UUID]RecoveryVersionState, len(ids))
+	if len(ids) == 0 {
+		return states, nil
+	}
+	query, args, err := storage.Psql.Select(
+		"t.id", "t.enabled", "t.deleted_at", "v.id", "v.enabled",
+		"v.effective_from", "v.effective_to", "t.planned_end_at",
+	).From("pm_aggregation_task_versions v").
+		Join("pm_aggregation_tasks t ON t.id = v.task_id").
+		Where(sq.Eq{"v.id": ids}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build load PM recovery version states SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query PM recovery version states: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var state RecoveryVersionState
+		if err := rows.Scan(
+			&state.TaskID, &state.TaskEnabled, &state.TaskDeletedAt,
+			&state.VersionID, &state.VersionEnabled, &state.EffectiveFrom,
+			&state.EffectiveTo, &state.PlannedEndAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan PM recovery version state: %w", err)
+		}
+		states[state.VersionID] = state
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate PM recovery version states: %w", err)
+	}
+	return states, nil
+}
+
 func buildLoadTaskVersionsByIDSQL(versionIDs []uuid.UUID) (string, []interface{}, error) {
 	return taskVersionSelect().
 		Where(sq.Eq{"v.id": versionIDs}).
@@ -548,7 +589,7 @@ func (r *PgTaskRepository) loadMatchable(
 
 func taskVersionSelect() sq.SelectBuilder {
 	return storage.Psql.Select(
-		"t.id", "v.id", "v.version_no", "t.name", "v.enabled",
+		"t.id", "v.id", "v.version_no", "t.name", "t.enabled", "t.deleted_at", "v.enabled",
 		"COALESCE(v.technology, '')", "v.dimension", "v.granularities",
 		"v.object_ldns", "v.effective_from",
 		"(SELECT MIN(lineage.effective_from) FROM pm_aggregation_task_versions lineage WHERE lineage.task_id = v.task_id)",
@@ -573,7 +614,8 @@ func (r *PgTaskRepository) loadTaskVersions(
 		var granularityStrings []string
 		var objectLDNs []string
 		if err := rows.Scan(
-			&version.TaskID, &version.VersionID, &version.VersionNo, &version.Name, &version.Enabled,
+			&version.TaskID, &version.VersionID, &version.VersionNo, &version.Name,
+			&version.TaskEnabled, &version.TaskDeletedAt, &version.Enabled,
 			&version.Technology, &version.Dimension, &granularityStrings, &objectLDNs,
 			&version.EffectiveFrom, &version.LineageEffectiveFrom,
 			&version.EffectiveTo, &version.PlannedEndAt,
@@ -814,7 +856,7 @@ func snapshotFromRequest(
 ) *TaskVersionSnapshot {
 	snapshot := &TaskVersionSnapshot{
 		TaskID: taskID, VersionID: versionID, VersionNo: versionNo,
-		Name: req.Name, Enabled: req.Enabled, Technology: req.Technology,
+		Name: req.Name, TaskEnabled: req.Enabled, Enabled: req.Enabled, Technology: req.Technology,
 		Dimension: req.Dimension, Granularities: req.Granularities,
 		EffectiveFrom: effectiveFrom, PlannedEndAt: req.PlannedEndAt,
 		Metrics:  make(map[string]MetricRule),

@@ -1544,7 +1544,11 @@ ALTER TABLE public.pm_aggregation_windows
     ADD COLUMN finalize_lease_until timestamptz,
     ADD COLUMN finalize_attempts integer NOT NULL DEFAULT 0,
     ADD COLUMN finalize_next_attempt_at timestamptz NOT NULL DEFAULT '-infinity',
-    ADD COLUMN version_audit_fingerprint text;
+    ADD COLUMN version_audit_fingerprint text,
+    ADD COLUMN recovery_original_status varchar(16),
+    ADD COLUMN recovery_terminal_at timestamptz,
+    ADD COLUMN recovery_terminal_reason text,
+    ADD COLUMN runtime_cleaned_at timestamptz;
 
 CREATE INDEX IF NOT EXISTS idx_pm_aggregation_windows_active_version_guard
     ON public.pm_aggregation_windows (
@@ -1575,7 +1579,10 @@ ALTER TABLE public.pm_aggregation_windows
     DROP CONSTRAINT chk_pm_aggregation_windows_status;
 ALTER TABLE public.pm_aggregation_windows
     ADD CONSTRAINT chk_pm_aggregation_windows_status
-        CHECK (status IN ('open', 'finalizing', 'prepared', 'published', 'failed', 'rebuilding'));
+        CHECK (status IN (
+            'open', 'finalizing', 'prepared', 'published', 'failed', 'rebuilding',
+            'orphaned', 'retired'
+        ));
 
 CREATE INDEX idx_pm_windows_prepared_publication
     ON public.pm_aggregation_windows (
@@ -1602,6 +1609,13 @@ CREATE INDEX idx_pm_windows_due_claim
 CREATE INDEX idx_pm_windows_oldest_due
     ON public.pm_aggregation_windows (granularity, window_end)
     WHERE status IN ('open', 'failed');
+
+CREATE INDEX idx_pm_windows_recovery_cleanup_pending
+    ON public.pm_aggregation_windows (
+        recovery_terminal_at, task_version_id, entity_key, granularity, window_start
+    )
+    WHERE status IN ('orphaned', 'retired')
+      AND runtime_cleaned_at IS NULL;
 
 -- The finalizer alternates oldest/newest scans. Keep every stable ordering
 -- column in one partial index so PostgreSQL can scan it in either direction

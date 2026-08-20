@@ -51,7 +51,8 @@ func devicePipelineVersion(source *TaskVersionSnapshot) (*TaskVersionSnapshot, b
 	}
 	return &TaskVersionSnapshot{
 		TaskID: taskID, VersionID: versionID, VersionNo: source.VersionNo,
-		Name:    "设备基础流水线-" + strings.ToUpper(source.Technology),
+		Name:        "设备基础流水线-" + strings.ToUpper(source.Technology),
+		TaskEnabled: source.TaskEnabled, TaskDeletedAt: source.TaskDeletedAt,
 		Enabled: true, Technology: source.Technology, Dimension: DimensionDevice,
 		Granularities: append([]Granularity(nil), source.Granularities...),
 		ObjectLDNs:    source.ObjectLDNs, EffectiveFrom: source.EffectiveFrom,
