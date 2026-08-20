@@ -57,12 +57,12 @@ type DerivedCommand struct {
 	ObjectPath    string      // 原 seed object_path（含 .{i}.），用于 standard_params object 行 + sub_field 关联
 	RPCMethod     string      // GetParameterValues / SetParameterValues / AddObject / DeleteObject
 	TargetObject  string      // ADD/RMV 时 = strip{i}(ObjectPath)；LST/MOD 时空
-	SubFields     []SeedParam // LST 取全部 params；MOD 仅 RW；ADD/RMV 为 nil
+	SubFields     []SeedParam // LST 取全部；MOD 取全部 RW；ADD 仅取当前实例层 RW；RMV 为 nil
 }
 
-// IsListOrModify 仅 LST/MOD 写 sub_fields。
-func (d DerivedCommand) IsListOrModify() bool {
-	return d.OperationType == OpLST || d.OperationType == OpMOD
+// HasSubFields 标识需要写入命令参数绑定的操作。
+func (d DerivedCommand) HasSubFields() bool {
+	return d.OperationType == OpLST || d.OperationType == OpMOD || d.OperationType == OpADD
 }
 
 // DeriveCommandsFromSeed 走全 seed 派生命令，并解决 logical_code 冲突。
@@ -79,6 +79,7 @@ func DeriveCommandsFromSeed(seed *SeedRoot) []DerivedCommand {
 		cmd       *SeedCommand
 		ops       []string // ["LST","MOD","ADD","RMV"] 子集
 		rwParams  []SeedParam
+		addParams []SeedParam
 		allParams []SeedParam
 	}
 	var slots []slot
@@ -94,21 +95,27 @@ func DeriveCommandsFromSeed(seed *SeedRoot) []DerivedCommand {
 				continue
 			}
 
-			// 收集 RW 集合 + 全集
+			// 收集 RW 集合 + 全集。ADD 只能携带当前新实例层的字段；更深一层
+			// 的 {i} 属于子对象，必须通过子对象自己的 ADD 命令创建。
 			var rw []SeedParam
+			var addRW []SeedParam
+			objectInstanceDepth := strings.Count(c.ObjectPath, "{i}")
 			for _, p := range c.Params {
 				if p.IsWritable() {
 					rw = append(rw, p)
+					if strings.Count(p.Path, "{i}") == objectInstanceDepth {
+						addRW = append(addRW, p)
+					}
 				}
 			}
-			s := slot{group: g, cmd: c, allParams: c.Params, rwParams: rw}
+			s := slot{group: g, cmd: c, allParams: c.Params, rwParams: rw, addParams: addRW}
 
 			// 操作集决策
 			s.ops = append(s.ops, OpLST) // LST 总加
 			if len(rw) > 0 {
 				s.ops = append(s.ops, OpMOD)
 			}
-			if !c.NonCreatable && len(rw) > 0 &&
+			if !c.NonCreatable && len(addRW) > 0 &&
 				strings.Contains(c.ObjectPath, ".{i}.") &&
 				!nonCreatable[c.ObjectPath] {
 				s.ops = append(s.ops, OpADD, OpRMV)
@@ -160,6 +167,7 @@ func DeriveCommandsFromSeed(seed *SeedRoot) []DerivedCommand {
 				d.NameEn = "Add " + nameEnAscii
 				d.RPCMethod = RPCAddObject
 				d.TargetObject = targetObj
+				d.SubFields = s.addParams
 			case OpRMV:
 				d.NameZh = "删除 " + baseNameZh
 				d.NameEn = "Remove " + nameEnAscii

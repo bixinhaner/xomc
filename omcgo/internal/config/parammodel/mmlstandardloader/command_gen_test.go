@@ -92,8 +92,39 @@ func TestGenerateCommands_ADDRMVWhenInstance(t *testing.T) {
 				"target_object 必以 . 结尾（TR-069 object 形态）")
 			assert.NotContains(t, c.TargetObject, "{i}", "去 {i}")
 			assert.Equal(t, CategoryNeighborMgmt, c.Category, "NeighborList → 2 邻区管理")
+			if c.OperationType == OpADD {
+				assert.Equal(t, []string{"Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.PCI"},
+					c.TargetPaths, "ADD 应显示全部可编辑 RW 参数")
+			} else {
+				assert.Empty(t, c.TargetPaths, "RMV 不需要参数")
+			}
 		}
 	}
+}
+
+func TestGenerateCommands_ADDExcludesNestedInstanceFields(t *testing.T) {
+	groups := []GroupSpec{{
+		Path:        "Device.KeepalivedMgmt.VrrpMgmt",
+		Code:        "DEVICE_KEEPALIVEDMGMT_VRRPMGMT",
+		HasInstance: true,
+		Params: []ParamSpec{
+			mkParam("Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt", AccessReadWrite, "U_INT"),
+			mkParam("Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface", AccessReadWrite, "STRING"),
+		},
+	}}
+
+	cmds := GenerateCommands(groups)
+	for _, c := range cmds {
+		if c.OperationType == OpADD {
+			assert.Equal(t,
+				[]string{"Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt"},
+				c.TargetPaths,
+				"新增 VRRP 实例不能混入 VirtualIpList 子实例字段",
+			)
+			return
+		}
+	}
+	t.Fatal("missing ADD command")
 }
 
 func TestGenerateCommands_NoADDWhenNoInstance(t *testing.T) {
@@ -150,7 +181,6 @@ func TestGenerateCommands_RealData_Distribution(t *testing.T) {
 	assert.Positive(t, ops[OpRMV])
 }
 
-
 // F-A 短 display name 规则覆盖：每条规则一个 testcase
 func TestGroupDisplayName_Aliases(t *testing.T) {
 	cases := []struct {
@@ -196,4 +226,3 @@ func TestGroupDisplayName_LengthBudget(t *testing.T) {
 	t.Logf("deepest path zh: %q (%d chars)", zh, len(zh))
 	t.Logf("deepest path en: %q (%d chars)", en, len(en))
 }
-

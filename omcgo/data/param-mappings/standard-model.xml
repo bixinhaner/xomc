@@ -1,10 +1,11 @@
 <?xml version="1.0" ?>
-<standardModel totalPaths="2007" totalObjects="16" totalParams="1991">
+<standardModel totalPaths="2008" totalObjects="17" totalParams="1991">
     <objects>
         <object standardPath="Device.DeviceInfo.EU." access="READ_ONLY" changeApplies="Immediate"/>
         <object standardPath="Device.DeviceInfo.EU.{i}.RU." access="READ_ONLY" changeApplies="Immediate"/>
         <object standardPath="Device.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
         <object standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
+        <object standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier." access="READ_WRITE" changeApplies="Immediate"/>
         <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell." access="READ_WRITE" changeApplies="Immediate"/>
         <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM." access="READ_ONLY" changeApplies="Immediate"/>
@@ -691,30 +692,30 @@
         <param standardPath="Device.IPsec.Status" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.IPsec.SupportedDiffieHellmanGroupTransforms" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.IPsec.SupportedIntegrityAlgorithms" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="Device.KeepalivedMgmt.CounterCheck" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="Device.KeepalivedMgmt.Enable" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="Device.KeepalivedMgmt.CounterCheck" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="Device.KeepalivedMgmt.Enable" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="Device.KeepalivedMgmt.LocalUplinkIpAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="Device.KeepalivedMgmt.ManualSwitch" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="Device.KeepalivedMgmt.ManualSwitch" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="Device.KeepalivedMgmt.MaxVrrpEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="Device.KeepalivedMgmt.RemoteUplinkIpAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="Device.KeepalivedMgmt.RouterId" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="Device.KeepalivedMgmt.SecondTimeout" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="Device.KeepalivedMgmt.RouterId" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="Device.KeepalivedMgmt.SecondTimeout" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.DstIpAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Interface" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Interface" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.MaxVirtualIpEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Priority" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Name" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Priority" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.SrcIpAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.State" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.State" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.IP" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Label" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.NetmaskPrefix" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Label" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.NetmaskPrefix" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpNumberOfEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
-        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualRouterId" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualRouterId" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="Device.KeepalivedMgmt.VrrpNumberOfEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="Device.LAN_HostConfigManagement.IPInterface.NRCU.F1UIpAddr" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.LAN_HostConfigManagement.IPInterface.NRCU.F1apLocalIpAddr" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>

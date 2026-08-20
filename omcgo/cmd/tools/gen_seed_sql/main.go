@@ -212,12 +212,12 @@ SET command_name      = EXCLUDED.command_name,
 	// ---------- Step 4: mml_command_sub_fields ----------
 	fmt.Fprintln(w, "-- ============================================================")
 	fmt.Fprintln(w, "-- Step 4: mml_command_sub_fields — 命令 ↔ standard_params 关联")
-	fmt.Fprintln(w, "-- 仅 LST/MOD 写；ADD/RMV 是对象操作不挂 sub_field。")
+	fmt.Fprintln(w, "-- LST 写全部字段，MOD/ADD 写 RW 字段，RMV 不写 sub_field。")
 	fmt.Fprintln(w, "-- 通过 standard_path 在 standard_params 中查 id；缺失 path 自然跳过。")
 	fmt.Fprintln(w, "-- ============================================================")
 	subFieldRows := 0
 	for _, c := range derived {
-		if !c.IsListOrModify() || len(c.SubFields) == 0 {
+		if !c.HasSubFields() || len(c.SubFields) == 0 {
 			continue
 		}
 		mmlCodeSeen := make(map[string]int, len(c.SubFields))
@@ -280,7 +280,7 @@ SET mml_code      = EXCLUDED.mml_code,
 // ============================================================
 
 // sqlStr 把 Go 字符串包装为 PostgreSQL 单引号字符串字面量；
-// 内部 ' 双写为 ''。standard_conforming_strings=on 默认开启，无需额外转义 \。
+// 内部 ' 双写为 ”。standard_conforming_strings=on 默认开启，无需额外转义 \。
 func sqlStr(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }

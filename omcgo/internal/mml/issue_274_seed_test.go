@@ -52,12 +52,35 @@ func TestIssue274SeedCopiesWritableFieldsToEveryMultiInstanceAdd(t *testing.T) {
 	assert.Contains(t, block, "-- Every multi-instance ADD must expose the writable fields of its MOD counterpart.")
 	assert.Contains(t, block, "mod.command_code = 'MOD ' || substr(add.command_code, 5)")
 	assert.Contains(t, block, "source_sf.access_type = 'RW'")
-	assert.Contains(t, block, "regexp_replace(source_sp.standard_path, '[^.]+$', '')")
+	assert.Contains(t, block, "regexp_count(source_sp.standard_path, '\\{i\\}')")
+	assert.Contains(t, block, "regexp_count(add.target_object, '\\{i\\}') + 1")
 	assert.Contains(t, block, "regexp_replace(add.target_object, '\\{i\\}\\.', '', 'g')")
 	assert.Contains(t, block, "add.operation_type = 'ADD'")
 	assert.Contains(t, block, "-- Commands without a MOD counterpart fall back to the standard writable fields.")
 	assert.Contains(t, block, "NOT EXISTS (")
 	assert.Contains(t, block, "candidate_sp.access = 'READ_WRITE'")
+}
+
+func TestIssue274SeedKeepsMODInheritedAddFieldsAuthoritative(t *testing.T) {
+	paths := []string{
+		"../../migrations/seed/000001_init_seed.sql",
+		"../../scripts/mml_apply_config_updates_20260721.sql",
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			contents, err := os.ReadFile(path)
+			require.NoError(t, err)
+			sql := string(contents)
+
+			// BSC overrides many DeviceGSM.Bts.{i} leaves to READ_WRITE while the shared
+			// standard model keeps them READ_ONLY. ADD must inherit that effective set
+			// from MOD, and no later global-access cleanup may remove those bindings.
+			assert.Contains(t, sql, "mod.command_code = 'MOD ' || substr(add.command_code, 5)")
+			assert.Contains(t, sql, "source_sf.access_type = 'RW'")
+			assert.Contains(t, sql, "NOT EXISTS (")
+			assert.NotRegexp(t, `(?m)^\s*sp\.access <> 'READ_WRITE'`, sql)
+		})
+	}
 }
 
 func TestIssue274SeedRepairsX2AndMMEAddObjectFamilies(t *testing.T) {
@@ -103,8 +126,43 @@ func TestIssue274SeedAddsNRDeviceLTENeighborObjectCommands(t *testing.T) {
 	assert.Contains(t, block, "dst.command_code IN ('ADD NR_LTE_CELL', 'RMV NR_LTE_CELL')")
 }
 
+func TestKeepalivedSeedRestoresPermissionDrivenCommandSet(t *testing.T) {
+	seed, err := os.ReadFile("../../migrations/seed/000001_init_seed.sql")
+	require.NoError(t, err)
+	block := keepalivedCorrectionBlock(string(seed))
+
+	assert.Contains(t, block, "('MOD MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT', '修改热备配置'")
+	assert.Contains(t, block, "('MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', '修改VRRP实例'")
+	assert.Contains(t, block, "('ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', '添加VRRP实例'")
+	assert.Contains(t, block, "('RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', '删除VRRP实例'")
+	assert.Contains(t, block, "'Device.KeepalivedMgmt.VrrpMgmt.{i}.', 'object', 'READ_WRITE'")
+	assert.Contains(t, block, "INSERT INTO public.param_mappings")
+	assert.Contains(t, block, "WHERE pm.name = 'BSC'")
+	assert.NotContains(t, block, "ADD MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT")
+	assert.NotContains(t, block, "RMV MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT")
+	assert.Contains(t, block, "AND bpm.access = 'READ_WRITE'")
+	assert.Contains(t, block, "regexp_count(fp.standard_path, '\\{i\\}') = 1")
+	assert.Contains(t, block, "UPDATE public.param_mappings mapping")
+	assert.Contains(t, block, "'Device.KeepalivedMgmt.VrrpMgmt.{i}.DstIpAddr', 'READ_ONLY', 'STRING'")
+	assert.Contains(t, block, "'Device.KeepalivedMgmt.VrrpMgmt.{i}.SrcIpAddr', 'READ_ONLY', 'STRING'")
+	assert.Contains(t, block, "'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.IP', 'READ_ONLY', 'STRING'")
+	assert.Contains(t, block, "'Device.KeepalivedMgmt.MaxVrrpEntries', 'READ_ONLY', 'U_INT'")
+	assert.Contains(t, block, "'Device.KeepalivedMgmt.VrrpMgmt.{i}.MaxVirtualIpEntries', 'READ_ONLY', 'U_INT'")
+	assert.Contains(t, block, "'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpNumberOfEntries', 'READ_ONLY', 'U_INT'")
+	assert.Contains(t, block, "'Device.KeepalivedMgmt.VrrpMgmt.'")
+	assert.Contains(t, block, "WHEN c.operation_type IN ('ADD', 'RMV') AND COALESCE(c.target_object, '') <> ''")
+}
+
 func issue274CorrectionBlock(sql string) string {
 	start := strings.Index(sql, "-- issue #274:")
+	if start < 0 {
+		return ""
+	}
+	return sql[start:]
+}
+
+func keepalivedCorrectionBlock(sql string) string {
+	start := strings.Index(sql, "-- Keepalived/VRRP: restore HA write commands")
 	if start < 0 {
 		return ""
 	}
