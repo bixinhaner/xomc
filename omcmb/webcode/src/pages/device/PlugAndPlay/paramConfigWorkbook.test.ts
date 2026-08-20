@@ -1049,6 +1049,50 @@ describe('parameter config workbook', () => {
     )).toThrowError(expect.objectContaining({ code: 'missing_columns', field: 'DEVICE.Unmapped' }));
   });
 
+  it('imports every mapped 5G device workbook parameter value', () => {
+    const fields = [
+      ['NTP Mode', 'Device.Time.Enable', '1'],
+      ['Local Time Zone', 'Device.Time.LocalTimeZoneName', 'UTC+08:00'],
+      ['NTP Server 1', 'Device.Time.NTPServer1', '192.0.2.1'],
+      ['NTP Server 2', 'Device.Time.NTPServer2', '192.0.2.2'],
+      ['NTP Server 3', 'Device.Time.NTPServer3', '192.0.2.3'],
+      ['NTP Server 4', 'Device.Time.NTPServer4', '192.0.2.4'],
+      ['NTP Server 5', 'Device.Time.NTPServer5', '192.0.2.5'],
+      ['URL', 'Device.ManagementServer.URL', 'http://acs.example.test'],
+      ['Periodic Inform Enable', 'Device.ManagementServer.PeriodicInformEnable', '1'],
+      ['Periodic Inform Time', 'Device.ManagementServer.PeriodicInformTime', '2026-08-20T16:00:00Z'],
+      ['Periodic Inform Interval', 'Device.ManagementServer.PeriodicInformInterval', '300'],
+      ['PpsTimeMode', 'Device.Time.PpsTimeMode', 'GPS_PPS'],
+    ] as const;
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['Serial Number', ...fields.map(([header]) => header)],
+      ['NR-SN-DEVICE-ALL', ...fields.map(([, , value]) => value)],
+    ]), 'DEVICE');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['页面显示名称', '数据工作表', '参数列名', 'TRPath', '来源', '说明'],
+      ...fields.map(([header, trPath]) => [header, 'DEVICE', header, trPath, '系统预置', '']),
+    ]), PARAM_MAPPING_SHEET);
+
+    const [parsed] = parseParamConfigWorkbook(
+      XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }),
+      'gNB',
+      'now',
+    );
+
+    expect(parsed.serialNumber).toBe('NR-SN-DEVICE-ALL');
+    for (const [header,, value] of fields) {
+      expect(parsed.sheetParameters?.DEVICE?.[0][header], header).toBe(value);
+    }
+    expect(parsed.workbookMappings).toEqual(fields.map(([header, trPath]) => ({
+      displayName: header,
+      sheet: 'DEVICE',
+      header,
+      trPath,
+      source: 'system',
+    })));
+  });
+
   it('ignores an unmapped column when spreadsheet editing leaves it completely empty', () => {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([

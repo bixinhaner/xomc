@@ -14,6 +14,10 @@ const networkCardsSource = readFileSync(
   resolve(process.cwd(), 'src/pages/device/PlugAndPlay/CommonQuickSettingsNetworkCards.tsx'),
   'utf8',
 );
+const gnbQuickSettingsFieldsSource = readFileSync(
+  resolve(process.cwd(), 'src/pages/device/PlugAndPlay/gnbQuickSettingsFields.ts'),
+  'utf8',
+);
 const drawerSection = pageSource.slice(
   pageSource.indexOf('{/* Config Detail/Edit Drawer */}'),
   pageSource.indexOf('{/* Firmware package import belongs to the target version. */}'),
@@ -49,8 +53,15 @@ describe('specified-device parameter editor', () => {
     expect(drawerSection).not.toContain('<GnbNetworkConfigCards');
     expect(drawerSection).not.toContain('<Collapse.Panel');
     expect(sharedPanelSource).toContain('export function ParameterConfigFields');
-    expect(sharedPanelSource).toContain('<PrimaryRadioInstanceEditor deviceType={deviceType} productClass={productClass} />');
-    expect(sharedPanelSource).toContain('<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} />');
+    expect(sharedPanelSource).toContain('<PrimaryRadioInstanceEditor deviceType={deviceType} productClass={productClass} readOnly={readOnly} />');
+    expect(sharedPanelSource).toContain('<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} readOnly={readOnly} />');
+  });
+
+  it('keeps the view drawer readable while making parameter fields read-only', () => {
+    expect(drawerSection).toContain('<Form form={configForm} layout="vertical" style={{ paddingBottom: 60 }}>');
+    expect(drawerSection).not.toContain('disabled={configDetailMode === \'view\'}');
+    expect(drawerSection).toContain("readOnly={configDetailMode === 'view'}");
+    expect(pageSource).toContain('readOnly={isView}');
   });
 
   it('lets a delete action promote the read-only drawer into edit mode', () => {
@@ -59,10 +70,25 @@ describe('specified-device parameter editor', () => {
     expect(networkCardsSource).toContain('<ConfigProvider componentDisabled={onRequestEdit ? false : undefined}>');
   });
 
+  it('shows an explicit edit action in the read-only config drawer before saving', () => {
+    expect(drawerSection).toContain("configDetailMode === 'view' && moduleActions.edit");
+    expect(drawerSection).toContain("onClick={() => setConfigDetailMode('edit')}");
+    expect(drawerSection).toContain("configDetailMode === 'edit'");
+    expect(drawerSection).toContain('handleConfigFormSubmit');
+  });
+
   it('offers a per-device download for the latest edited workbook', () => {
     expect(pageSource).toContain('handleDownloadParamConfig(record)');
     expect(pageSource).toContain('createParamConfigWorkbook([record], { productClass })');
     expect(pageSource).not.toContain('withTemplateSheetParameters(record)');
     expect(pageSource).toContain("{t('common.download')}");
+  });
+
+  it('maps imported workbook columns into the existing device detail fields', () => {
+    expect(drawerSection).toContain('<ParameterConfigFields');
+    expect(drawerSection).toContain('scope="device"');
+    expect(sharedPanelSource).not.toContain('function ImportedSheetParameterFields');
+    expect(sharedPanelSource).not.toContain('provision.importedWorkbookFields');
+    expect(gnbQuickSettingsFieldsSource).toContain("name: sheetField('DEVICE', `NTP Server${index}`)");
   });
 });
