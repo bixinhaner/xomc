@@ -20,6 +20,29 @@ const drawerSection = pageSource.slice(
 );
 
 describe('specified-device parameter editor', () => {
+  it('renders common and specified-device choices as mutually exclusive checkboxes instead of tabs', () => {
+    const selfConfigStart = pageSource.indexOf('const renderSelfConfig = () => (');
+    const selfConfigSection = pageSource.slice(
+      selfConfigStart,
+      pageSource.indexOf('  return (', selfConfigStart),
+    );
+
+    expect(selfConfigSection).toContain("<Checkbox");
+    expect(selfConfigSection).toContain("checked={paramConfigMode === 'common'}");
+    expect(selfConfigSection).toContain("checked={paramConfigMode === 'specified'}");
+    expect(selfConfigSection).toContain("form.setFieldsValue({ paramConfigMode: 'common' })");
+    expect(selfConfigSection).toContain("form.setFieldsValue({ paramConfigMode: 'specified' })");
+    expect(selfConfigSection).not.toContain('<Tabs');
+  });
+
+  it('submits only the selected parameter configuration mode', () => {
+    expect(pageSource).toContain("const submittedParamConfigMode: ParamConfigMode = values.paramConfigMode === 'specified' ? 'specified' : 'common';");
+    expect(pageSource).toContain("submittedParamConfigList = [];");
+    expect(pageSource).toContain('commonParamConfig = {};');
+    expect(pageSource).toContain('paramConfigMode: submittedParamConfigMode');
+    expect(pageSource).toContain('paramConfigList: submittedParamConfigList');
+  });
+
   it('uses the same parameter field panel as common parameter configuration', () => {
     expect(drawerSection).toContain('<ParameterConfigFields');
     expect(drawerSection).toContain('scope="device"');

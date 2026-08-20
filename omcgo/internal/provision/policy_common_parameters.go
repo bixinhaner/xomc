@@ -23,19 +23,41 @@ type policyAllocationRule struct {
 	Reserved []policyAllocationRange `json:"reserved"`
 }
 
-func policyHasCommonParameters(policy *PlugAndPlayPolicy) bool {
+const (
+	parameterConfigModeCommon    = "common"
+	parameterConfigModeSpecified = "specified"
+)
+
+func policyParameterConfigMode(policy *PlugAndPlayPolicy) string {
 	if policy == nil || len(policy.Config) == 0 {
-		return false
+		return parameterConfigModeSpecified
 	}
 	var root map[string]any
 	if json.Unmarshal(policy.Config, &root) != nil {
-		return false
+		return parameterConfigModeSpecified
 	}
-	return len(mapValue(root["commonParamConfig"])) > 0
+	mode := strings.ToLower(strings.TrimSpace(valueString(root["paramConfigMode"])))
+	switch mode {
+	case parameterConfigModeCommon:
+		return parameterConfigModeCommon
+	case parameterConfigModeSpecified:
+		return parameterConfigModeSpecified
+	default:
+		if mode == "" && len(mapValue(root["commonParamConfig"])) > 0 {
+			return parameterConfigModeCommon
+		}
+		return parameterConfigModeSpecified
+	}
+}
+
+func policyUsesCommonParameterMode(policy *PlugAndPlayPolicy) bool {
+	return policy != nil &&
+		policy.SelfConfigEnabled &&
+		policyParameterConfigMode(policy) == parameterConfigModeCommon
 }
 
 func validatePolicyCommonParameters(policy *PlugAndPlayPolicy) error {
-	if !policyHasCommonParameters(policy) {
+	if !policyUsesCommonParameterMode(policy) {
 		return nil
 	}
 	var root map[string]any
@@ -43,6 +65,9 @@ func validatePolicyCommonParameters(policy *PlugAndPlayPolicy) error {
 		return &ConfigValidationError{Message: fmt.Sprintf("decode policy config: %v", err)}
 	}
 	common := mapValue(root["commonParamConfig"])
+	if len(common) == 0 {
+		return &ConfigValidationError{Message: "common parameter configuration is required"}
+	}
 	if !strings.EqualFold(strings.TrimSpace(valueString(common["deviceType"])), "gNB") {
 		return nil
 	}
@@ -88,6 +113,9 @@ func materializePolicyParameters(
 	if err := json.Unmarshal(policy.Config, &root); err != nil {
 		return nil, &ConfigValidationError{Message: fmt.Sprintf("decode policy config: %v", err)}
 	}
+	if !policyUsesCommonParameterMode(policy) {
+		return policy, nil
+	}
 	common := sanitizePolicyCommonParameters(cloneMap(mapValue(root["commonParamConfig"])))
 	explicitRows := mapSlice(root["paramConfigList"])
 	explicitBySerial := make(map[string]map[string]any, len(explicitRows))
@@ -98,11 +126,7 @@ func materializePolicyParameters(
 		}
 	}
 	if len(common) == 0 {
-		if _, exists := explicitBySerial[device.SerialNumber]; !exists {
-			return nil, &ConfigValidationError{Message: fmt.Sprintf(
-				"policy has no common or device parameter configuration for device %s", device.SerialNumber)}
-		}
-		return policy, nil
+		return nil, &ConfigValidationError{Message: "common parameter configuration is required"}
 	}
 
 	ordered := append([]model.Device(nil), fleet...)

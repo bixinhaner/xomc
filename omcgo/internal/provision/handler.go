@@ -1000,7 +1000,7 @@ func (h *Handler) executeXML(ctx context.Context, policy *PlugAndPlayPolicy, dev
 		return nil, fmt.Errorf("lookup device parameter model: %w", definitionErr)
 	}
 	compilationPolicy := policy
-	if policyHasCommonParameters(policy) {
+	if policyUsesCommonParameterMode(policy) {
 		fleet, listErr := h.listPolicyDevices(ctx, policy)
 		if listErr != nil {
 			return nil, fmt.Errorf("list product devices for parameter allocation: %w", listErr)

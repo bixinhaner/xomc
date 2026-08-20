@@ -14,6 +14,7 @@ import (
 func TestMaterializePolicyParametersAllocatesByStableFleetOrder(t *testing.T) {
 	created := time.Date(2026, 8, 7, 8, 0, 0, 0, time.UTC)
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"paramConfigMode":"common",
 		"commonParamConfig":{
 			"deviceType":"gNB","gnbIdLength":24,"freqBandIndicator":78,
 			"gnbIdAllocation":{"start":100,"end":110,"step":1,"reserved":[{"start":101,"end":101}]},
@@ -41,6 +42,7 @@ func TestMaterializePolicyParametersAllocatesByStableFleetOrder(t *testing.T) {
 func TestMaterializePolicyParametersMergesDeviceOverrideOnCommonValues(t *testing.T) {
 	device := model.Device{ID: uuid.New(), SerialNumber: "SN-1"}
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"paramConfigMode":"common",
 		"commonParamConfig":{
 			"deviceType":"gNB","gnbIdLength":24,"freqBandIndicator":78,"dlbandwidth":"100MHz",
 			"gnbIdAllocation":{"start":1,"end":10,"step":1},
@@ -61,9 +63,52 @@ func TestMaterializePolicyParametersMergesDeviceOverrideOnCommonValues(t *testin
 	require.Equal(t, float64(0), row["pci"])
 }
 
+func TestMaterializePolicyParametersTreatsLegacyCommonConfigAsCommonMode(t *testing.T) {
+	device := model.Device{ID: uuid.New(), SerialNumber: "SN-1"}
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"commonParamConfig":{
+			"deviceType":"gNB","gnbIdLength":24,"freqBandIndicator":78,
+			"gnbIdAllocation":{"start":1,"end":10,"step":1},
+			"pciAllocation":{"start":0,"end":1007,"step":1}
+		},
+		"paramConfigList":[{"serialNumber":"SN-1","dlbandwidth":"80MHz"}]
+	}`)}
+
+	materialized, err := materializePolicyParameters(policy, &device, []model.Device{device})
+	require.NoError(t, err)
+	var root map[string]any
+	require.NoError(t, json.Unmarshal(materialized.Config, &root))
+	row := mapSlice(root["paramConfigList"])[0]
+	require.Equal(t, float64(78), row["freqBandIndicator"])
+	require.Equal(t, "80MHz", row["dlbandwidth"])
+}
+
+func TestMaterializePolicyParametersSpecifiedModeDoesNotMergeCommonValues(t *testing.T) {
+	device := model.Device{ID: uuid.New(), SerialNumber: "SN-1"}
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"paramConfigMode":"specified",
+		"commonParamConfig":{
+			"deviceType":"gNB","gnbIdLength":24,"freqBandIndicator":78,
+			"gnbIdAllocation":{"start":1,"end":10,"step":1},
+			"pciAllocation":{"start":0,"end":1007,"step":1}
+		},
+		"paramConfigList":[{"serialNumber":"SN-1","dlbandwidth":"80MHz","tac":3}]
+	}`)}
+
+	materialized, err := materializePolicyParameters(policy, &device, []model.Device{device})
+	require.NoError(t, err)
+	var root map[string]any
+	require.NoError(t, json.Unmarshal(materialized.Config, &root))
+	row := mapSlice(root["paramConfigList"])[0]
+	require.NotContains(t, row, "freqBandIndicator")
+	require.Equal(t, "80MHz", row["dlbandwidth"])
+	require.Equal(t, float64(3), row["tac"])
+}
+
 func TestMaterializePolicyParametersPreservesCommonRadioInstanceList(t *testing.T) {
 	device := model.Device{ID: uuid.New(), SerialNumber: "SN-MULTI-1"}
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"paramConfigMode":"common",
 		"commonParamConfig":{
 			"deviceType":"gNB","gnbIdLength":24,
 			"gnbIdAllocation":{"start":1,"end":10,"step":1},
@@ -91,6 +136,7 @@ func TestMaterializePolicyParametersPreservesCommonRadioInstanceList(t *testing.
 func TestMaterializePolicyParametersDeviceRadioInstanceListOverridesCommonList(t *testing.T) {
 	device := model.Device{ID: uuid.New(), SerialNumber: "SN-MULTI-1"}
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"paramConfigMode":"common",
 		"commonParamConfig":{
 			"deviceType":"eNB",
 			"sheetParameters":{"CELL":[
@@ -117,6 +163,7 @@ func TestMaterializePolicyParametersDeviceRadioInstanceListOverridesCommonList(t
 func TestMaterializePolicyParametersExpandsCommonNetworkInstancesInListOrder(t *testing.T) {
 	device := model.Device{ID: uuid.New(), SerialNumber: "SN-1"}
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"paramConfigMode":"common",
 		"commonParamConfig":{
 			"deviceType":"gNB","gnbIdLength":24,
 			"gnbIdAllocation":{"start":1,"end":10,"step":1},
@@ -153,6 +200,7 @@ func TestMaterializePolicyParametersDoesNotTurnMappedWorkbookValuesIntoCustomPar
 	device := model.Device{ID: uuid.New(), SerialNumber: "SN-MAPPED-1"}
 	const path = "Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.SsbFrequency"
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"paramConfigMode":"common",
 		"commonParamConfig":{
 			"deviceType":"gNB","gnbIdLength":24,
 			"gnbIdAllocation":{"start":1,"end":10,"step":1},
@@ -184,6 +232,7 @@ func TestMaterializePolicyParametersDoesNotTurnMappedWorkbookValuesIntoCustomPar
 func TestMaterializePolicyParametersRemovesFieldsExcludedFromCommonConfiguration(t *testing.T) {
 	device := model.Device{ID: uuid.New(), SerialNumber: "SN-1"}
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"paramConfigMode":"common",
 		"commonParamConfig":{
 			"deviceType":"gNB","gnbIdLength":24,
 			"gnbIdAllocation":{"start":1,"end":10,"step":1},
@@ -216,6 +265,7 @@ func TestMaterializePolicyParametersRemovesFieldsExcludedFromCommonConfiguration
 func TestMaterializePolicyParametersRejectsDuplicateExplicitPCI(t *testing.T) {
 	device := model.Device{ID: uuid.New(), SerialNumber: "SN-1"}
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"paramConfigMode":"common",
 		"commonParamConfig":{
 			"deviceType":"gNB","gnbIdLength":24,
 			"gnbIdAllocation":{"start":1,"end":10,"step":1},
@@ -236,6 +286,7 @@ func TestMaterializePolicyParametersRejectsDuplicateExplicitPCI(t *testing.T) {
 func TestMaterializePolicyParametersRejectsExhaustedRange(t *testing.T) {
 	device := model.Device{ID: uuid.New(), SerialNumber: "SN-2"}
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"paramConfigMode":"common",
 		"commonParamConfig":{
 			"deviceType":"gNB","gnbIdLength":24,
 			"gnbIdAllocation":{"start":1,"end":1,"step":1},
@@ -250,7 +301,8 @@ func TestMaterializePolicyParametersRejectsExhaustedRange(t *testing.T) {
 }
 
 func TestValidatePolicyCommonParametersEnforcesGNBIDLength(t *testing.T) {
-	policy := &PlugAndPlayPolicy{Config: json.RawMessage(`{
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"paramConfigMode":"common",
 		"commonParamConfig":{
 			"deviceType":"gNB","gnbIdLength":24,
 			"gnbIdAllocation":{"start":1,"end":16777216,"step":1},
@@ -258,4 +310,17 @@ func TestValidatePolicyCommonParametersEnforcesGNBIDLength(t *testing.T) {
 		}
 	}`)}
 	require.ErrorContains(t, validatePolicyCommonParameters(policy), "24-bit maximum")
+}
+
+func TestValidatePolicyCommonParametersIgnoresSpecifiedMode(t *testing.T) {
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"paramConfigMode":"specified",
+		"commonParamConfig":{
+			"deviceType":"gNB","gnbIdLength":24,
+			"gnbIdAllocation":{"start":1,"end":16777216,"step":1},
+			"pciAllocation":{"start":0,"end":1007,"step":1}
+		}
+	}`)}
+
+	require.NoError(t, validatePolicyCommonParameters(policy))
 }
