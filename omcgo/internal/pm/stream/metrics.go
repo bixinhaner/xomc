@@ -41,6 +41,10 @@ type Metrics struct {
 	RedisSampledEstimatedBytes             *prometheus.GaugeVec
 	RedisSweeperDeletedTotal               prometheus.Counter
 	RedisWriteErrorsTotal                  prometheus.Counter
+	RuntimeCleanupRowsTotal                *prometheus.CounterVec
+	RuntimeCleanupErrorsTotal              *prometheus.CounterVec
+	RuntimeCleanupDuration                 *prometheus.HistogramVec
+	RuntimeCleanupBacklog                  *prometheus.GaugeVec
 	BuiltinReconcileRunsTotal              prometheus.Counter
 	BuiltinReconcileErrorsTotal            prometheus.Counter
 	BuiltinVersionsChangedTotal            prometheus.Counter
@@ -194,6 +198,23 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "omc_pm_aggregation_redis_write_errors_total",
 			Help: "Redis aggregation state write or UNLINK failures.",
 		}),
+		RuntimeCleanupRowsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_runtime_cleanup_rows_total",
+			Help: "Rows or replay chunks removed by bounded PM runtime cleanup.",
+		}, []string{"target"}),
+		RuntimeCleanupErrorsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_runtime_cleanup_errors_total",
+			Help: "Bounded PM runtime cleanup failures by target.",
+		}, []string{"target"}),
+		RuntimeCleanupDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "omc_pm_aggregation_runtime_cleanup_duration_seconds",
+			Help:    "Time spent in one bounded PM runtime cleanup batch.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"target"}),
+		RuntimeCleanupBacklog: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_pm_aggregation_runtime_cleanup_backlog",
+			Help: "Capped sample of rows or replay chunks remaining for PM runtime cleanup.",
+		}, []string{"target"}),
 		BuiltinReconcileRunsTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "omc_pm_aggregation_builtin_reconcile_runs_total",
 			Help: "Built-in PM aggregation reconciliation runs.",
@@ -247,6 +268,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.RedisSampledEstimatedBytes,
 		m.RedisSweeperDeletedTotal,
 		m.RedisWriteErrorsTotal,
+		m.RuntimeCleanupRowsTotal,
+		m.RuntimeCleanupErrorsTotal,
+		m.RuntimeCleanupDuration,
+		m.RuntimeCleanupBacklog,
 		m.BuiltinReconcileRunsTotal,
 		m.BuiltinReconcileErrorsTotal,
 		m.BuiltinVersionsChangedTotal,

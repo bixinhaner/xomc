@@ -6,7 +6,10 @@ import (
 	"time"
 )
 
-const minimumHourlyCloseGrace = 12 * time.Minute
+const (
+	minimumHourlyCloseGrace = 12 * time.Minute
+	maximumCleanupBatch     = 5000
+)
 
 type Config struct {
 	Enabled             bool
@@ -21,6 +24,10 @@ type Config struct {
 	WindowTTL           time.Duration
 	OutboxRetention     time.Duration
 	ReplayRetention     time.Duration
+	CleanupBatch        int
+	CleanupInterval     time.Duration
+	CleanupMaxDuration  time.Duration
+	CleanupVacuum       bool
 	RedisV2WriteEnabled bool
 }
 
@@ -38,6 +45,10 @@ func DefaultConfig() Config {
 		WindowTTL:           45 * 24 * time.Hour,
 		OutboxRetention:     24 * time.Hour,
 		ReplayRetention:     45 * 24 * time.Hour,
+		CleanupBatch:        500,
+		CleanupInterval:     time.Hour,
+		CleanupMaxDuration:  30 * time.Second,
+		CleanupVacuum:       false,
 		RedisV2WriteEnabled: true,
 	}
 }
@@ -65,6 +76,19 @@ func ConfigFromEnv() Config {
 		envDuration("PM_AGGREGATION_REPLAY_RETENTION", cfg.ReplayRetention),
 		45*24*time.Hour, 90*24*time.Hour,
 	)
+	cfg.CleanupBatch = min(
+		envInt("PM_AGGREGATION_CLEANUP_BATCH", cfg.CleanupBatch),
+		maximumCleanupBatch,
+	)
+	cfg.CleanupInterval = boundedDuration(
+		envDuration("PM_AGGREGATION_CLEANUP_INTERVAL", cfg.CleanupInterval),
+		time.Minute, 24*time.Hour,
+	)
+	cfg.CleanupMaxDuration = boundedDuration(
+		envDuration("PM_AGGREGATION_CLEANUP_MAX_DURATION", cfg.CleanupMaxDuration),
+		time.Second, 5*time.Minute,
+	)
+	cfg.CleanupVacuum = envBool("PM_AGGREGATION_CLEANUP_VACUUM", cfg.CleanupVacuum)
 	cfg.RedisV2WriteEnabled = envBool(
 		"PM_AGGREGATION_REDIS_V2_WRITE_ENABLED", cfg.RedisV2WriteEnabled,
 	)

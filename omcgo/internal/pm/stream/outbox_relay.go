@@ -18,8 +18,6 @@ type OutboxRelay struct {
 	logger          *zap.Logger
 	metrics         *Metrics
 	batch           int
-	outboxRetention time.Duration
-	replayRetention time.Duration
 	redeliveryAfter time.Duration
 	redeliveryEvery time.Duration
 }
@@ -36,19 +34,8 @@ func NewOutboxRelay(repo *OutboxRepository, bus event.EventBus, logger *zap.Logg
 	return &OutboxRelay{
 		repo: repo, bus: bus, interval: 200 * time.Millisecond,
 		logger: logger, batch: 100,
-		outboxRetention: 24 * time.Hour, replayRetention: 45 * 24 * time.Hour,
 		redeliveryAfter: 5 * time.Minute, redeliveryEvery: time.Minute,
 	}
-}
-
-func (r *OutboxRelay) SetRetention(outbox, replay time.Duration) *OutboxRelay {
-	if outbox > 0 {
-		r.outboxRetention = outbox
-	}
-	if replay > 0 {
-		r.replayRetention = replay
-	}
-	return r
 }
 
 func (r *OutboxRelay) SetBatch(batch int) *OutboxRelay {
@@ -61,8 +48,6 @@ func (r *OutboxRelay) SetBatch(batch int) *OutboxRelay {
 func (r *OutboxRelay) Run(ctx context.Context) error {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
-	cleanupTicker := time.NewTicker(time.Hour)
-	defer cleanupTicker.Stop()
 	go runRedeliveryLoop(ctx, r.redeliveryEvery, func() {
 		r.requeueStale(ctx)
 	})
@@ -80,16 +65,6 @@ func (r *OutboxRelay) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-cleanupTicker.C:
-			now := time.Now().UTC()
-			if err := r.repo.DeletePublishedBefore(
-				ctx, now.Add(-r.outboxRetention), now.Add(-r.replayRetention),
-			); err != nil {
-				r.logger.Warn("cleanup PM aggregation outbox", zap.Error(err))
-			}
-			if err := r.repo.DeleteReplayBefore(ctx, now.Add(-r.replayRetention)); err != nil {
-				r.logger.Warn("cleanup PM aggregation replay sources", zap.Error(err))
-			}
 		case <-ticker.C:
 		}
 	}

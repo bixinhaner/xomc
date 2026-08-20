@@ -17,8 +17,26 @@ func TestDefaultConfigUsesTwelveMinuteHourlyCloseGrace(t *testing.T) {
 	require.Equal(t, 32, cfg.FinalizeConcurrency)
 	require.Equal(t, 24*time.Hour, cfg.OutboxRetention)
 	require.Equal(t, 45*24*time.Hour, cfg.ReplayRetention)
+	require.Equal(t, 500, cfg.CleanupBatch)
+	require.Equal(t, time.Hour, cfg.CleanupInterval)
+	require.Equal(t, 30*time.Second, cfg.CleanupMaxDuration)
+	require.False(t, cfg.CleanupVacuum)
 	require.True(t, cfg.RedisV2WriteEnabled,
 		"new releases must use compact v2 Redis state by default")
+}
+
+func TestConfigFromEnvBoundsRuntimeCleanup(t *testing.T) {
+	t.Setenv("PM_AGGREGATION_CLEANUP_BATCH", "999999")
+	t.Setenv("PM_AGGREGATION_CLEANUP_INTERVAL", "1s")
+	t.Setenv("PM_AGGREGATION_CLEANUP_MAX_DURATION", "24h")
+	t.Setenv("PM_AGGREGATION_CLEANUP_VACUUM", "true")
+
+	cfg := ConfigFromEnv()
+
+	require.Equal(t, maximumCleanupBatch, cfg.CleanupBatch)
+	require.Equal(t, time.Minute, cfg.CleanupInterval)
+	require.Equal(t, 5*time.Minute, cfg.CleanupMaxDuration)
+	require.True(t, cfg.CleanupVacuum)
 }
 
 func TestConfigFromEnvCanDisableRedisV2WritesForRollback(t *testing.T) {
