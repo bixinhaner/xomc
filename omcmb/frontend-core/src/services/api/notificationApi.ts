@@ -11,6 +11,10 @@ import type {
   NotificationChannel,
   NotificationLanguage,
   NotificationHistoryStatus,
+  EmailRunHistory,
+  EmailRunDeliveryHistory,
+  EmailRunHistoryListParams,
+  EmailRunHistoryListResponse,
 } from '../../types/notification';
 
 // ---------------------------------------------------------------------------
@@ -51,6 +55,38 @@ interface BackendListResponse<T> {
   page: number;
   page_size: number;
   total_pages?: number;
+}
+
+interface BackendEmailRunHistory {
+  id: string;
+  business_type: 'alarm' | 'kpi';
+  template_name: string;
+  period?: string;
+  scheduled_at: string;
+  started_at?: string;
+  finished_at?: string;
+  job_attempt: number;
+  window_start: string;
+  window_end: string;
+  status: EmailRunHistory['status'];
+  subject?: string;
+  last_error?: string;
+  recipient_count: number;
+  sent_count: number;
+  failed_count: number;
+  total_attempts: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface BackendEmailRunDeliveryHistory {
+  id: string;
+  recipient: string;
+  status: EmailRunDeliveryHistory['status'];
+  attempt: number;
+  last_error?: string;
+  sent_at?: string;
+  updated_at: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +161,30 @@ function mapHistoryList(
     total: resp.total,
     page: resp.page,
     pageSize: resp.page_size,
+  };
+}
+
+function mapEmailRun(item: BackendEmailRunHistory): EmailRunHistory {
+  return {
+    id: item.id,
+    businessType: item.business_type,
+    templateName: item.template_name,
+    period: item.period,
+    scheduledAt: item.scheduled_at,
+    startedAt: item.started_at,
+    finishedAt: item.finished_at,
+    jobAttempt: item.job_attempt ?? 0,
+    windowStart: item.window_start,
+    windowEnd: item.window_end,
+    status: item.status,
+    subject: item.subject,
+    lastError: item.last_error,
+    recipientCount: item.recipient_count,
+    sentCount: item.sent_count,
+    failedCount: item.failed_count,
+    totalAttempts: item.total_attempts,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
   };
 }
 
@@ -237,5 +297,40 @@ export const notificationHistoryApi = {
     } catch {
       return null;
     }
+  },
+};
+
+export const emailRunHistoryApi = {
+  async list(params: EmailRunHistoryListParams = {}): Promise<EmailRunHistoryListResponse> {
+    const query: Record<string, unknown> = {};
+    if (params.businessType) query.business_type = params.businessType;
+    if (params.status) query.status = params.status;
+    if (params.page) query.page = params.page;
+    if (params.pageSize) query.page_size = params.pageSize;
+    const { data } = await http.get<BackendListResponse<BackendEmailRunHistory>>(
+      '/notifications/email-runs',
+      { params: query }
+    );
+    return {
+      items: (data.items ?? []).map(mapEmailRun),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
+  },
+
+  async deliveries(businessType: 'alarm' | 'kpi', runId: string): Promise<EmailRunDeliveryHistory[]> {
+    const { data } = await http.get<{ items: BackendEmailRunDeliveryHistory[] }>(
+      `/notifications/email-runs/${businessType}/${runId}/deliveries`
+    );
+    return (data.items ?? []).map((item) => ({
+      id: item.id,
+      recipient: item.recipient,
+      status: item.status,
+      attempt: item.attempt,
+      lastError: item.last_error,
+      sentAt: item.sent_at,
+      updatedAt: item.updated_at,
+    }));
   },
 };

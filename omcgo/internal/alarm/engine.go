@@ -253,6 +253,12 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) (err erro
 				e.logger.Warn("publish alarm.raised failed", zap.Error(pubErr))
 			}
 		}
+		emailEvt, err := event.NewEvent(event.SubjectAlarmEmailRaised, alarm)
+		if err == nil {
+			if pubErr := e.eventBus.Publish(ctx, event.SubjectAlarmEmailRaised, emailEvt); pubErr != nil {
+				e.logger.Warn("publish alarm.email.raised failed", zap.Error(pubErr))
+			}
+		}
 	}
 
 	e.logger.Info("new alarm raised",
@@ -302,6 +308,12 @@ func (e *AlarmEngine) Acknowledge(ctx context.Context, alarmID uuid.UUID, by str
 
 // Clear marks an alarm as cleared, archives to history, and removes from active.
 func (e *AlarmEngine) Clear(ctx context.Context, alarmID uuid.UUID) error {
+	return e.clearByOperator(ctx, alarmID, "", "")
+}
+
+// clearByOperator clears an alarm through the complete lifecycle while
+// preserving the operator metadata supplied by the batch-clear API.
+func (e *AlarmEngine) clearByOperator(ctx context.Context, alarmID uuid.UUID, by, note string) error {
 	alarm, err := e.store.GetActiveByID(ctx, alarmID)
 	if err != nil {
 		return fmt.Errorf("get alarm: %w", err)
@@ -309,6 +321,10 @@ func (e *AlarmEngine) Clear(ctx context.Context, alarmID uuid.UUID) error {
 
 	if alarm.Status == model.AlarmCleared {
 		return fmt.Errorf("alarm is already cleared")
+	}
+	if by != "" {
+		alarm.ClearedBy = &by
+		alarm.ClearNote = &note
 	}
 
 	return e.clearActiveAlarm(ctx, alarm)
@@ -351,6 +367,12 @@ func (e *AlarmEngine) clearActiveAlarm(ctx context.Context, alarm *model.Alarm) 
 		if err == nil {
 			if pubErr := e.eventBus.Publish(ctx, event.SubjectAlarmCleared, evt); pubErr != nil {
 				e.logger.Warn("publish alarm.cleared event", zap.Error(pubErr))
+			}
+		}
+		emailEvt, err := event.NewEvent(event.SubjectAlarmEmailCleared, alarm)
+		if err == nil {
+			if pubErr := e.eventBus.Publish(ctx, event.SubjectAlarmEmailCleared, emailEvt); pubErr != nil {
+				e.logger.Warn("publish alarm.email.cleared event", zap.Error(pubErr))
 			}
 		}
 	}

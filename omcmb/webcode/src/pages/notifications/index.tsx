@@ -4,6 +4,8 @@ import { useTabStore } from '@core/store/tabStore';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
 import MessageList from './MessageList';
+import EmailRunHistoryList from './EmailRunHistoryList';
+import { Tabs } from 'antd';
 
 export default function NotificationsPage() {
   const t = useT();
@@ -22,7 +24,20 @@ export default function NotificationsPage() {
 
   return (
     <ListPageLayout title={t('notification.title')}>
-      <MessageList />
+      <Tabs
+        items={[
+          {
+            key: 'messages',
+            label: t('notification.emailRun.messageTab'),
+            children: <MessageList />,
+          },
+          {
+            key: 'email-runs',
+            label: t('notification.emailRun.tab'),
+            children: <EmailRunHistoryList />,
+          },
+        ]}
+      />
     </ListPageLayout>
   );
 }

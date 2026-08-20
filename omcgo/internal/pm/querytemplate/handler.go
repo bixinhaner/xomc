@@ -14,6 +14,7 @@ import (
 	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/pm/regularreport"
 )
 
 const (
@@ -25,6 +26,7 @@ const (
 type Handler struct {
 	repo                   Repository
 	enabledMetricValidator *EnabledMetricPayloadService
+	deviceScopeValidator   *DeviceScopeValidator
 	logger                 *zap.Logger
 }
 
@@ -38,6 +40,11 @@ func NewHandler(repo Repository, logger *zap.Logger) *Handler {
 
 func (h *Handler) WithEnabledMetricPayloadService(svc *EnabledMetricPayloadService) *Handler {
 	h.enabledMetricValidator = svc
+	return h
+}
+
+func (h *Handler) WithDeviceScopeValidator(validator *DeviceScopeValidator) *Handler {
+	h.deviceScopeValidator = validator
 	return h
 }
 
@@ -201,6 +208,10 @@ func (h *Handler) Create(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
+	if err := h.validateDeviceScope(c, payload, callerID, isSuperAdmin); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
 	req := CreateRequest{
 		Name:        dto.Name,
 		Visibility:  visibility,
@@ -261,6 +272,10 @@ func (h *Handler) Update(c *gin.Context) {
 			commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 			return
 		}
+		if err := h.validateDeviceScope(c, dto.Payload, callerID, isSuperAdmin); err != nil {
+			commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+			return
+		}
 		req.Payload = []byte(dto.Payload)
 	}
 	if dto.Visibility != nil {
@@ -295,6 +310,13 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 	response.OK(c, toDTO(got))
+}
+
+func (h *Handler) validateDeviceScope(c *gin.Context, payload []byte, callerID uuid.UUID, isSuperAdmin bool) error {
+	if h.deviceScopeValidator == nil {
+		return nil
+	}
+	return h.deviceScopeValidator.ValidatePayload(c.Request.Context(), payload, callerID, isSuperAdmin)
 }
 
 // Delete DELETE /pm/query-templates/:id
@@ -376,6 +398,9 @@ func validatePayloadLimits(payload []byte) error {
 	}
 	if count > maxTemplateMetricPaths {
 		return fmt.Errorf("metric_paths exceeds maximum of %d", maxTemplateMetricPaths)
+	}
+	if err := regularreport.ValidatePayload(payload); err != nil {
+		return err
 	}
 	return nil
 }

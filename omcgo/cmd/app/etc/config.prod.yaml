@@ -249,10 +249,11 @@ notification:
     enabled: false              # 配好内网 SMTP 服务器后改 true
     host: ""                    # 内网 SMTP 服务器地址
     port: 25
-    username: ""                # 留空 = 不做 SMTP AUTH
+    security_mode: "none"       # none / starttls / implicit_tls
+    auth_enabled: false
+    username: ""
     password: ""
     from: "omc-alert@example.com"
-    starttls: false             # SMTP 支持 STARTTLS 时改 true
     timeout: 10s
   alert_webhook:
     token: ""                   # 建议生产填随机串，Alertmanager 侧带 Bearer

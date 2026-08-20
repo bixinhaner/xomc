@@ -580,6 +580,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// admin / operator / viewer 一律 403。
 	superAdminGroup := v1.Group("")
 	superAdminGroup.Use(admin.RequireSuperAdmin())
+	if md.emailSettingsHandler != nil {
+		md.emailSettingsHandler.RegisterRoutes(superAdminGroup.Group("/admin"))
+	}
 
 	// ----- T-0098 P3-04: Alarm Definitions routes → super_admin only -----
 	if c.AlarmDefHandler != nil {
@@ -611,6 +614,12 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- Alarm filter rule routes → resource "alarms" -----
 	alarmFilterHandler := alarm.NewFilterHandler(ah.alarmFilterRuleRepo, c.Logger)
 	alarmFilterHandler.RegisterRoutes(featGroup("alarms", "Alarm.View").Group("/alarms/alarm-filters"))
+	alarmEmailHandler := alarm.NewAlarmEmailSubscriptionHandler(
+		ah.alarmEmailRepository,
+		c.PermService,
+		device.NewPgDeviceGroupReader(c.PgPool),
+	)
+	alarmEmailHandler.RegisterRoutes(featGroup("alarms", "Alarm.View"))
 
 	// ----- KPI threshold routes → resource "pm" -----
 	thresholdHandler := pm.NewThresholdHandler(md.thresholdRepo, c.Logger)
@@ -746,6 +755,10 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	notifGroup := featGroup("alarms", "Alarm.View").Group("/notifications")
 	md.notifTemplateHandler.RegisterRoutes(notifGroup)
 	md.notifHistoryHandler.RegisterRoutes(notifGroup)
+	if md.emailRunHistoryHandler != nil {
+		emailRunGroup := featGroup("notifications", "Alarm.View", "Performance.View").Group("/notifications")
+		md.emailRunHistoryHandler.RegisterRoutes(emailRunGroup)
+	}
 
 	// ----- T-0152: Alertmanager 告警 webhook → publicV1（无 JWT）-----
 	// Alertmanager 无法携带 JWT，故挂在无鉴权的 publicV1 上；可选 Bearer token

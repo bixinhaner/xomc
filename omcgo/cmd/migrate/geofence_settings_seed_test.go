@@ -59,7 +59,7 @@ func geofenceSeedBaselineSection(t *testing.T, sql string) string {
 	index := strings.LastIndex(sql, marker)
 	require.NotEqual(t, -1, index)
 	section := sql[index:]
-	end := strings.Index(section, "-- +omcgo MainReconcileEnd")
+	end := strings.Index(section, mainReconcileEnd)
 	require.NotEqual(t, -1, end)
 	return section[:end]
 }

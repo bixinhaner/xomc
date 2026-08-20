@@ -333,6 +333,8 @@ CREATE TABLE public.alarm_definitions (
     event_type integer,
     cn_probable_cause text,
     en_probable_cause text,
+    cn_suggestion text,
+    en_suggestion text,
     is_show boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -20922,6 +20924,10 @@ CREATE INDEX idx_pm_aggregation_task_versions_content_hash
 -- Existing pre-release databases may already record goose version 1 while
 -- missing this consolidated additive block. Keep it idempotent so migrate can
 -- replay it after the seed baseline without rebuilding the database.
+ALTER TABLE public.alarm_definitions
+    ADD COLUMN IF NOT EXISTS cn_suggestion text,
+    ADD COLUMN IF NOT EXISTS en_suggestion text;
+
 CREATE TABLE IF NOT EXISTS public.plug_and_play_policies (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     name varchar(100) NOT NULL,
@@ -21609,6 +21615,178 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_async_jobs_geofence_manual_bind_request
     WHERE job_type = 'geofence_manual_bind'
       AND status IN ('pending', 'running', 'succeeded');
 
+-- Alarm email subscriptions are intentionally separate from alarm_filters.
+-- async_jobs remains the execution queue; alarm_email_runs supplies the
+-- subscription-scoped idempotency key that the generic bucket index cannot.
+CREATE TABLE IF NOT EXISTS public.alarm_email_global_settings (
+    id smallint PRIMARY KEY DEFAULT 1,
+    enabled boolean NOT NULL DEFAULT false,
+    default_recipients text[] NOT NULL DEFAULT '{}',
+    updated_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT alarm_email_global_settings_singleton_check CHECK (id = 1)
+);
+
+INSERT INTO public.alarm_email_global_settings (id, enabled, default_recipients)
+VALUES (1, false, '{}')
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS public.alarm_email_subscriptions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name varchar(128) NOT NULL,
+    description text NOT NULL DEFAULT '',
+    enabled boolean NOT NULL DEFAULT false,
+    interval_minutes smallint NOT NULL DEFAULT 0,
+    tolerance_minutes smallint NOT NULL DEFAULT 0,
+    recipients text[] NOT NULL DEFAULT '{}',
+    include_default_recipients boolean NOT NULL DEFAULT true,
+    alarm_identifiers text[] NOT NULL DEFAULT '{}',
+    severities smallint[] NOT NULL DEFAULT '{}',
+    alarm_sources text[] NOT NULL DEFAULT '{}',
+    event_types text[] NOT NULL DEFAULT '{}',
+    device_ids uuid[] NOT NULL DEFAULT '{}',
+    device_group_ids uuid[] NOT NULL DEFAULT '{}',
+    created_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
+    updated_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    deleted_at timestamptz,
+    legacy_filter_id uuid,
+    CONSTRAINT alarm_email_subscriptions_interval_check
+        CHECK (interval_minutes IN (0, 10, 30, 60)),
+    CONSTRAINT alarm_email_subscriptions_tolerance_check
+        CHECK (tolerance_minutes IN (0, 10, 30, 60))
+);
+
+ALTER TABLE public.alarm_email_subscriptions
+    ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+ALTER TABLE public.alarm_email_subscriptions
+    ADD COLUMN IF NOT EXISTS legacy_filter_id uuid;
+ALTER TABLE public.alarm_email_subscriptions
+    DROP CONSTRAINT IF EXISTS alarm_email_subscriptions_name_key;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_alarm_email_subscriptions_active_name
+    ON public.alarm_email_subscriptions (lower(name))
+    WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_alarm_email_subscriptions_legacy_filter
+    ON public.alarm_email_subscriptions (legacy_filter_id)
+    WHERE legacy_filter_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_alarm_email_subscriptions_enabled_interval
+    ON public.alarm_email_subscriptions (enabled, interval_minutes);
+CREATE INDEX IF NOT EXISTS idx_alarm_email_subscriptions_alarm_identifiers
+    ON public.alarm_email_subscriptions USING gin (alarm_identifiers);
+CREATE INDEX IF NOT EXISTS idx_alarm_email_subscriptions_device_ids
+    ON public.alarm_email_subscriptions USING gin (device_ids);
+CREATE INDEX IF NOT EXISTS idx_alarm_email_subscriptions_device_group_ids
+    ON public.alarm_email_subscriptions USING gin (device_group_ids);
+
+CREATE TABLE IF NOT EXISTS public.alarm_email_runs (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    subscription_id uuid NOT NULL
+        REFERENCES public.alarm_email_subscriptions(id) ON DELETE RESTRICT,
+    async_job_id uuid NOT NULL UNIQUE
+        REFERENCES public.async_jobs(id) ON DELETE RESTRICT,
+    window_start timestamptz NOT NULL,
+    window_end timestamptz NOT NULL,
+    status varchar(24) NOT NULL DEFAULT 'pending',
+    subscription_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+    recipients_snapshot text[] NOT NULL DEFAULT '{}',
+    subject text,
+    body_summary text,
+    last_error text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT alarm_email_runs_window_check CHECK (window_start < window_end),
+    CONSTRAINT alarm_email_runs_status_check
+        CHECK (status IN ('pending', 'processing', 'sent', 'partial_failed', 'failed')),
+    CONSTRAINT uq_alarm_email_runs_subscription_window
+        UNIQUE (subscription_id, window_start, window_end)
+);
+
+ALTER TABLE public.alarm_email_runs
+    ADD COLUMN IF NOT EXISTS subscription_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE public.alarm_email_runs
+    ADD COLUMN IF NOT EXISTS recipients_snapshot text[] NOT NULL DEFAULT '{}';
+
+CREATE INDEX IF NOT EXISTS idx_alarm_email_runs_status_created
+    ON public.alarm_email_runs (status, created_at);
+
+CREATE TABLE IF NOT EXISTS public.alarm_email_deliveries (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id uuid NOT NULL REFERENCES public.alarm_email_runs(id) ON DELETE CASCADE,
+    recipient text NOT NULL,
+    status varchar(16) NOT NULL DEFAULT 'pending',
+    attempt integer NOT NULL DEFAULT 0,
+    last_error text,
+    sent_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT alarm_email_deliveries_status_check
+        CHECK (status IN ('pending', 'processing', 'sent', 'failed')),
+    CONSTRAINT alarm_email_deliveries_attempt_check CHECK (attempt >= 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_alarm_email_deliveries_run_recipient
+    ON public.alarm_email_deliveries (run_id, lower(recipient));
+CREATE INDEX IF NOT EXISTS idx_alarm_email_deliveries_run_status
+    ON public.alarm_email_deliveries (run_id, status);
+
+-- KPI Regular Report configuration is stored with the query template payload.
+-- These tables keep one immutable scheduled run and one delivery row per
+-- recipient, while pm_kpi_export_tasks remains the canonical CSV generator.
+CREATE TABLE IF NOT EXISTS public.pm_kpi_report_runs (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    template_id uuid REFERENCES public.pm_query_templates(id) ON DELETE SET NULL,
+    template_name varchar(128) NOT NULL,
+    creator_id uuid NOT NULL,
+    period varchar(16) NOT NULL,
+    scheduled_at timestamptz NOT NULL,
+    window_start timestamptz NOT NULL,
+    window_end timestamptz NOT NULL,
+    export_task_id uuid NOT NULL UNIQUE
+        REFERENCES public.pm_kpi_export_tasks(id) ON DELETE RESTRICT,
+    async_job_id uuid NOT NULL UNIQUE
+        REFERENCES public.async_jobs(id) ON DELETE RESTRICT,
+    status varchar(24) NOT NULL DEFAULT 'pending',
+    subject text,
+    last_error text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT pm_kpi_report_runs_period_check
+        CHECK (period IN ('15min', 'hourly', 'daily')),
+    CONSTRAINT pm_kpi_report_runs_window_check CHECK (window_start < window_end),
+    CONSTRAINT pm_kpi_report_runs_status_check
+        CHECK (status IN ('pending', 'processing', 'sent', 'partial_failed', 'failed')),
+    CONSTRAINT uq_pm_kpi_report_runs_template_schedule_period
+        UNIQUE (template_id, scheduled_at, period)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pm_kpi_report_runs_status_created
+    ON public.pm_kpi_report_runs (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_pm_kpi_report_runs_creator_created
+    ON public.pm_kpi_report_runs (creator_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.pm_kpi_report_deliveries (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id uuid NOT NULL REFERENCES public.pm_kpi_report_runs(id) ON DELETE CASCADE,
+    recipient text NOT NULL,
+    status varchar(16) NOT NULL DEFAULT 'pending',
+    attempt integer NOT NULL DEFAULT 0,
+    last_error text,
+    sent_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT pm_kpi_report_deliveries_status_check
+        CHECK (status IN ('pending', 'sent', 'failed')),
+    CONSTRAINT pm_kpi_report_deliveries_attempt_check CHECK (attempt >= 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pm_kpi_report_deliveries_run_recipient
+    ON public.pm_kpi_report_deliveries (run_id, lower(recipient));
+CREATE INDEX IF NOT EXISTS idx_pm_kpi_report_deliveries_run_status
+    ON public.pm_kpi_report_deliveries (run_id, status);
+
 -- +goose StatementBegin
 DO $$
 DECLARE
@@ -21625,12 +21803,50 @@ BEGIN
         'public.event_outbox',
         'public.geofence_evaluations',
         'public.geofence_batch_items',
-        'public.third_party_location_batches'
+        'public.third_party_location_batches',
+        'public.alarm_email_global_settings',
+        'public.alarm_email_subscriptions',
+        'public.alarm_email_runs',
+        'public.alarm_email_deliveries',
+        'public.pm_kpi_report_runs',
+        'public.pm_kpi_report_deliveries'
     ] LOOP
         IF to_regclass(required_relation) IS NULL THEN
             RAISE EXCEPTION 'main baseline reconcile missing relation %', required_relation;
         END IF;
     END LOOP;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'pm_kpi_report_runs'
+          AND column_name = 'creator_id'
+    ) THEN
+        RAISE EXCEPTION 'main baseline reconcile missing pm_kpi_report_runs.creator_id';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'alarm_email_runs'
+          AND column_name = 'subscription_snapshot'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'alarm_email_runs'
+          AND column_name = 'recipients_snapshot'
+    ) THEN
+        RAISE EXCEPTION 'main baseline reconcile missing alarm email run snapshots';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'alarm_email_subscriptions'
+          AND column_name = 'legacy_filter_id'
+    ) THEN
+        RAISE EXCEPTION 'main baseline reconcile missing legacy alarm email linkage';
+    END IF;
 
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns

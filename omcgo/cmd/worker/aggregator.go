@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	pmexport "github.com/omcgo/omcgo/internal/pm/export"
@@ -27,8 +28,9 @@ func startPMAggregatorPipeline(
 	kpiRouter *router.Router,
 	tz *tzManager,
 	exportBucket string,
+	smtpConfig appconfig.SMTPConfig,
 ) {
-	startPMExportOnly(ctx, w, kpiRouter, tz, exportBucket)
+	startPMExportOnly(ctx, w, kpiRouter, tz, exportBucket, smtpConfig)
 }
 
 // runJobTypeWorker 单 JobType 内串行循环 RunNext。

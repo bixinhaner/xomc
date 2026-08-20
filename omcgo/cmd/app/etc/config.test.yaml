@@ -212,10 +212,11 @@ notification:
     enabled: false
     host: ""
     port: 25
+    security_mode: "none"
+    auth_enabled: false
     username: ""
     password: ""
     from: "omc-alert@example.com"
-    starttls: false
     timeout: 10s
   alert_webhook:
     token: ""

@@ -3,8 +3,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"os"
-	"strconv"
 
 	"github.com/omcgo/omcgo/internal/alarm"
 	alarmdef "github.com/omcgo/omcgo/internal/alarm/definition"
@@ -20,7 +18,7 @@ func initAlarmModule(c *Container) error {
 
 	alarmRedisStore := alarm.NewRedisAlarmStore(c.Redis)
 	alarmPgStore := alarm.NewPgAlarmStore(c.PgPool, c.TsPool)
-	
+
 	alarmReconciler := alarm.NewReconciler(c.PgPool, alarmRedisStore, logger)
 	alarmReconciler.Start()
 	c.GS.Register("alarm-reconciler", 2, func(ctx context.Context) error {
@@ -52,6 +50,7 @@ func initAlarmModule(c *Container) error {
 
 	// 过滤规则仓储
 	alarmFilterRuleRepo := alarm.NewPgAlarmFilterRuleRepository(c.PgPool)
+	alarmEmailRepository := alarm.NewPgAlarmEmailRepository(c.PgPool)
 
 	// W2 T-0011: webhook 派发器（含 retry / HMAC / dead-letter）+ 死信仓储 + 过滤引擎
 	webhookMetrics := alarm.NewWebhookMetrics(c.MetricsReg)
@@ -59,16 +58,6 @@ func initAlarmModule(c *Container) error {
 	deadLetterRepo := alarm.NewPgDeadLetterRepository(c.PgPool)
 	filterEngine := alarm.NewFilterEngine(alarmFilterRuleRepo, alarmPgStore, webhookDispatcher, deadLetterRepo, webhookMetrics, logger.Named("filter"))
 	filterEngine.SetDeviceGroupResolver(alarm.NewPgDeviceGroupResolver(c.PgPool))
-
-	// W2.A.1 / T-0007 整合: SMTP 邮件派发器（实现 EmailDispatcher 接口）。
-	// 配置从环境变量读取（OMC_SMTP_HOST/PORT/USERNAME/PASSWORD/FROM/USE_TLS/USE_STARTTLS）。
-	// 配置缺失时仍创建 dispatcher（dispatch 时会因空 host 拨号失败，进 metric=failure），
-	// 这样 filter_engine 永远走 SMTPEmailDispatcher 而非 noop，保证生产可观测性。
-	// 后续 task 把 SMTP 配置接入 appconfig YAML（替换本处 env 读取）。
-	emailMetrics := alarm.NewEmailMetrics(c.MetricsReg)
-	emailCfg := loadEmailConfigFromEnv()
-	emailDispatcher := alarm.NewSMTPEmailDispatcher(emailCfg, logger.Named("email"), emailMetrics)
-	filterEngine.SetEmailDispatcher(emailDispatcher)
 
 	// issue #67：告警字典在 alarmdef 模块（Depends=dictload）才装配，晚于本模块。
 	// 沿用 AlarmSyncProcessor 的后置注入约定——若此刻 Registry 已就绪先注入，
@@ -100,6 +89,7 @@ func initAlarmModule(c *Container) error {
 	c.alarmHandlerDeps = &alarmHandlerDeps{
 		alarmPgStore:          alarmPgStore,
 		alarmFilterRuleRepo:   alarmFilterRuleRepo,
+		alarmEmailRepository:  alarmEmailRepository,
 		dataPermissionChecker: dataPermissionChecker,
 		alarmSyncService:      alarmSyncService,
 	}
@@ -111,22 +101,7 @@ func initAlarmModule(c *Container) error {
 type alarmHandlerDeps struct {
 	alarmPgStore          *alarm.PgAlarmStore
 	alarmFilterRuleRepo   *alarm.PgAlarmFilterRuleRepository
+	alarmEmailRepository  *alarm.PgAlarmEmailRepository
 	dataPermissionChecker *alarm.DataPermissionChecker
 	alarmSyncService      *alarm.AlarmSyncService
-}
-
-// loadEmailConfigFromEnv 从 OMC_SMTP_* 环境变量读 SMTP 配置（W2.A.1/T-0007）。
-// 未设置 → 返回零值 EmailConfig（拨号会失败但不 panic，便于 dev / test 环境）。
-// 后续把整段读取迁移到 appconfig.yaml 时替换本函数为 cfg.AppConfig.Email 即可。
-func loadEmailConfigFromEnv() alarm.EmailConfig {
-	port, _ := strconv.Atoi(os.Getenv("OMC_SMTP_PORT")) // 解析失败 → 0，dispatch 时返错
-	return alarm.EmailConfig{
-		Host:        os.Getenv("OMC_SMTP_HOST"),
-		Port:        port,
-		Username:    os.Getenv("OMC_SMTP_USERNAME"),
-		Password:    os.Getenv("OMC_SMTP_PASSWORD"),
-		From:        os.Getenv("OMC_SMTP_FROM"),
-		UseTLS:      os.Getenv("OMC_SMTP_USE_TLS") == "true",
-		UseSTARTTLS: os.Getenv("OMC_SMTP_USE_STARTTLS") == "true",
-	}
 }

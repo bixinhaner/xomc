@@ -206,6 +206,46 @@ func TestCreate_PrivateByNormalUser_OK(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rr.Code)
 }
 
+func TestCreate_RejectsInvalidRegularReportConfiguration(t *testing.T) {
+	alice := uuid.New()
+	r := setupRouter(newStubRepo(), alice, false)
+	rr := doJSON(t, r, http.MethodPost, "/api/v1/pm/query-templates", map[string]any{
+		"name":       "bad-report",
+		"visibility": "private",
+		"payload": map[string]any{
+			"device_sns":   []string{"SN-1"},
+			"metric_paths": []string{"K1"},
+			"regular_report": map[string]any{
+				"enabled": true, "send_time": "08:30", "periods": []string{"daily"},
+				"email_enabled": true, "recipients": []string{},
+			},
+		},
+	})
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "recipients")
+}
+
+func TestCreate_RejectsRegularReportWithoutMetrics(t *testing.T) {
+	alice := uuid.New()
+	r := setupRouter(newStubRepo(), alice, false)
+	rr := doJSON(t, r, http.MethodPost, "/api/v1/pm/query-templates", map[string]any{
+		"name":       "report-without-metrics",
+		"visibility": "private",
+		"payload": map[string]any{
+			"device_sns":   []string{"SN-1"},
+			"metric_paths": []string{},
+			"regular_report": map[string]any{
+				"enabled": true, "send_time": "08:30", "periods": []string{"daily"},
+				"email_enabled": true, "recipients": []string{"ops@example.com"},
+			},
+		},
+	})
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "metric_path")
+}
+
 func TestCreate_RejectsPayloadWithTooManyDevices(t *testing.T) {
 	alice := uuid.New()
 	r := setupRouter(newStubRepo(), alice, false)

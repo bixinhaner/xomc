@@ -3,20 +3,28 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/alarm"
+	"github.com/omcgo/omcgo/internal/authz"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/geofence"
+	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	pmexport "github.com/omcgo/omcgo/internal/pm/export"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	pmmetrics "github.com/omcgo/omcgo/internal/pm/metrics"
+	"github.com/omcgo/omcgo/internal/pm/regularreport"
 	"github.com/omcgo/omcgo/internal/pm/resultnorm"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
+	"github.com/omcgo/omcgo/internal/topology"
 	"go.uber.org/zap"
 )
 
@@ -296,6 +304,7 @@ func startPMExportOnly(
 	kpiRouter *router.Router,
 	tz *tzManager,
 	exportBucket string,
+	smtpConfig appconfig.SMTPConfig,
 ) {
 	logger := w.Logger.Named("pm-export")
 	aggr := aggregator.NewWithPool(w.TsPool, kpiRouter, logger)
@@ -314,8 +323,9 @@ func startPMExportOnly(
 	registry := asyncjob.NewRegistry(jobRepo, buildLockOwner(), logger)
 	asyncMetrics := asyncjob.NewMetrics(w.MetricsReg)
 	registry.SetMetrics(asyncMetrics)
+	exportRepository := pmexport.NewPgRepository(w.PgPool)
 	exportRunner := pmexport.NewRunner(pmexport.RunnerDeps{
-		Repo: pmexport.NewPgRepository(w.PgPool), Aggr: aggr,
+		Repo: exportRepository, Aggr: aggr,
 		MetricDB: w.TsPool, AdhocDB: w.TsPool, TaskMetaDB: w.PgPool,
 		Uploader: w.MinIO, Bucket: exportBucket, Logger: logger,
 		TimezoneProvider: exportTimezoneProvider(tz),
@@ -323,6 +333,65 @@ func startPMExportOnly(
 	})
 	registry.Register(exportRunner)
 	go runJobTypeWorker(ctx, registry, exportRunner.JobType(), logger)
+	alarmEmailRepository := alarm.NewPgAlarmEmailRepository(w.PgPool)
+	omcName := "OMC"
+	if row, err := sysConfig.GetByKey(ctx, "basic", "mrOMCName"); err == nil {
+		if configuredName := strings.TrimSpace(row.Value); configuredName != "" {
+			omcName = configuredName
+		}
+	} else if !errors.Is(err, commonerrors.ErrNotFound) {
+		logger.Warn("load OMC name for alarm email", zap.Error(err))
+	}
+	emailSender := notification.NewDynamicEmailSender(
+		workerNotificationSMTPStore{repo: sysConfig},
+		smtpOptionsFromWorkerConfig(smtpConfig),
+		logger.Named("email"),
+	)
+	alarmEmailRunner := alarm.NewAlarmEmailJobRunner(
+		alarmEmailRepository,
+		alarm.NewPgAlarmEmailReader(w.PgPool, w.TsPool),
+		emailSender,
+		omcName,
+		tz.Current(),
+		logger,
+	)
+	runtimeScopeAuthorizer := authz.NewRuntimeDeviceScopeAuthorizer(
+		admin.NewPgUserRepository(w.PgPool),
+		admin.NewPermissionService(
+			admin.NewPgRoleRepository(w.PgPool),
+			topology.NewPgDeviceGroupRepository(w.PgPool),
+			w.Redis,
+			logger.Named("email-runtime-authz"),
+		),
+		device.NewPgDeviceGroupReader(w.PgPool),
+		device.NewPgDeviceRepository(w.PgPool),
+	)
+	alarmEmailRunner.SetLocationProvider(tz.Current)
+	alarmEmailRunner.SetScopeAuthorizer(runtimeScopeAuthorizer)
+	registry.Register(alarmEmailRunner)
+	go runJobTypeWorker(ctx, registry, alarmEmailRunner.JobType(), logger.Named("alarm-email"))
+	go alarm.NewAlarmEmailScheduler(alarmEmailRepository, logger).Run(ctx, time.Minute)
+	if err := alarm.NewAlarmEmailRealtimeSubscriber(alarmEmailRepository, logger).Subscribe(w.EventBus); err != nil {
+		logger.Warn("subscribe realtime alarm email", zap.Error(err))
+	}
+	kpiReportRepository := regularreport.NewPgRepository(w.PgPool)
+	kpiReportRunner := regularreport.NewRunner(
+		kpiReportRepository,
+		exportRepository,
+		exportRunner,
+		regularreport.NewMinIOAttachmentStore(w.MinIO),
+		emailSender,
+		omcName,
+		tz.Current,
+		logger,
+	)
+	kpiReportRunner.SetScopeAuthorizer(runtimeScopeAuthorizer)
+	registry.Register(kpiReportRunner)
+	go runJobTypeWorker(ctx, registry, kpiReportRunner.JobType(), logger.Named("kpi-regular-report"))
+	pmReadiness := pmstream.ConfigFromEnv()
+	go regularreport.NewScheduler(kpiReportRepository, tz.Current, logger).
+		SetReadinessGrace(pmReadiness.CloseGrace, pmReadiness.DailyCloseGrace).
+		Run(ctx, time.Minute)
 	geofenceRepository := geofence.NewPgRepository(w.PgPool)
 	geofenceMetrics := geofence.NewBatchMetrics(w.MetricsReg)
 	geofenceRunner := registerGeofenceManualBindRunner(

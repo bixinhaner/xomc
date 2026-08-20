@@ -161,6 +161,9 @@ func (c *WorkerConfig) Validate() error {
 	if err := c.ParamSync.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := c.Notification.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if err := c.MinIO.Buckets.validateConfigBackup(); err != nil {
 		errs = append(errs, err.Error())
 	}
@@ -310,6 +313,19 @@ func (c NotificationConfig) validate() error {
 		}
 		if c.SMTP.From == "" {
 			return fmt.Errorf("notification.smtp.from must not be empty when smtp.enabled=true")
+		}
+		switch c.SMTP.SecurityMode {
+		case "", "none", "starttls", "implicit_tls":
+		default:
+			return fmt.Errorf("notification.smtp.security_mode must be one of none, starttls, implicit_tls, got %q", c.SMTP.SecurityMode)
+		}
+		if c.SMTP.AuthEnabled {
+			if c.SMTP.Username == "" {
+				return fmt.Errorf("notification.smtp.username must not be empty when smtp.auth_enabled=true")
+			}
+			if c.SMTP.Password == "" {
+				return fmt.Errorf("notification.smtp.password must not be empty when smtp.auth_enabled=true")
+			}
 		}
 	}
 	return nil

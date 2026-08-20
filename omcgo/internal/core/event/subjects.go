@@ -284,6 +284,13 @@ const (
 	// 发布者：alarm.AlarmEngine，订阅者：北向接口模块
 	SubjectAlarmCleared = "alarm.cleared"
 
+	// SubjectAlarmEmailRaised / SubjectAlarmEmailCleared 是邮件实时订阅的
+	// 专用工作队列主题。ALARM stream 使用 WorkQueuePolicy，不同业务消费者
+	// 不能同时过滤 alarm.raised / alarm.cleared；专用主题避免邮件与北向推送
+	// 互相竞争同一条生命周期事件。
+	SubjectAlarmEmailRaised  = "alarm.email.raised"
+	SubjectAlarmEmailCleared = "alarm.email.cleared"
+
 	// SubjectAlarmAcknowledged 是告警被确认时发布。
 	// 发布者：alarm.AlarmEngine，订阅者：暂无
 	SubjectAlarmAcknowledged = "alarm.acknowledged"

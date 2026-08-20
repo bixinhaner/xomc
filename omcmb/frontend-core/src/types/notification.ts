@@ -97,3 +97,57 @@ export interface NotificationHistoryListResponse {
   page: number;
   pageSize: number;
 }
+
+export type EmailRunBusinessType = 'alarm' | 'kpi';
+export type EmailRunStatus =
+  | 'pending'
+  | 'processing'
+  | 'sent'
+  | 'partial_failed'
+  | 'failed';
+
+export interface EmailRunHistory {
+  id: string;
+  businessType: EmailRunBusinessType;
+  templateName: string;
+  period?: string;
+  scheduledAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  jobAttempt: number;
+  windowStart: string;
+  windowEnd: string;
+  status: EmailRunStatus;
+  subject?: string;
+  lastError?: string;
+  recipientCount: number;
+  sentCount: number;
+  failedCount: number;
+  totalAttempts: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EmailRunDeliveryHistory {
+  id: string;
+  recipient: string;
+  status: 'pending' | 'processing' | 'sent' | 'failed';
+  attempt: number;
+  lastError?: string;
+  sentAt?: string;
+  updatedAt: string;
+}
+
+export interface EmailRunHistoryListParams {
+  businessType?: EmailRunBusinessType;
+  status?: EmailRunStatus;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface EmailRunHistoryListResponse {
+  items: EmailRunHistory[];
+  total: number;
+  page: number;
+  pageSize: number;
+}

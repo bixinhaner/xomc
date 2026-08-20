@@ -23,6 +23,7 @@ import PmRetentionSection from './PmRetentionSection';
 import RetentionBackpressureSection from './RetentionBackpressureSection';
 import GeofenceSystemSettings from './GeofenceSystemSettings';
 import UICustomSection from './UICustomSection';
+import NotificationSettings from './NotificationSettings';
 import {
   useSysConfigsByCategory,
   useBatchUpdateSysConfigs,
@@ -36,16 +37,17 @@ import { useUserStore } from '@core/store/userStore';
 import styles from './SystemConfig.module.css';
 
 // 设置子页签类型（v1.0：移除 sas / ldap，参 omgo/docs/prd/system/config.md）
-// notify tab 已隐藏（#781）：邮件/短信后端未真实打通前不展示，避免误导用户
+// 邮件通知已接真实 SMTP 后端；短信仍不在本期范围。
 // omc tab 已隐藏（#802）：rsyslog/磁盘告警后端未实现，两个卡片均为空壳
 // northbound tab 已隐藏（#820）：北向功能未完成（用户管理 Mock 数据、服务信息无 DB 记录），待完成后恢复
-type SettingsTab = 'basic' | 'security' | 'device' | 'storage' | 'acs_transfer' | 'agent' | 'geofence' | 'pm_retention' | 'retention_bp' | 'ui_custom';
+type SettingsTab = 'basic' | 'security' | 'device' | 'notification.email' | 'storage' | 'acs_transfer' | 'agent' | 'geofence' | 'pm_retention' | 'retention_bp' | 'ui_custom';
 
 // 设置子页签配置
 const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
   { key: 'basic', labelKey: 'system.config.basic' },
   { key: 'security', labelKey: 'system.config.security' },
   { key: 'device', labelKey: 'system.config.device' },
+  { key: 'notification.email', labelKey: 'system.config.notify' },
   { key: 'storage', labelKey: 'system.config.storage' },
   { key: 'acs_transfer', labelKey: 'system.config.acsTransfer' },
   { key: 'agent', labelKey: 'system.config.agent' },
@@ -107,9 +109,9 @@ export default function SystemConfig() {
   const visibleApplyBatch = isApplyBatchForCategory(applyBatch, activeTab) ? applyBatch : null;
 
   useEffect(() => {
-    setActiveTab(requestedTab);
+    setActiveTab(requestedTab === 'notification.email' && !isSuperAdmin ? 'basic' : requestedTab);
     setSubmittedBatch(null);
-  }, [requestedTab]);
+  }, [isSuperAdmin, requestedTab]);
 
   // 各设置模块的表单实例
   const [basicForm] = Form.useForm();
@@ -235,6 +237,8 @@ export default function SystemConfig() {
         return <DeviceSettings form={deviceForm} />;
       case 'storage':
         return <StorageSettings form={storageForm} />;
+      case 'notification.email':
+        return isSuperAdmin ? <NotificationSettings /> : null;
       case 'acs_transfer':
 		return <TransferSettings form={transferForm} />;
       case 'agent':
@@ -257,7 +261,7 @@ export default function SystemConfig() {
 
   // Tabs 配置
   const tabItems = settingsTabs
-    .filter((tab) => tab.key !== 'geofence' || isSuperAdmin)
+    .filter((tab) => !['geofence', 'notification.email'].includes(tab.key) || isSuperAdmin)
     .map((tab) => ({
       key: tab.key,
       label: t(tab.labelKey),

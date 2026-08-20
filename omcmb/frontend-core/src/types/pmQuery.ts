@@ -15,6 +15,15 @@
 import type { Granularity } from './pmDashboard';
 
 export type TemplateVisibility = 'public' | 'private';
+export type RegularReportPeriod = '15min' | 'hourly' | 'daily';
+
+export interface RegularReportConfig {
+  enabled: boolean;
+  sendTime: string;
+  periods: RegularReportPeriod[];
+  emailEnabled: boolean;
+  recipients: string[];
+}
 
 // 时间窗预设：前端选预设后转 RFC3339 区间下发后端，预设原值仍保留方便回显。
 export type TimeRangePreset = 'last_1h' | 'last_3h' | 'last_24h' | 'last_7d' | 'last_30d' | 'last_6m' | 'custom';
@@ -30,6 +39,7 @@ export interface QueryTemplatePayload {
   absoluteEnd?: string;
   // 设备类型（影响 indicator picker 筛选）
   deviceType?: 'ENB' | 'GNB' | 'GSM';
+  regularReport?: RegularReportConfig;
 }
 
 // 前端域模型
@@ -86,6 +96,13 @@ interface BackendPayload {
   absolute_start?: string;
   absolute_end?: string;
   device_type?: string;
+  regular_report?: {
+    enabled?: boolean;
+    send_time?: string;
+    periods?: string[];
+    email_enabled?: boolean;
+    recipients?: string[];
+  };
 }
 
 function mapPayload(p: Record<string, unknown> | null | undefined): QueryTemplatePayload {
@@ -98,6 +115,13 @@ function mapPayload(p: Record<string, unknown> | null | undefined): QueryTemplat
     absoluteStart: b.absolute_start,
     absoluteEnd: b.absolute_end,
     deviceType: b.device_type as 'ENB' | 'GNB' | 'GSM' | undefined,
+    regularReport: {
+      enabled: b.regular_report?.enabled ?? false,
+      sendTime: b.regular_report?.send_time ?? '08:00',
+      periods: (b.regular_report?.periods ?? ['daily']) as RegularReportPeriod[],
+      emailEnabled: b.regular_report?.email_enabled ?? true,
+      recipients: b.regular_report?.recipients ?? [],
+    },
   };
 }
 
@@ -110,6 +134,13 @@ function payloadToBackend(p: QueryTemplatePayload): BackendPayload {
     absolute_start: p.absoluteStart,
     absolute_end: p.absoluteEnd,
     device_type: p.deviceType,
+    regular_report: {
+      enabled: p.regularReport?.enabled ?? false,
+      send_time: p.regularReport?.sendTime ?? '08:00',
+      periods: p.regularReport?.periods ?? ['daily'],
+      email_enabled: p.regularReport?.emailEnabled ?? true,
+      recipients: p.regularReport?.recipients ?? [],
+    },
   };
 }
 

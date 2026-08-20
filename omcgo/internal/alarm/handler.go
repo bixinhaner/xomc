@@ -2,6 +2,7 @@ package alarm
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -58,7 +59,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	{
 		alarms.GET("/active", h.ListActive)
 		alarms.GET("/history", h.ListHistory)
-	alarms.GET("/statistics", h.Statistics)
+		alarms.GET("/statistics", h.Statistics)
 		alarms.GET("/history/statistics", h.HistoryStatistics)
 		alarms.POST("/history/batch/acknowledge", h.BatchHistoryAcknowledge)
 		alarms.POST("/history/batch/unacknowledge", h.BatchHistoryUnacknowledge)
@@ -71,8 +72,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		alarms.POST("/active/batch/clear", h.BatchClear)
 		alarms.POST("/active/batch/unacknowledge", h.BatchUnacknowledge)
 		alarms.POST("/active/:id/read", h.MarkRead)
-			// 告警同步
-			alarms.POST("/sync/:device_sn", h.TriggerSync)
+		// 告警同步
+		alarms.POST("/sync/:device_sn", h.TriggerSync)
 	}
 }
 
@@ -335,8 +336,8 @@ func (h *Handler) HistoryStatistics(c *gin.Context) {
 // BatchAcknowledge handles POST /alarms/active/batch/acknowledge.
 func (h *Handler) BatchAcknowledge(c *gin.Context) {
 	var req struct {
-		IDs   []uuid.UUID `json:"ids" binding:"required"`
-		Note  string      `json:"acknowledged_by"`
+		IDs  []uuid.UUID `json:"ids" binding:"required"`
+		Note string      `json:"acknowledged_by"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
@@ -383,9 +384,16 @@ func (h *Handler) BatchClear(c *gin.Context) {
 	if username == nil {
 		username = "operator"
 	}
-	if err := h.store.BatchClear(c.Request.Context(), req.IDs, username.(string), req.Note); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
+	for _, id := range req.IDs {
+		if err := h.engine.clearByOperator(c.Request.Context(), id, username.(string), req.Note); err != nil {
+			// Preserve the previous batch-clear behavior: alarms that were
+			// already removed by another operation do not fail the whole batch.
+			if errors.Is(err, commonerrors.ErrNotFound) {
+				continue
+			}
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	response.OKWithMsg(c, gin.H{"count": len(req.IDs)}, "alarms cleared")
 }
@@ -393,8 +401,8 @@ func (h *Handler) BatchClear(c *gin.Context) {
 // BatchHistoryAcknowledge handles POST /alarms/history/batch/acknowledge.
 func (h *Handler) BatchHistoryAcknowledge(c *gin.Context) {
 	var req struct {
-		IDs   []uuid.UUID `json:"ids" binding:"required"`
-		Note  string      `json:"acknowledged_by"`
+		IDs  []uuid.UUID `json:"ids" binding:"required"`
+		Note string      `json:"acknowledged_by"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)

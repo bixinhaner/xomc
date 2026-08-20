@@ -20,8 +20,9 @@ var _ HistoryRepository = (*memHistoryRepo)(nil)
 
 // memHistoryRepo is a thread-safe in-memory HistoryRepository for unit tests.
 type memHistoryRepo struct {
-	mu    sync.Mutex
-	items map[uuid.UUID]*NotificationHistory
+	mu        sync.Mutex
+	items     map[uuid.UUID]*NotificationHistory
+	insertErr error
 }
 
 func newMemHistoryRepo() *memHistoryRepo {
@@ -76,6 +77,9 @@ func (m *memHistoryRepo) GetByID(_ context.Context, id uuid.UUID) (*Notification
 func (m *memHistoryRepo) Insert(_ context.Context, h *NotificationHistory) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.insertErr != nil {
+		return m.insertErr
+	}
 	if h.ID == uuid.Nil {
 		h.ID = uuid.New()
 	}

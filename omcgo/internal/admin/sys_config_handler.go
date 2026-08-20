@@ -93,11 +93,17 @@ func (h *SysConfigHandler) Get(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	if !allowSysConfigCategory(c, result.Category) {
+		return
+	}
 	response.OKWithMsg(c, toSysConfigResponse(*result), "查询成功")
 }
 
 func (h *SysConfigHandler) List(c *gin.Context) {
 	category := c.Query("category")
+	if !allowSysConfigCategory(c, category) {
+		return
+	}
 	publicOnly := c.Query("public") == "true"
 
 	result, err := h.service.List(c.Request.Context(), category, publicOnly)
@@ -151,6 +157,9 @@ func (h *SysConfigHandler) BatchUpdate(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	if !allowSysConfigCategory(c, req.Category) {
+		return
+	}
 	if err := validateGenericBatchWrite(req); err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -161,4 +170,15 @@ func (h *SysConfigHandler) BatchUpdate(c *gin.Context) {
 		return
 	}
 	response.OKWithMsg(c, gin.H{"updated": result.Updated, "batch": result.Batch}, "保存成功")
+}
+
+func allowSysConfigCategory(c *gin.Context, category string) bool {
+	if category != "notification.email" {
+		return true
+	}
+	if isSuper, _ := c.Get(CtxKeyIsSuperAdmin); isSuper == true {
+		return true
+	}
+	commonerrors.AbortWithError(c, http.StatusForbidden, commonerrors.ErrForbidden)
+	return false
 }

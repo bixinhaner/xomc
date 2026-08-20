@@ -1460,6 +1460,14 @@ export const adminApi = {
     };
   },
 
+	async sendTestEmail(recipient: string): Promise<{ recipient: string }> {
+		const { data } = await http.post<{ recipient: string }>(
+			'/admin/notification/email/test',
+			{ recipient },
+		);
+		return data;
+	},
+
   async getSysConfigApplyBatch(id: string): Promise<ConfigApplyBatch> {
     const { data } = await http.get<{
       id: string;

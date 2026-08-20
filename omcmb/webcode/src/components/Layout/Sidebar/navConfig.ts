@@ -59,6 +59,7 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'alarm-history',      label: 'nav.alarm.history',        path: '/alarm/history' },
       // { key: 'alarm-stats',        label: 'nav.alarm.statistics',     path: '/alarm/statistics' },  // 隐藏告警统计
       { key: 'alarm-rule',         label: 'nav.alarm.rules',          path: '/alarm/rules' },
+      { key: 'alarm-email-subscription', label: 'nav.alarm.emailSubscription', path: '/alarm/email-subscriptions' },
       // T-0098-P5-06：旧 alarm-knowledge（/alarm/library）已下线，治理走 /product/alarm-library（super_admin）。
       // { key: 'alarm-sync',         label: 'nav.alarm.sync',           path: '/alarm/sync' },           // 隐藏
       // { key: 'alarm-notification', label: 'nav.alarm.notification',   path: '/alarm/notification' },  // 隐藏告警通知

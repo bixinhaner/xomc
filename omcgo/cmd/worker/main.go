@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -420,10 +419,6 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	deadLetterRepo := alarm.NewPgDeadLetterRepository(w.PgPool)
 	filterEngine := alarm.NewFilterEngine(alarmFilterRuleRepo, alarmPgStore, webhookDispatcher, deadLetterRepo, webhookMetrics, logger)
 	filterEngine.SetDeviceGroupResolver(alarm.NewPgDeviceGroupResolver(w.PgPool))
-	emailMetrics := alarm.NewEmailMetrics(w.MetricsReg)
-	emailCfg := loadEmailConfigFromEnv()
-	emailDispatcher := alarm.NewSMTPEmailDispatcher(emailCfg, logger.Named("email"), emailMetrics)
-	filterEngine.SetEmailDispatcher(emailDispatcher)
 	alarmEngine.SetFilterEngine(filterEngine)
 
 	geofenceAlarmMonitor := alarm.NewGeofenceAlarmMonitor(alarmEngine, logger)
@@ -840,7 +835,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	// #458：cron 随 pipeCtx 取消统一停；后台轮询 sys_configs 感知改时区后即时重排（不重启）。
 	pmTz.shutdownOnCtx(pipeCtx)
 	pmTz.startReloadPoller(pipeCtx, defaultReloadPollInterval)
-	startPMAggregatorPipeline(pipeCtx, w, pmKPIRouter, pmTz, exportBucket)
+	startPMAggregatorPipeline(pipeCtx, w, pmKPIRouter, pmTz, exportBucket, cfg.Notification.SMTP)
 	startPMAggregationStream(pipeCtx, w, pmTz)
 	startRawObjectCleanup(pipeCtx, w, cfg)
 
@@ -1765,15 +1760,33 @@ func parseStringSlice(s string) []string {
 	return result
 }
 
-func loadEmailConfigFromEnv() alarm.EmailConfig {
-	port, _ := strconv.Atoi(os.Getenv("OMC_SMTP_PORT"))
-	return alarm.EmailConfig{
-		Host:        os.Getenv("OMC_SMTP_HOST"),
-		Port:        port,
-		Username:    os.Getenv("OMC_SMTP_USERNAME"),
-		Password:    os.Getenv("OMC_SMTP_PASSWORD"),
-		From:        os.Getenv("OMC_SMTP_FROM"),
-		UseTLS:      os.Getenv("OMC_SMTP_USE_TLS") == "true",
-		UseSTARTTLS: os.Getenv("OMC_SMTP_USE_STARTTLS") == "true",
+type workerNotificationSMTPStore struct {
+	repo admin.SysConfigRepository
+}
+
+func (s workerNotificationSMTPStore) LoadSMTPSettings(ctx context.Context) (map[string]string, error) {
+	rows, err := s.repo.List(ctx, notification.SMTPConfigCategory, false)
+	if err != nil {
+		return nil, err
 	}
+	values := make(map[string]string, len(rows))
+	for _, row := range rows {
+		values[row.Key] = row.Value
+	}
+	return values, nil
+}
+
+func smtpOptionsFromWorkerConfig(cfg appconfig.SMTPConfig) notification.SMTPOptions {
+	cfg = cfg.Effective()
+	return notification.WithLegacySMTPEnvironment(notification.SMTPOptions{
+		Enabled:      cfg.Enabled,
+		Host:         cfg.Host,
+		Port:         cfg.Port,
+		SecurityMode: notification.SMTPSecurityMode(cfg.SecurityMode),
+		AuthEnabled:  cfg.AuthEnabled,
+		Username:     cfg.Username,
+		Password:     cfg.Password,
+		From:         cfg.From,
+		Timeout:      cfg.Timeout,
+	})
 }
