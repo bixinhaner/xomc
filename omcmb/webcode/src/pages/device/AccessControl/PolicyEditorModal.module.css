@@ -84,19 +84,31 @@
   gap: 12px;
 }
 
-.conditionCard {
+.conditionCollapse {
   border-color: var(--ant-color-border-secondary);
   background: var(--ant-color-bg-container);
 }
 
-.conditionCard :global(.ant-card-head) {
-  min-height: 42px;
-  padding: 0 14px;
-  border-bottom-color: var(--ant-color-border-secondary);
+.conditionCollapse :global(.ant-collapse-header) {
+  align-items: center !important;
+  min-height: 46px;
+  padding: 10px 14px !important;
 }
 
-.conditionCard :global(.ant-card-body) {
-  padding: 16px 16px 4px;
+.conditionCollapse > :global(.ant-collapse-item > .ant-collapse-content > .ant-collapse-content-box) {
+  padding: 16px 16px 0;
+}
+
+.conditionSummary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.conditionSummaryValue {
+  min-width: 0;
+  max-width: 440px;
 }
 
 .conditionIndex {
@@ -107,10 +119,24 @@
 }
 
 .conditionOptions {
+  padding-top: 4px;
+}
+
+.advancedSettings {
   margin: 0 -16px;
-  padding: 12px 16px 0;
   border-top: 1px dashed var(--ant-color-border-secondary);
+  border-radius: 0;
   background: var(--ant-color-fill-quaternary);
+}
+
+.advancedSettings :global(.ant-collapse-header) {
+  min-height: 40px;
+  padding: 8px 16px !important;
+  color: var(--ant-color-text-secondary) !important;
+}
+
+.advancedSettings :global(.ant-collapse-content-box) {
+  padding: 4px 16px 0 !important;
 }
 
 .fullWidth {

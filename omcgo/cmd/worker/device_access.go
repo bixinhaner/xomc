@@ -34,12 +34,23 @@ func startDeviceAccessWorkers(w *workerInfra) error {
 		logger,
 	)
 	coordinator.SetGPSProbePlanner(deviceaccess.NewPgGPSProbeQueue(w.PgPool))
+	reevaluationQueue := deviceaccess.NewPgReevaluationQueue(w.PgPool)
+	collectionDeadlines := deviceaccess.NewCollectionDeadlineScheduler(w.PgPool, reevaluationQueue)
 	consumer := deviceaccess.NewReevaluationConsumer(w.EventBus, coordinator)
 	if err := consumer.Start(); err != nil {
 		return err
 	}
+	policyConsumer := deviceaccess.NewPolicyPublishedConsumer(
+		w.EventBus,
+		deviceaccess.NewPolicyPublishedExpander(w.PgPool),
+	)
+	if err := policyConsumer.Start(); err != nil {
+		_ = consumer.Stop()
+		return err
+	}
 	probeConsumer := deviceaccess.NewGPSProbeConsumer(w.EventBus, probes)
 	if err := probeConsumer.Start(); err != nil {
+		_ = policyConsumer.Stop()
 		_ = consumer.Stop()
 		return err
 	}
@@ -50,8 +61,10 @@ func startDeviceAccessWorkers(w *workerInfra) error {
 		defer close(done)
 		dispatchTicker := time.NewTicker(time.Second)
 		recoveryTicker := time.NewTicker(time.Minute)
+		collectionDeadlineTicker := time.NewTicker(30 * time.Second)
 		defer dispatchTicker.Stop()
 		defer recoveryTicker.Stop()
+		defer collectionDeadlineTicker.Stop()
 		for {
 			select {
 			case <-workerCtx.Done():
@@ -70,6 +83,13 @@ func startDeviceAccessWorkers(w *workerInfra) error {
 				if err != nil && !errors.Is(err, context.Canceled) {
 					logger.Warn("recover stale device access outbox failed", zap.Error(err))
 				}
+			case <-collectionDeadlineTicker.C:
+				ctx, deadlineCancel := context.WithTimeout(workerCtx, 10*time.Second)
+				_, err := collectionDeadlines.RunOnce(ctx, 100)
+				deadlineCancel()
+				if err != nil && !errors.Is(err, context.Canceled) {
+					logger.Warn("schedule expired device access collections failed", zap.Error(err))
+				}
 			}
 		}
 	}()
@@ -77,9 +97,13 @@ func startDeviceAccessWorkers(w *workerInfra) error {
 		cancel()
 		<-done
 		probeErr := probeConsumer.Stop()
+		policyErr := policyConsumer.Stop()
 		consumerErr := consumer.Stop()
 		if probeErr != nil {
 			return probeErr
+		}
+		if policyErr != nil {
+			return policyErr
 		}
 		return consumerErr
 	})

@@ -87,16 +87,19 @@ func (c *ReevaluationCoordinator) Handle(ctx context.Context, request Reevaluati
 	input := EvaluationInput{
 		Carrier:                carrier,
 		SerialNumber:           serialNumber,
+		OUI:                    asset.ExpectedOUI,
+		ProductClass:           firstNonEmpty(request.ObservedProductClass, asset.ExpectedProductClass),
 		AuthenticationRequired: authenticationRequired,
 		Authenticated:          authenticated,
 		AssetRetired:           asset.AssetRetired,
 		ExistingState:          existingState,
-		ConfirmedMismatch: request.TriggerType == "access_probe_evidence" &&
+		ConfirmedMismatch: request.TriggerType == TriggerAccessProbeEvidence &&
 			current.State != nil && current.State.State == AccessStateRevalidating &&
 			current.Evidence.Version > current.State.EvidenceVersion,
-		EvaluatedAt: evaluatedAt,
-		Evidence:    evidenceSetFromContext(current, asset, evaluatedAt),
-		Policy:      policy,
+		EvaluatedAt:        evaluatedAt,
+		CollectionDeadline: collectionDeadline(current.State),
+		Evidence:           evidenceSetFromContext(current, asset, evaluatedAt),
+		Policy:             policy,
 	}
 	decision := c.evaluator.Evaluate(input)
 	probeNeeds, shouldProbe := accessProbeNeeds(current, decision, evaluatedAt)
@@ -170,6 +173,7 @@ func (c *ReevaluationCoordinator) Handle(ctx context.Context, request Reevaluati
 		PolicyVersionID:         policyVersionID,
 		EvidenceVersion:         current.Evidence.Version,
 		OccurredAt:              evaluatedAt,
+		DecisionExpiresAt:       nextDecisionDeadline(current.State, decision, policy, evaluatedAt),
 		Decision:                decision,
 		Outbox: OutboxEvent{
 			EventType: decisionEventType(decision.State),
@@ -188,3 +192,12 @@ func (c *ReevaluationCoordinator) Handle(ctx context.Context, request Reevaluati
 }
 
 var _ ReevaluationHandler = (*ReevaluationCoordinator)(nil)
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}

@@ -14,8 +14,11 @@ const stateColors: Record<AccessState, string> = {
 const actionColors: Record<ActionStatus, string> = {
   pending_dispatch: 'orange',
   dispatching: 'processing',
+  verifying: 'blue',
+  retry_wait: 'gold',
   succeeded: 'green',
   failed: 'red',
+  dead: 'magenta',
   cancelled: 'default',
 };
 
@@ -45,6 +48,27 @@ export function GuardedButton({ allowed, deniedText, children, ...props }: Butto
     <Tooltip title={allowed ? undefined : deniedText}>
       <span>
         <Button {...props} disabled={!allowed || props.disabled}>{children}</Button>
+      </span>
+    </Tooltip>
+  );
+}
+
+export function IconActionButton({ label, allowed = true, deniedText, tooltip, ...props }: ButtonProps & {
+  label: string;
+  allowed?: boolean;
+  deniedText?: string;
+  tooltip?: ReactNode;
+}) {
+  return (
+    <Tooltip title={tooltip ?? (!allowed && deniedText ? deniedText : label)}>
+      <span>
+        <Button
+          {...props}
+          type={props.type ?? 'text'}
+          size={props.size ?? 'small'}
+          aria-label={label}
+          disabled={!allowed || props.disabled}
+        />
       </span>
     </Tooltip>
   );

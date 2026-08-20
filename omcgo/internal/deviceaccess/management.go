@@ -30,22 +30,26 @@ type AccessStateItem struct {
 	EvidenceVersion   int64           `json:"evidence_version"`
 	DecisionVersion   int64           `json:"decision_version"`
 	NormalTasksFrozen bool            `json:"normal_tasks_frozen"`
+	DecisionExpiresAt *time.Time      `json:"decision_expires_at,omitempty"`
 	LastDecidedAt     time.Time       `json:"last_decided_at"`
 	UpdatedAt         time.Time       `json:"updated_at"`
 }
 
 type PolicyVersionSummary struct {
-	ID            uuid.UUID           `json:"id"`
-	PolicySetID   uuid.UUID           `json:"policy_set_id"`
-	Name          string              `json:"name"`
-	Carrier       string              `json:"carrier"`
-	Version       int64               `json:"version"`
-	Status        PolicyVersionStatus `json:"status"`
-	DefaultAction PolicyDefaultAction `json:"default_action"`
-	CreatedBy     *uuid.UUID          `json:"created_by,omitempty"`
-	PublishedBy   *uuid.UUID          `json:"published_by,omitempty"`
-	PublishedAt   *time.Time          `json:"published_at,omitempty"`
-	CreatedAt     time.Time           `json:"created_at"`
+	ID                       uuid.UUID           `json:"id"`
+	PolicySetID              uuid.UUID           `json:"policy_set_id"`
+	Name                     string              `json:"name"`
+	Carrier                  string              `json:"carrier"`
+	Version                  int64               `json:"version"`
+	Status                   PolicyVersionStatus `json:"status"`
+	DefaultAction            PolicyDefaultAction `json:"default_action"`
+	FailureMode              FailureMode         `json:"failure_mode"`
+	CollectionTimeoutSeconds int64               `json:"collection_timeout_seconds"`
+	BypassProfileCount       int64               `json:"bypass_profile_count"`
+	CreatedBy                *uuid.UUID          `json:"created_by,omitempty"`
+	PublishedBy              *uuid.UUID          `json:"published_by,omitempty"`
+	PublishedAt              *time.Time          `json:"published_at,omitempty"`
+	CreatedAt                time.Time           `json:"created_at"`
 }
 
 type AccessListItem struct {
@@ -98,6 +102,7 @@ type DecisionItem struct {
 	MatchedRule      *uuid.UUID          `json:"matched_rule_id,omitempty"`
 	OccurredAt       time.Time           `json:"occurred_at"`
 	Checks           []DecisionCheckItem `json:"checks"`
+	Archive          *DecisionArchive    `json:"archive,omitempty"`
 }
 
 type DecisionCheckItem struct {
@@ -123,6 +128,22 @@ type EvidenceItem struct {
 	ExpiresAt       *time.Time      `json:"expires_at,omitempty"`
 }
 
+type AccessNotificationItem struct {
+	ID            uuid.UUID  `json:"id"`
+	Channel       string     `json:"channel"`
+	Recipients    []string   `json:"recipients"`
+	Subject       string     `json:"subject"`
+	Status        string     `json:"status"`
+	ErrorMessage  string     `json:"error_message,omitempty"`
+	SourceType    string     `json:"source_type"`
+	SourceID      *uuid.UUID `json:"source_id,omitempty"`
+	EventID       *uuid.UUID `json:"event_id,omitempty"`
+	CorrelationID string     `json:"correlation_id,omitempty"`
+	RetryCount    int        `json:"retry_count"`
+	SentAt        *time.Time `json:"sent_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
 type AccessDetail struct {
 	State     AccessStateItem `json:"state"`
 	Decisions []DecisionItem  `json:"decisions"`
@@ -130,20 +151,46 @@ type AccessDetail struct {
 	Actions   []Action        `json:"actions"`
 }
 
+type AccessStateSummary struct {
+	Accepted       int64 `json:"accepted"`
+	Rejected       int64 `json:"rejected"`
+	ReviewRequired int64 `json:"review_required"`
+	Revoked        int64 `json:"revoked"`
+	Total          int64 `json:"total"`
+}
+
 type ManagementFilter struct {
-	Carrier       string
-	SerialNumber  string
-	State         AccessState
-	Status        string
-	EntryType     ListEntryType
-	Page          int
-	PageSize      int
-	VisibleGroups []uuid.UUID
+	Carrier         string
+	SerialNumber    string
+	ProductName     string
+	State           AccessState
+	Status          string
+	EntryType       ListEntryType
+	Decision        EffectiveAction
+	ReasonCode      ReasonCode
+	ActionStatus    ActionStatus
+	Dimension       ConditionType
+	PolicyVersionID *uuid.UUID
+	MatchedRuleID   *uuid.UUID
+	StartedAt       *time.Time
+	EndedAt         *time.Time
+	ArchiveStatus   string
+	Page            int
+	PageSize        int
+	VisibleGroups   []uuid.UUID
 }
 
 type ManagementStore interface {
 	ListStates(context.Context, ManagementFilter) ([]AccessStateItem, int64, error)
+	SummarizeStates(context.Context, ManagementFilter) (AccessStateSummary, error)
 	GetDetail(context.Context, ManagementFilter) (AccessDetail, error)
+	ListDecisions(context.Context, ManagementFilter) ([]DecisionItem, int64, error)
+	ListIdentitySnapshots(context.Context, ManagementFilter) ([]IdentitySnapshot, int64, error)
+	ListEvidence(context.Context, ManagementFilter) ([]EvidenceItem, int64, error)
+	ListNotifications(context.Context, ManagementFilter) ([]AccessNotificationItem, int64, error)
+	ListManualOperations(context.Context, ManagementFilter) ([]AccessManualOperationItem, int64, error)
+	ArchiveDecision(context.Context, string, uuid.UUID, uuid.UUID, []uuid.UUID, string) error
+	RestoreDecision(context.Context, string, uuid.UUID, uuid.UUID, []uuid.UUID) error
 	ListPolicyVersions(context.Context, ManagementFilter) ([]PolicyVersionSummary, int64, error)
 	ListEntries(context.Context, ManagementFilter) ([]AccessListItem, int64, error)
 	ListCandidates(context.Context, ManagementFilter) ([]CandidateItem, int64, error)
@@ -185,7 +232,7 @@ func (s *PgManagementStore) SetCandidateOwnershipRegistrar(registrar CandidateOw
 
 func (s *PgManagementStore) ListStates(ctx context.Context, filter ManagementFilter) ([]AccessStateItem, int64, error) {
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
-	where := tenantFilters(filter, "s")
+	where := stateFilters(filter)
 	countBuilder := storage.Psql.Select("COUNT(*)").From("device_access_states s").Where(where)
 	countBuilder = applyAccessIdentityVisibility(countBuilder, "s.device_id", "s.carrier", "s.serial_number", filter.VisibleGroups)
 	countQuery, countArgs, err := countBuilder.ToSql()
@@ -199,7 +246,7 @@ func (s *PgManagementStore) ListStates(ctx context.Context, filter ManagementFil
 	listBuilder := storage.Psql.Select(
 		"s.carrier", "s.serial_number", accessStateProductNameSQL, "s.device_id", "s.candidate_id", "s.state",
 		"s.effective_decision", "s.reason_code", "s.policy_version_id", "s.evidence_version",
-		"s.decision_version", "s.normal_tasks_frozen", "s.last_decided_at", "s.updated_at",
+		"s.decision_version", "s.normal_tasks_frozen", "s.decision_expires_at", "s.last_decided_at", "s.updated_at",
 	).From("device_access_states s").
 		LeftJoin("devices d ON d.id = s.device_id").
 		Where(where).
@@ -221,7 +268,7 @@ func (s *PgManagementStore) ListStates(ctx context.Context, filter ManagementFil
 		if err := rows.Scan(
 			&item.Carrier, &item.SerialNumber, &item.ProductName, &item.DeviceID, &item.CandidateID, &item.State,
 			&item.EffectiveDecision, &item.ReasonCode, &item.PolicyVersionID, &item.EvidenceVersion,
-			&item.DecisionVersion, &item.NormalTasksFrozen, &item.LastDecidedAt, &item.UpdatedAt,
+			&item.DecisionVersion, &item.NormalTasksFrozen, &item.DecisionExpiresAt, &item.LastDecidedAt, &item.UpdatedAt,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan access state: %w", err)
 		}
@@ -233,6 +280,77 @@ func (s *PgManagementStore) ListStates(ctx context.Context, filter ManagementFil
 	return items, total, nil
 }
 
+func (s *PgManagementStore) SummarizeStates(ctx context.Context, filter ManagementFilter) (AccessStateSummary, error) {
+	where := stateFilters(filter)
+	builder := storage.Psql.Select(
+		"COUNT(*) FILTER (WHERE s.state = 'accepted')",
+		"COUNT(*) FILTER (WHERE s.effective_decision = 'reject')",
+		"COUNT(*) FILTER (WHERE s.effective_decision = 'review')",
+		"COUNT(*) FILTER (WHERE s.effective_decision = 'revoke')",
+		"COUNT(*)",
+	).From("device_access_states s").Where(where)
+	builder = applyAccessIdentityVisibility(builder, "s.device_id", "s.carrier", "s.serial_number", filter.VisibleGroups)
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return AccessStateSummary{}, fmt.Errorf("build access state summary: %w", err)
+	}
+	var summary AccessStateSummary
+	if err := s.db.QueryRow(ctx, query, args...).Scan(
+		&summary.Accepted, &summary.Rejected, &summary.ReviewRequired, &summary.Revoked, &summary.Total,
+	); err != nil {
+		return AccessStateSummary{}, fmt.Errorf("summarize access states: %w", err)
+	}
+	return summary, nil
+}
+
+func stateFilters(filter ManagementFilter) sq.And {
+	where := tenantFilters(filter, "s")
+	if filter.Decision != "" {
+		where = append(where, sq.Eq{"s.effective_decision": filter.Decision})
+	}
+	if filter.ReasonCode != "" {
+		where = append(where, sq.Eq{"s.reason_code": filter.ReasonCode})
+	}
+	if filter.PolicyVersionID != nil {
+		where = append(where, sq.Eq{"s.policy_version_id": *filter.PolicyVersionID})
+	}
+	if filter.StartedAt != nil {
+		where = append(where, sq.GtOrEq{"s.last_decided_at": *filter.StartedAt})
+	}
+	if filter.EndedAt != nil {
+		where = append(where, sq.LtOrEq{"s.last_decided_at": *filter.EndedAt})
+	}
+	if filter.MatchedRuleID != nil {
+		where = append(where, sq.Expr(`EXISTS (
+			SELECT 1 FROM device_access_decisions filtered_decision
+			WHERE filtered_decision.carrier = s.carrier
+			AND filtered_decision.serial_number = s.serial_number
+			AND filtered_decision.decision_version = s.decision_version
+			AND filtered_decision.matched_rule_id = ?
+		)`, *filter.MatchedRuleID))
+	}
+	if filter.Dimension != "" {
+		where = append(where, sq.Expr(`EXISTS (
+			SELECT 1 FROM device_access_decisions dimension_decision
+			JOIN device_access_decision_checks dimension_check ON dimension_check.decision_id = dimension_decision.id
+			WHERE dimension_decision.carrier = s.carrier
+			AND dimension_decision.serial_number = s.serial_number
+			AND dimension_decision.decision_version = s.decision_version
+			AND dimension_check.check_type = ?
+		)`, filter.Dimension))
+	}
+	if filter.ActionStatus != "" {
+		where = append(where, sq.Expr(`EXISTS (
+			SELECT 1 FROM device_access_actions filtered_action
+			JOIN device_access_decisions action_decision ON action_decision.id = filtered_action.decision_id
+			WHERE action_decision.carrier = s.carrier
+			AND action_decision.serial_number = s.serial_number
+			AND filtered_action.status = ?
+		)`, filter.ActionStatus))
+	}
+	return where
+}
+
 func (s *PgManagementStore) GetDetail(ctx context.Context, filter ManagementFilter) (AccessDetail, error) {
 	carrier := strings.TrimSpace(filter.Carrier)
 	serialNumber := strings.TrimSpace(filter.SerialNumber)
@@ -240,7 +358,7 @@ func (s *PgManagementStore) GetDetail(ctx context.Context, filter ManagementFilt
 		"s.carrier", "s.serial_number", accessStateProductNameSQL,
 		"s.device_id", "s.candidate_id", "s.state", "s.effective_decision",
 		"s.reason_code", "s.policy_version_id", "s.evidence_version", "s.decision_version",
-		"s.normal_tasks_frozen", "s.last_decided_at", "s.updated_at",
+		"s.normal_tasks_frozen", "s.decision_expires_at", "s.last_decided_at", "s.updated_at",
 	).From("device_access_states s").
 		LeftJoin("devices d ON d.id = s.device_id").
 		Where(sq.Eq{"s.carrier": carrier, "s.serial_number": serialNumber})
@@ -254,6 +372,7 @@ func (s *PgManagementStore) GetDetail(ctx context.Context, filter ManagementFilt
 		&detail.State.Carrier, &detail.State.SerialNumber, &detail.State.ProductName, &detail.State.DeviceID, &detail.State.CandidateID,
 		&detail.State.State, &detail.State.EffectiveDecision, &detail.State.ReasonCode, &detail.State.PolicyVersionID,
 		&detail.State.EvidenceVersion, &detail.State.DecisionVersion, &detail.State.NormalTasksFrozen,
+		&detail.State.DecisionExpiresAt,
 		&detail.State.LastDecidedAt, &detail.State.UpdatedAt,
 	); err != nil {
 		if err == pgx.ErrNoRows {
@@ -261,11 +380,15 @@ func (s *PgManagementStore) GetDetail(ctx context.Context, filter ManagementFilt
 		}
 		return AccessDetail{}, fmt.Errorf("query access state detail: %w", err)
 	}
-	detail.Decisions, err = s.loadDecisions(ctx, carrier, serialNumber)
+	historyFilter := filter
+	historyFilter.Page = 1
+	historyFilter.PageSize = 50
+	historyFilter.ArchiveStatus = "all"
+	detail.Decisions, _, err = s.ListDecisions(ctx, historyFilter)
 	if err != nil {
-		return AccessDetail{}, err
+		return AccessDetail{}, fmt.Errorf("load access state decisions: %w", err)
 	}
-	detail.Evidence, err = s.loadEvidence(ctx, carrier, serialNumber, detail.State.EvidenceVersion)
+	detail.Evidence, err = s.loadEvidenceVersion(ctx, carrier, serialNumber, detail.State.EvidenceVersion)
 	if err != nil {
 		return AccessDetail{}, err
 	}
@@ -291,7 +414,8 @@ func (s *PgManagementStore) ListPolicyVersions(ctx context.Context, filter Manag
 	}
 	query, args, err := storage.Psql.Select(
 		"pv.id", "pv.policy_set_id", "ps.name", "ps.carrier", "pv.version", "pv.status",
-		"pv.default_action", "pv.created_by", "pv.published_by", "pv.published_at", "pv.created_at",
+		"pv.default_action", "pv.failure_mode", "pv.collection_timeout_seconds", "jsonb_array_length(pv.bypass_profiles)",
+		"pv.created_by", "pv.published_by", "pv.published_at", "pv.created_at",
 	).From(from).Where(where).OrderBy("pv.created_at DESC").Limit(uint64(pageSize)).
 		Offset(uint64((page - 1) * pageSize)).ToSql()
 	if err != nil {
@@ -306,6 +430,7 @@ func (s *PgManagementStore) ListPolicyVersions(ctx context.Context, filter Manag
 	for rows.Next() {
 		var item PolicyVersionSummary
 		if err := rows.Scan(&item.ID, &item.PolicySetID, &item.Name, &item.Carrier, &item.Version, &item.Status, &item.DefaultAction,
+			&item.FailureMode, &item.CollectionTimeoutSeconds, &item.BypassProfileCount,
 			&item.CreatedBy, &item.PublishedBy, &item.PublishedAt, &item.CreatedAt); err != nil {
 			return nil, 0, fmt.Errorf("scan policy version: %w", err)
 		}
@@ -325,6 +450,12 @@ func (s *PgManagementStore) ListEntries(ctx context.Context, filter ManagementFi
 	}
 	if filter.SerialNumber != "" {
 		where = append(where, sq.ILike{"le.identity_value": "%" + strings.TrimSpace(filter.SerialNumber) + "%"})
+	}
+	if filter.ProductName != "" {
+		where = append(where, sq.ILike{accessListProductNameSQL: "%" + strings.TrimSpace(filter.ProductName) + "%"})
+	}
+	if filter.Status != "" {
+		where = append(where, sq.Eq{"le.status": filter.Status})
 	}
 	countBuilder := storage.Psql.Select("COUNT(*)").From("device_access_list_entries le").
 		LeftJoin("devices d ON d.carrier = le.carrier AND d.serial_number = le.identity_value").Where(where)
@@ -376,6 +507,9 @@ func (s *PgManagementStore) ListCandidates(ctx context.Context, filter Managemen
 	where := sq.And{sq.Eq{"c.carrier": strings.TrimSpace(filter.Carrier)}}
 	if filter.Status != "" {
 		where = append(where, sq.Eq{"c.review_status": filter.Status})
+		if filter.Status == "pending" {
+			where = append(where, sq.Expr("c.device_id IS NULL"))
+		}
 	}
 	if filter.SerialNumber != "" {
 		where = append(where, sq.ILike{"c.serial_number": "%" + strings.TrimSpace(filter.SerialNumber) + "%"})
@@ -392,7 +526,7 @@ func (s *PgManagementStore) ListCandidates(ctx context.Context, filter Managemen
 	}
 	listBuilder := storage.Psql.Select(
 		"c.id", "c.carrier", "c.serial_number", "c.oui", "COALESCE(c.product_class, '')", "COALESCE(c.software_version, '')",
-		"COALESCE(c.observed_remote_ip::text, '')", "c.device_id", "c.first_seen_at", "c.last_seen_at", "c.inform_count",
+		"COALESCE(host(c.observed_remote_ip), '')", "c.device_id", "c.first_seen_at", "c.last_seen_at", "c.inform_count",
 		"c.review_status", "c.reviewed_by", "c.reviewed_at", "c.expires_at",
 	).From("device_access_candidates c").Where(where).OrderBy("c.last_seen_at DESC").
 		Limit(uint64(pageSize)).Offset(uint64((page - 1) * pageSize))
@@ -492,7 +626,7 @@ func (s *PgManagementStore) ReviewCandidate(
 	if _, err := tx.Exec(ctx, query, args...); err != nil {
 		return fmt.Errorf("upsert candidate review list entry: %w", err)
 	}
-	payload, err := json.Marshal(ReevaluationRequest{Carrier: carrier, SerialNumber: serialNumber, TriggerType: "candidate_review"})
+	payload, err := json.Marshal(ReevaluationRequest{Carrier: carrier, SerialNumber: serialNumber, TriggerType: TriggerCandidateReviewed})
 	if err != nil {
 		return fmt.Errorf("encode candidate review reevaluation: %w", err)
 	}
@@ -511,40 +645,6 @@ func (s *PgManagementStore) ReviewCandidate(
 		return fmt.Errorf("commit candidate review: %w", err)
 	}
 	return nil
-}
-
-func (s *PgManagementStore) loadDecisions(ctx context.Context, carrier, serialNumber string) ([]DecisionItem, error) {
-	query, args, err := storage.Psql.Select(
-		"id", "trigger_type", "previous_state", "new_state", "decision", "reason_code", "policy_version_id",
-		"evidence_version", "decision_version", "matched_list_entry_id", "matched_rule_id", "occurred_at",
-	).From("device_access_decisions").Where(sq.Eq{"carrier": carrier, "serial_number": serialNumber}).
-		OrderBy("decision_version DESC").Limit(50).ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("build decision history: %w", err)
-	}
-	rows, err := s.db.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query decision history: %w", err)
-	}
-	defer rows.Close()
-	items := make([]DecisionItem, 0)
-	for rows.Next() {
-		var item DecisionItem
-		if err := rows.Scan(&item.ID, &item.TriggerType, &item.PreviousState, &item.NewState, &item.Decision,
-			&item.ReasonCode, &item.PolicyVersionID, &item.EvidenceVersion, &item.DecisionVersion,
-			&item.MatchedListEntry, &item.MatchedRule, &item.OccurredAt); err != nil {
-			return nil, fmt.Errorf("scan decision history: %w", err)
-		}
-		item.Checks, err = s.loadDecisionChecks(ctx, item.ID)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate decision history: %w", err)
-	}
-	return items, nil
 }
 
 func (s *PgManagementStore) loadDecisionChecks(ctx context.Context, decisionID uuid.UUID) ([]DecisionCheckItem, error) {
@@ -575,7 +675,11 @@ func (s *PgManagementStore) loadDecisionChecks(ctx context.Context, decisionID u
 	return items, nil
 }
 
-func (s *PgManagementStore) loadEvidence(ctx context.Context, carrier, serialNumber string, version int64) ([]EvidenceItem, error) {
+func (s *PgManagementStore) loadEvidenceVersion(
+	ctx context.Context,
+	carrier, serialNumber string,
+	version int64,
+) ([]EvidenceItem, error) {
 	query, args, err := storage.Psql.Select(
 		"id", "evidence_version", "evidence_type", "evidence_status", "normalized_value", "source",
 		"task_id", "observed_at", "expires_at",
@@ -590,11 +694,13 @@ func (s *PgManagementStore) loadEvidence(ctx context.Context, carrier, serialNum
 		return nil, fmt.Errorf("query access evidence: %w", err)
 	}
 	defer rows.Close()
-	items := []EvidenceItem{}
+	items := make([]EvidenceItem, 0)
 	for rows.Next() {
 		var item EvidenceItem
-		if err := rows.Scan(&item.ID, &item.EvidenceVersion, &item.EvidenceType, &item.EvidenceStatus,
-			&item.NormalizedValue, &item.Source, &item.TaskID, &item.ObservedAt, &item.ExpiresAt); err != nil {
+		if err := rows.Scan(
+			&item.ID, &item.EvidenceVersion, &item.EvidenceType, &item.EvidenceStatus,
+			&item.NormalizedValue, &item.Source, &item.TaskID, &item.ObservedAt, &item.ExpiresAt,
+		); err != nil {
 			return nil, fmt.Errorf("scan access evidence: %w", err)
 		}
 		items = append(items, item)

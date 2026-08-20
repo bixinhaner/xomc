@@ -22,6 +22,9 @@ const (
 	SubjectDeviceAccessRevalidating     = "device.access.revalidating"
 	SubjectDeviceAccessRejected         = "device.access.rejected"
 	SubjectDeviceAccessRevoked          = "device.access.revoked"
+	SubjectDeviceAccessPolicyPublished  = "device.access.policy_published"
+	SubjectDeviceAccessActionFailed     = "device.access.action_failed"
+	SubjectDeviceAccessActionRecovered  = "device.access.action_recovered"
 )
 
 // Device events

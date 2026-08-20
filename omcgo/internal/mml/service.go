@@ -19,6 +19,7 @@ import (
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	taskpkg "github.com/omcgo/omcgo/internal/task"
 )
 
 // RoleQuerier 派生当前 admin 在 RBAC 体系下可见的 device group IDs（用于 T-0090-c
@@ -1428,6 +1429,9 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		s.fanouter.SetSequentialMode(prev)
 		if err != nil {
 			s.logger.Error("fanout mml task failed", zap.Error(err))
+			if errors.Is(err, taskpkg.ErrTaskAdmissionDenied) {
+				return nil, s.failAdmissionDeniedTask(ctx, task, err)
+			}
 		} else if created > 0 {
 			if err := s.taskRepo.UpdateStatus(ctx, task.ID, TaskRunning); err != nil {
 				s.logger.Error("update mml task to running", zap.Error(err))
@@ -1531,6 +1535,9 @@ func (s *Service) CreateAndFanoutTask(ctx context.Context, task *MMLTask, sequen
 		s.fanouter.SetSequentialMode(prev)
 		if err != nil {
 			s.logger.Error("fanout console task failed", zap.Error(err))
+			if errors.Is(err, taskpkg.ErrTaskAdmissionDenied) {
+				return s.failAdmissionDeniedTask(ctx, task, err)
+			}
 		} else if created > 0 {
 			if err := s.taskRepo.UpdateStatus(ctx, task.ID, TaskRunning); err != nil {
 				s.logger.Error("update console task to running", zap.Error(err))
@@ -1570,6 +1577,37 @@ func (s *Service) fanoutClaimed(ctx context.Context, task *MMLTask) error {
 		s.publishTaskStatus(task.Executor, task.ID.String(), string(TaskPending), string(task.Status))
 	}
 	return nil
+}
+
+// failAdmissionDeniedTask 将已落库、但被设备接入门禁拒绝创建 device_tasks 的
+// MML 父任务收口为失败。其他 fanout 错误保持原有处理语义。
+func (s *Service) failAdmissionDeniedTask(ctx context.Context, task *MMLTask, fanoutErr error) error {
+	if task == nil {
+		return fanoutErr
+	}
+
+	oldStatus := string(task.Status)
+	now := time.Now().UTC()
+	task.Status = TaskFailed
+	task.Result = resultFailedPtr()
+	task.FinishedAt = &now
+	task.NextTriggerAt = nil
+	task.FailedCount = task.TotalDevices
+	task.Results = append(task.Results, map[string]interface{}{
+		"code":    "MML_TASK_ADMISSION_DENIED",
+		"message": fanoutErr.Error(),
+	})
+
+	if err := s.taskRepo.Update(ctx, task); err != nil {
+		return errors.Join(
+			fmt.Errorf("fanout mml task: %w", fanoutErr),
+			fmt.Errorf("mark mml task failed: %w", err),
+		)
+	}
+	if s.hub != nil && task.Executor != "" {
+		s.publishTaskStatus(task.Executor, task.ID.String(), oldStatus, string(TaskFailed))
+	}
+	return fmt.Errorf("fanout mml task: %w", fanoutErr)
 }
 
 // resolveRPCMethods 为缺少 rpc_method 的 command 条目按 command_code 查库补齐。
@@ -1993,6 +2031,9 @@ func (s *Service) StartTask(ctx context.Context, id uuid.UUID) (*MMLTask, error)
 		created, err := s.fanouter.Fanout(ctx, task)
 		if err != nil {
 			s.logger.Error("fanout on start failed", zap.Error(err))
+			if errors.Is(err, taskpkg.ErrTaskAdmissionDenied) {
+				return nil, s.failAdmissionDeniedTask(ctx, task, err)
+			}
 		} else {
 			s.logger.Info("mml task fanned out on start",
 				zap.String("task_id", id.String()),

@@ -263,6 +263,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		requestID = middleware.GenerateRequestIDWithPrefix(prefix)
 	}
+	r.Header.Set(middleware.RequestIDHeader, requestID)
 
 	// 将请求 ID 存入上下文，供日志和下游服务使用
 	ctx := logger.WithRequestID(r.Context(), requestID)
@@ -618,14 +619,18 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 
 	// 使用上面预生成的 Session ID 创建会话（准入槽位与设备会话指针已绑定该 ID）。
 	session := &Session{
-		ID:           sessionID,
-		DeviceSN:     deviceSN,
-		State:        StateInformReceived,
-		InstanceID:   r.RemoteAddr,
-		StartedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-		InformEvents: eventCodes,
-		CWMPId:       cwmpID,
+		ID:            sessionID,
+		DeviceSN:      deviceSN,
+		DeviceOUI:     inform.DeviceId.OUI,
+		ProductClass:  inform.DeviceId.ProductClass,
+		RequestID:     r.Header.Get(middleware.RequestIDHeader),
+		Authenticated: authIdentity.Authenticated,
+		State:         StateInformReceived,
+		InstanceID:    r.RemoteAddr,
+		StartedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		InformEvents:  eventCodes,
+		CWMPId:        cwmpID,
 	}
 
 	// 按 Session ID 存储会话（基于 Cookie 的查找）
@@ -772,7 +777,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 	}
 
 	// 尝试从统一任务队列获取下一个仍满足 PG pending fence 的任务。
-	taskItem, cwmpID, err := h.popAndMarkNextTask(r.Context(), deviceSN, log)
+	taskItem, cwmpID, err := h.popAndMarkNextTask(r.Context(), session, log)
 	if err != nil {
 		log.Error("pop sendable task from queue", zap.Error(err))
 	} else if taskItem != nil {
@@ -1055,7 +1060,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	}
 
 	// 尝试从统一任务队列获取下一个仍满足 PG pending fence 的任务。
-	nextTask, newCWMPID, err := h.popAndMarkNextTask(r.Context(), deviceSN, log)
+	nextTask, newCWMPID, err := h.popAndMarkNextTask(r.Context(), session, log)
 	if err != nil {
 		log.Error("pop sendable task from queue", zap.Error(err))
 	} else if nextTask != nil {
@@ -1119,7 +1124,15 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 // copies after recovery or cancellation. MarkTaskSent removes those copies and
 // returns ErrTaskNotPending; skipping them here preserves the current CWMP
 // session so later valid tasks can be sent without waiting for another Inform.
-func (h *Handler) popAndMarkNextTask(ctx context.Context, deviceSN string, log *zap.Logger) (*task.Task, string, error) {
+func (h *Handler) popAndMarkNextTask(ctx context.Context, session *Session, log *zap.Logger) (*task.Task, string, error) {
+	if session == nil {
+		return nil, "", errors.New("pop task without CWMP session")
+	}
+	deviceSN := session.DeviceSN
+	ctx = task.WithExecutionSession(ctx, task.ExecutionSession{
+		SessionID: session.ID, RequestID: session.RequestID, DeviceOUI: session.DeviceOUI,
+		ProductClass: session.ProductClass, Authenticated: session.Authenticated,
+	})
 	for skipped := 0; skipped < maxStaleTaskSkipsPerDispatch; skipped++ {
 		nextTask, err := h.taskService.PopTask(ctx, deviceSN)
 		if err != nil || nextTask == nil {
@@ -1513,7 +1526,7 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 
 	// 检查队列中是否有更多仍满足 PG pending fence 的任务。
 	deviceSN := session.DeviceSN
-	nextTask, newCWMPID, err := h.popAndMarkNextTask(r.Context(), deviceSN, log)
+	nextTask, newCWMPID, err := h.popAndMarkNextTask(r.Context(), session, log)
 	if err != nil {
 		log.Error("pop next sendable task after fault", zap.Error(err))
 	} else if nextTask != nil {

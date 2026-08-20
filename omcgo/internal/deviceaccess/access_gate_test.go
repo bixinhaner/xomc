@@ -36,6 +36,7 @@ type accessGateRepositoryStub struct {
 	observation Observation
 	context     EvaluationContext
 	saved       *DecisionChange
+	snapshots   []IdentitySnapshot
 	saveCount   int
 }
 
@@ -46,7 +47,18 @@ func (s *accessGateRepositoryStub) LoadEvaluationContext(context.Context, string
 func (s *accessGateRepositoryStub) SaveDecision(_ context.Context, change DecisionChange) (SavedDecision, error) {
 	s.saved = &change
 	s.saveCount++
-	return SavedDecision{}, nil
+	decisionID := uuid.New()
+	if change.IdentitySnapshot != nil {
+		snapshot := *change.IdentitySnapshot
+		snapshot.DecisionID = decisionID.String()
+		s.snapshots = append(s.snapshots, snapshot)
+	}
+	return SavedDecision{ID: decisionID}, nil
+}
+
+func (s *accessGateRepositoryStub) SaveIdentitySnapshot(_ context.Context, snapshot IdentitySnapshot) error {
+	s.snapshots = append(s.snapshots, snapshot)
+	return nil
 }
 
 func (s *accessGateRepositoryStub) UpsertCandidateObservation(_ context.Context, observation Observation) (Candidate, error) {
@@ -98,6 +110,37 @@ func TestAccessGateUnknownAssetRequiresReview(t *testing.T) {
 	require.NotNil(t, repository.saved)
 	require.Equal(t, "evt-unknown", repository.saved.TriggerEventID)
 	require.Equal(t, event.SubjectDeviceAccessReviewRequired, repository.saved.Outbox.EventType)
+}
+
+func TestAccessGatePersistsInformIdentitySnapshotWithStableTrigger(t *testing.T) {
+	repository := &accessGateRepositoryStub{}
+	gate := NewAccessGate(repository, accessGateAssetStub{evidence: AssetEvidence{
+		Source: AssetEvidenceSourceDevice, ExpectedOUI: "48BF74", ExpectedProductClass: "BaiStation",
+	}}, accessGatePolicyStub{policy: CompiledPolicy{ListEntries: []CompiledListEntry{{
+		ID: "allow-1", Type: ListEntryTypeAllow, IdentityType: IdentityTypeSerialNumber,
+		IdentityValue: "SN-SNAPSHOT", Status: ListEntryStatusActive,
+	}}}})
+	observedAt := time.Date(2026, 8, 19, 11, 30, 0, 0, time.UTC)
+	gate.SetClock(func() time.Time { return observedAt })
+
+	decision, err := gate.Admit(context.Background(), devicepkg.AccessObservation{
+		Carrier: model.CarrierCMCC, SerialNumber: "SN-SNAPSHOT", OUI: "48BF74", ProductClass: "BaiStation",
+		RemoteIP: "192.0.2.10", Authenticated: true, AuthMethod: "digest", CredentialID: "auth-user",
+		DeviceCode: "SITE-001", CloudKey: "CLOUD1",
+		CarrierIdentityResolved: true, TriggerType: TriggerInformBoot, InformEvent: "1 BOOT", EventID: "request-1",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, devicepkg.AccessDecisionAccepted, decision.State)
+	require.Len(t, repository.snapshots, 1)
+	snapshot := repository.snapshots[0]
+	require.Equal(t, "request-1", snapshot.RequestID)
+	require.Equal(t, "CLOUD1", snapshot.CloudKey)
+	require.Equal(t, "SITE-001", snapshot.DeviceCode)
+	require.Equal(t, "1 BOOT", snapshot.InformEvent)
+	require.Equal(t, IdentityStatusResolved, snapshot.IdentityStatus)
+	require.Equal(t, observedAt, snapshot.InformTime)
+	require.Equal(t, TriggerInformBoot, repository.saved.TriggerType)
 }
 
 func TestAccessGateBypassesWithoutCreatingCandidateWhenBusinessSwitchIsDisabled(t *testing.T) {
@@ -177,6 +220,21 @@ func TestAccessGateRejectsAssetIdentityMismatch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, devicepkg.AccessDecisionRejected, decision.State)
 	require.Equal(t, string(ReasonIdentityMismatch), decision.ReasonCode)
+}
+
+func TestRequiredCarrierIdentityEvidenceCannotBeSilentlyInferredFromOUI(t *testing.T) {
+	assetCode := "SITE-001"
+	asset := AssetEvidence{ExpectedOUI: "48BF74", ExpectedProductClass: "BaiStation", SiteID: &assetCode}
+
+	require.Equal(t, CheckMissing, identityCheckResult(devicepkg.AccessObservation{
+		OUI: "48BF74", ProductClass: "BaiStation", CarrierIdentityResolved: true,
+		DeviceCodeRequired: true,
+	}, asset))
+	require.Equal(t, ReasonDeviceCodeMissing, identityMissingReason(devicepkg.AccessObservation{DeviceCodeRequired: true}))
+	require.Equal(t, ReasonCloudKeyMissing, identityMissingReason(devicepkg.AccessObservation{CloudKeyRequired: true}))
+	require.Equal(t, CheckFailed, identityCheckResult(devicepkg.AccessObservation{
+		OUI: "48BF74", ProductClass: "BaiStation", DeviceCode: "OTHER-SITE", DeviceCodeRequired: true,
+	}, asset))
 }
 
 func TestAccessGateDoesNotTreatMissingProductClassAsConfirmedMismatch(t *testing.T) {

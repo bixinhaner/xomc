@@ -21,10 +21,14 @@ import (
 // stubDeviceTaskCreator captures fan-out invocations for assertion.
 type stubDeviceTaskCreator struct {
 	calls [][]*task.CreateTaskRequest
+	err   error
 }
 
 func (s *stubDeviceTaskCreator) BatchCreateTasks(_ context.Context, reqs []*task.CreateTaskRequest) ([]*task.Task, error) {
 	s.calls = append(s.calls, reqs)
+	if s.err != nil {
+		return nil, s.err
+	}
 	out := make([]*task.Task, len(reqs))
 	for i := range reqs {
 		out[i] = &task.Task{ID: uuid.New().String()}
@@ -1477,6 +1481,110 @@ func TestService_ExecuteCommand_RawParamPaths_LST(t *testing.T) {
 	}, got.Names)
 }
 
+func TestService_ExecuteCommand_AdmissionDeniedMarksParentFailed(t *testing.T) {
+	admissionErr := fmt.Errorf("device SN-REJECTED: %w: normal_tasks_frozen_by_access_state", task.ErrTaskAdmissionDenied)
+	var persisted *MMLTask
+	var updated bool
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, mmlTask *MMLTask) error {
+			mmlTask.ID = uuid.New()
+			persisted = mmlTask
+			return nil
+		},
+		updateFn: func(_ context.Context, mmlTask *MMLTask) error {
+			updated = true
+			persisted = mmlTask
+			return nil
+		},
+	}
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+	svc.SetFanouter(NewFanouter(&stubDeviceTaskCreator{err: admissionErr}, nil, nil, nil, zap.NewNop()))
+
+	result, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		DeviceSNs:     []string{"SN-REJECTED"},
+		ParamPaths:    []string{"Device.DeviceInfo.SerialNumber"},
+		OperationType: "LST",
+		Creator:       "admin",
+	})
+
+	require.ErrorIs(t, err, task.ErrTaskAdmissionDenied)
+	assert.Nil(t, result)
+	require.True(t, updated, "fanout 被拒绝后必须持久化父任务失败状态")
+	require.NotNil(t, persisted)
+	assert.Equal(t, TaskFailed, persisted.Status)
+	require.NotNil(t, persisted.Result)
+	assert.Equal(t, ResultFailed, *persisted.Result)
+	assert.Equal(t, persisted.TotalDevices, persisted.FailedCount)
+	assert.NotNil(t, persisted.FinishedAt)
+	require.Len(t, persisted.Results, 1)
+	assert.Equal(t, "MML_TASK_ADMISSION_DENIED", persisted.Results[0]["code"])
+}
+
+func TestService_ExecuteCommand_NonAdmissionFanoutErrorKeepsLegacyBehavior(t *testing.T) {
+	var updated bool
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, mmlTask *MMLTask) error {
+			mmlTask.ID = uuid.New()
+			return nil
+		},
+		updateFn: func(_ context.Context, _ *MMLTask) error {
+			updated = true
+			return nil
+		},
+	}
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+	svc.SetFanouter(NewFanouter(&stubDeviceTaskCreator{err: errors.New("temporary storage failure")}, nil, nil, nil, zap.NewNop()))
+
+	result, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		DeviceSNs:     []string{"SN-A"},
+		ParamPaths:    []string{"Device.DeviceInfo.SerialNumber"},
+		OperationType: "LST",
+		Creator:       "admin",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, TaskPending, result.Status)
+	assert.False(t, updated, "非接入门禁类 fanout 错误必须保持原有处理语义")
+}
+
+func TestService_CreateAndFanoutTask_AdmissionDeniedMarksParentFailed(t *testing.T) {
+	admissionErr := fmt.Errorf("device SN-REJECTED: %w: normal_tasks_frozen_by_access_state", task.ErrTaskAdmissionDenied)
+	var updated bool
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, mmlTask *MMLTask) error {
+			mmlTask.ID = uuid.New()
+			return nil
+		},
+		updateFn: func(_ context.Context, _ *MMLTask) error {
+			updated = true
+			return nil
+		},
+	}
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+	svc.SetFanouter(NewFanouter(&stubDeviceTaskCreator{err: admissionErr}, nil, nil, nil, zap.NewNop()))
+	mmlTask := &MMLTask{
+		DeviceSNs: []string{"SN-REJECTED"},
+		Commands: []map[string]interface{}{{
+			"command_code": "REBOOT",
+			"rpc_method":   "Reboot",
+		}},
+		ExecuteType: ExecuteImmediate,
+		Status:      TaskPending,
+		Creator:     "admin",
+	}
+
+	err := svc.CreateAndFanoutTask(context.Background(), mmlTask, false)
+
+	require.ErrorIs(t, err, task.ErrTaskAdmissionDenied)
+	require.True(t, updated, "console fanout 被拒绝后必须持久化父任务失败状态")
+	assert.Equal(t, TaskFailed, mmlTask.Status)
+	require.NotNil(t, mmlTask.Result)
+	assert.Equal(t, ResultFailed, *mmlTask.Result)
+	assert.Equal(t, 1, mmlTask.FailedCount)
+	assert.NotNil(t, mmlTask.FinishedAt)
+}
+
 func TestService_ExecuteCommand_RawParamPaths_DSP_DefaultsToLST(t *testing.T) {
 	// 不传 OperationType（默认 LST），仍应走通
 	cmdRepo := &mockCommandRepo{}
@@ -1694,6 +1802,46 @@ func TestService_StartTask_PendingToRunning(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, TaskRunning, result.Status)
+}
+
+func TestService_StartTask_AdmissionDeniedMarksParentFailed(t *testing.T) {
+	taskID := uuid.New()
+	existing := &MMLTask{
+		ID:           taskID,
+		Status:       TaskPending,
+		ExecuteType:  ExecuteImmediate,
+		DeviceSNs:    []string{"SN-REJECTED"},
+		TotalDevices: 1,
+		Commands: []map[string]interface{}{{
+			"command_code": "REBOOT",
+			"rpc_method":   "Reboot",
+		}},
+	}
+	admissionErr := fmt.Errorf("device SN-REJECTED: %w: normal_tasks_frozen_by_access_state", task.ErrTaskAdmissionDenied)
+	var updated bool
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*MMLTask, error) {
+			return existing, nil
+		},
+		updateStatusFn: func(_ context.Context, _ uuid.UUID, status TaskStatus) error {
+			assert.Equal(t, TaskRunning, status)
+			return nil
+		},
+		updateFn: func(_ context.Context, _ *MMLTask) error {
+			updated = true
+			return nil
+		},
+	}
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+	svc.SetFanouter(NewFanouter(&stubDeviceTaskCreator{err: admissionErr}, nil, nil, nil, zap.NewNop()))
+
+	result, err := svc.StartTask(context.Background(), taskID)
+
+	require.ErrorIs(t, err, task.ErrTaskAdmissionDenied)
+	assert.Nil(t, result)
+	require.True(t, updated)
+	assert.Equal(t, TaskFailed, existing.Status)
+	assert.NotNil(t, existing.FinishedAt)
 }
 
 func TestService_StartTask_RunningFails(t *testing.T) {

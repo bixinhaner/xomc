@@ -28,6 +28,10 @@ var historyColumns = []string{
 	"status",
 	"error_message",
 	"alarm_id",
+	"source_type",
+	"source_id",
+	"event_id",
+	"correlation_id",
 	"retry_count",
 	"sent_at",
 	"created_at",
@@ -74,7 +78,22 @@ func (r *PgHistoryRepository) List(ctx context.Context, filter NotificationHisto
 		base = base.Where(sq.Eq{"alarm_id": *filter.AlarmID})
 		countBase = countBase.Where(sq.Eq{"alarm_id": *filter.AlarmID})
 	}
-
+	if filter.SourceType != nil && *filter.SourceType != "" {
+		base = base.Where(sq.Eq{"source_type": *filter.SourceType})
+		countBase = countBase.Where(sq.Eq{"source_type": *filter.SourceType})
+	}
+	if filter.SourceID != nil {
+		base = base.Where(sq.Eq{"source_id": *filter.SourceID})
+		countBase = countBase.Where(sq.Eq{"source_id": *filter.SourceID})
+	}
+	if filter.EventID != nil {
+		base = base.Where(sq.Eq{"event_id": *filter.EventID})
+		countBase = countBase.Where(sq.Eq{"event_id": *filter.EventID})
+	}
+	if filter.CorrelationID != nil && *filter.CorrelationID != "" {
+		base = base.Where(sq.Eq{"correlation_id": *filter.CorrelationID})
+		countBase = countBase.Where(sq.Eq{"correlation_id": *filter.CorrelationID})
+	}
 	countSQL, countArgs, err := countBase.ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build count history SQL: %w", err)
@@ -160,8 +179,10 @@ func (r *PgHistoryRepository) Insert(ctx context.Context, h *NotificationHistory
 		Values(
 			h.ID, h.TemplateID, h.Channel, h.Recipients,
 			h.Subject, h.Body, h.Status, h.ErrorMessage,
-			h.AlarmID, h.RetryCount, h.SentAt, h.CreatedAt,
+			h.AlarmID, strings.TrimSpace(h.SourceType), h.SourceID, h.EventID, strings.TrimSpace(h.CorrelationID),
+			h.RetryCount, h.SentAt, h.CreatedAt,
 		).
+		Suffix("ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO NOTHING").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build insert history SQL: %w", err)
@@ -171,6 +192,50 @@ func (r *PgHistoryRepository) Insert(ctx context.Context, h *NotificationHistory
 		return fmt.Errorf("insert history: %w", err)
 	}
 	return nil
+}
+
+// BackfillDeviceAccessDecisions closes the notification-history gap for
+// decisions committed before the decision subscriber was deployed. The
+// decision UUID is also the event UUID, so the backfill and live subscriber
+// remain idempotent through the existing unique event index.
+func (r *PgHistoryRepository) BackfillDeviceAccessDecisions(ctx context.Context) (int64, error) {
+	selectRows := storage.Psql.Select(
+		"decision.id", "NULL::uuid", "'system'", "ARRAY['device-access-operators']::text[]",
+		`CASE decision.new_state
+			WHEN 'accepted' THEN 'DEVICE_ACCESS_ACCEPTED'
+			WHEN 'rejected' THEN 'DEVICE_ACCESS_REJECTED'
+			WHEN 'revoked' THEN 'DEVICE_ACCESS_REVOKED'
+			ELSE 'DEVICE_ACCESS_REVIEW_REQUIRED'
+		END`,
+		`jsonb_build_object(
+			'carrier', decision.carrier,
+			'serial_number', decision.serial_number,
+			'device_id', decision.device_id,
+			'candidate_id', decision.candidate_id,
+			'state', decision.new_state,
+			'reason_code', decision.reason_code,
+			'policy_version_id', decision.policy_version_id,
+			'decision_version', decision.decision_version
+		)::text`,
+		"'not_configured'", "NULL::text", "NULL::uuid", "'device_access_decision'",
+		"decision.id", "decision.id", "COALESCE(decision.trigger_event_id, '')", "0", "NULL::timestamptz", "decision.occurred_at",
+	).From("device_access_decisions decision").
+		Where(sq.Eq{"decision.new_state": []string{"accepted", "rejected", "review_required", "revoked"}}).
+		Where(`NOT EXISTS (
+			SELECT 1 FROM notification_history history WHERE history.event_id = decision.id
+		)`)
+	query, args, err := storage.Psql.Insert("notification_history").Columns(historyColumns...).
+		Select(selectRows).
+		Suffix("ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO NOTHING").
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build device access decision notification backfill: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("backfill device access decision notification history: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // UpdateStatus updates the delivery status of an existing history entry.
@@ -203,7 +268,8 @@ func scanHistory(row interface{ Scan(dest ...any) error }) (*NotificationHistory
 	err := row.Scan(
 		&h.ID, &h.TemplateID, &h.Channel, &h.Recipients,
 		&h.Subject, &h.Body, &h.Status, &h.ErrorMessage,
-		&h.AlarmID, &h.RetryCount, &h.SentAt, &h.CreatedAt,
+		&h.AlarmID, &h.SourceType, &h.SourceID, &h.EventID, &h.CorrelationID,
+		&h.RetryCount, &h.SentAt, &h.CreatedAt,
 	)
 	if err != nil {
 		return nil, err

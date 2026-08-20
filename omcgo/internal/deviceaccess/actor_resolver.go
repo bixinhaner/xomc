@@ -76,7 +76,10 @@ func (r ContextActorResolver) ResolveActor(c *gin.Context) (PolicyActor, error) 
 			return PolicyActor{}, commonerrors.ErrForbidden
 		}
 	}
-	return PolicyActor{Carrier: carrier, SubjectID: subjectID, VisibleGroups: visibleGroups}, nil
+	return PolicyActor{
+		Carrier: carrier, SubjectID: subjectID,
+		Username: contextString(c, "username"), VisibleGroups: visibleGroups,
+	}, nil
 }
 
 func contextString(c *gin.Context, key string) string {

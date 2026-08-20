@@ -102,7 +102,11 @@ type Session struct {
 
 	// DeviceSN 是设备序列号，从 Inform.DeviceId.SerialNumber 提取。
 	// 用作设备查找和命令队列访问的主键。
-	DeviceSN string `json:"device_sn"`
+	DeviceSN      string `json:"device_sn"`
+	DeviceOUI     string `json:"device_oui,omitempty"`
+	ProductClass  string `json:"product_class,omitempty"`
+	RequestID     string `json:"request_id,omitempty"`
+	Authenticated bool   `json:"authenticated"`
 
 	// State 是状态机中的当前会话状态。
 	State SessionState `json:"state"`

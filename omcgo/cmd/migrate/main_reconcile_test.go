@@ -161,14 +161,19 @@ func TestMainBaselineReconcileRepairsAndReplaysPostgreSQL16(t *testing.T) {
 	_, err = db.Exec(`
 DROP TABLE public.geofence_carrier_settings;
 DROP TABLE
+	public.device_access_action_attempts,
     public.device_access_actions,
     public.device_access_decision_checks,
+	public.device_access_decision_archives,
+	public.device_access_identity_snapshots,
     public.device_access_decisions,
     public.device_access_states,
     public.device_access_evidence,
     public.device_access_candidates,
+	public.device_access_import_rows,
     public.device_access_conditions,
     public.device_access_rules,
+	public.device_access_import_batches,
     public.device_access_policy_versions,
     public.device_access_policy_sets,
     public.device_access_list_entries,
@@ -211,6 +216,74 @@ INSERT INTO public.alarm_filters (
 		require.NoError(t, reconcileMainBaselineSeed(db, seedDir))
 	}
 
+	// Older pre-release databases could retain the reject-only policy check
+	// under an unexpected name. Reconciliation must remove every stale check,
+	// not only the canonical constraint name.
+	_, err = db.Exec(`
+ALTER TABLE public.device_access_policy_versions
+    ADD CONSTRAINT legacy_reject_only_default_action
+    CHECK (default_action = 'reject')
+`)
+	require.NoError(t, err)
+	require.NoError(t, reconcileMainBaselineSchema(db, seedDir))
+
+	var defaultActionChecks int
+	require.NoError(t, db.QueryRow(`
+SELECT COUNT(*)
+FROM pg_catalog.pg_constraint constraint_row
+WHERE constraint_row.conrelid = 'public.device_access_policy_versions'::regclass
+  AND constraint_row.contype = 'c'
+  AND pg_get_constraintdef(constraint_row.oid) ILIKE '%default_action%'
+`).Scan(&defaultActionChecks))
+	require.Equal(t, 1, defaultActionChecks)
+
+	policySetID := uuid.New()
+	_, err = db.Exec(`
+INSERT INTO public.device_access_policy_sets (id, name, carrier)
+VALUES ($1, 'review-policy', 'cmcc')
+`, policySetID)
+	require.NoError(t, err)
+	_, err = db.Exec(`
+INSERT INTO public.device_access_policy_versions (
+    policy_set_id, version, status, default_action, failure_mode,
+    collection_timeout_seconds, content_hash
+) VALUES ($1, 1, 'draft', 'review', 'review_hold', 900, $2)
+`, policySetID, strings.Repeat("a", 64))
+	require.NoError(t, err)
+
+	candidateID, decisionID, actionID := uuid.New(), uuid.New(), uuid.New()
+	_, err = db.Exec(`
+INSERT INTO public.device_access_candidates (id, carrier, serial_number, oui, expires_at)
+VALUES ($1, 'cmcc', 'LEGACY-RF-1', 'AABBCC', now() + interval '1 day')
+`, candidateID)
+	require.NoError(t, err)
+	_, err = db.Exec(`
+INSERT INTO public.device_access_decisions (
+    id, carrier, serial_number, candidate_id, trigger_type, trigger_event_id,
+    new_state, decision, reason_code, decision_version
+) VALUES ($2, 'cmcc', 'LEGACY-RF-1', $1, 'inform', 'legacy-event', 'rejected', 'reject', 'denylist', 1)
+`, candidateID, decisionID)
+	require.NoError(t, err)
+	_, err = db.Exec(`
+INSERT INTO public.device_access_actions (
+    id, candidate_id, decision_id, action_type, direction, status,
+    idempotency_key, attempts, completed_at
+) VALUES ($3, $1, $2, 'rf_off', 'contain', 'succeeded', 'legacy-action', 0, now())
+`, candidateID, decisionID, actionID)
+	require.NoError(t, err)
+	require.NoError(t, reconcileMainBaselineSchema(db, seedDir))
+
+	var actionStatus, failureCode string
+	var repairRequired bool
+	require.NoError(t, db.QueryRow(`
+SELECT status, last_failure_code, manual_repair_required
+FROM public.device_access_actions
+WHERE id = $1
+`, actionID).Scan(&actionStatus, &failureCode, &repairRequired))
+	require.Equal(t, "dead", actionStatus)
+	require.Equal(t, "evidence_missing", failureCode)
+	require.True(t, repairRequired)
+
 	for _, relation := range []string{
 		"public.geofence_carrier_settings",
 		"public.geofence_definitions",
@@ -250,7 +323,7 @@ SELECT COUNT(*) FROM public.menus WHERE permission_key = 'device:access-control'
 	require.NoError(t, db.QueryRow(`
 SELECT COUNT(*) FROM public.api_endpoints WHERE api_group = 'device-access'
 `).Scan(&accessEndpoints))
-	require.Equal(t, 14, accessEndpoints)
+	require.Equal(t, 39, accessEndpoints)
 
 	var emailConfigRows int
 	require.NoError(t, db.QueryRow(`

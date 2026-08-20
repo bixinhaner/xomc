@@ -1467,7 +1467,7 @@ func TestPopAndMarkNextTaskSkipsStaleTask(t *testing.T) {
 	taskSvc.markSentErrors[stale.ID] = fmt.Errorf("stale fence: %w", task.ErrTaskNotPending)
 
 	h := &Handler{taskService: taskSvc}
-	got, cwmpID, err := h.popAndMarkNextTask(context.Background(), "SN-STALE", zap.NewNop())
+	got, cwmpID, err := h.popAndMarkNextTask(context.Background(), &Session{DeviceSN: "SN-STALE"}, zap.NewNop())
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, valid.ID, got.ID)

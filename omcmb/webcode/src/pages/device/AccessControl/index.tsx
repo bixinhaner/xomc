@@ -8,21 +8,27 @@ import AccessStatesPanel from './AccessStatesPanel';
 import AccessActionsPanel from './AccessActionsPanel';
 import { AccessListPanel, CandidatePanel, PolicyPanel } from './GovernancePanels';
 import RuntimeSwitch from './RuntimeSwitch';
+import styles from './AccessControl.module.css';
 
 const PERM_MANAGE_LIST = 'device:access-control:manage-list';
 const PERM_REVIEW = 'device:access-control:review';
 const PERM_ACTION = 'device:access-control:action';
 const PERM_PUBLISH = 'device:access-control:publish';
 const PERM_SETTINGS = 'device:access-control:settings';
+const PERM_AUDIT = 'device:access-control:audit';
 
 export default function AccessControl() {
   const t = useT();
   const [operatorCode, setOperatorCode] = useState('cmcc');
+  const [activeTab, setActiveTab] = useState('states');
+  const [ruleDrilldown, setRuleDrilldown] = useState<{ policyVersionId: string; matchedRuleId: string }>();
+  const [candidateSerialNumber, setCandidateSerialNumber] = useState<string>();
   const canManageList = usePermission(PERM_MANAGE_LIST);
   const canReview = usePermission(PERM_REVIEW);
   const canAction = usePermission(PERM_ACTION);
   const canPublish = usePermission(PERM_PUBLISH);
   const canConfigureSettings = usePermission(PERM_SETTINGS);
+  const canArchiveAudit = usePermission(PERM_AUDIT);
   const runtimeSettings = useDeviceAccessRuntimeSettings(operatorCode);
   const operators = ['cmcc', 'ctcc', 'cucc'].map((value) => ({ value, label: t(`deviceAccess.operator.${value}`) }));
 
@@ -33,11 +39,11 @@ export default function AccessControl() {
       extra={<Select value={operatorCode} options={operators} onChange={setOperatorCode} style={{ width: 210 }} aria-label={t('deviceAccess.operator')} />}
     >
       <RuntimeSwitch operatorCode={operatorCode} allowed={canConfigureSettings} t={t} />
-      <Tabs destroyOnHidden items={[
-        { key: 'states', label: t('deviceAccess.tabs.states'), children: <AccessStatesPanel operatorCode={operatorCode} t={t} canReevaluate={canPublish} businessEnabled={runtimeSettings.data?.enabled ?? false} /> },
-        { key: 'policies', label: t('deviceAccess.tabs.policies'), children: <PolicyPanel operatorCode={operatorCode} t={t} allowed={canPublish} /> },
-        { key: 'lists', label: t('deviceAccess.tabs.lists'), children: <AccessListPanel operatorCode={operatorCode} t={t} allowed={canManageList} /> },
-        { key: 'candidates', label: t('deviceAccess.tabs.candidates'), children: <CandidatePanel operatorCode={operatorCode} t={t} allowed={canReview} /> },
+      <Tabs className={styles.pageTabs} activeKey={activeTab} onChange={setActiveTab} destroyOnHidden items={[
+        { key: 'states', label: t('deviceAccess.tabs.states'), children: <AccessStatesPanel operatorCode={operatorCode} t={t} canReevaluate={canPublish} canManageList={canManageList} canArchive={canArchiveAudit} businessEnabled={runtimeSettings.data?.enabled ?? false} ruleDrilldown={ruleDrilldown} onReviewCandidate={(serialNumber) => { setCandidateSerialNumber(serialNumber); setActiveTab('candidates'); }} /> },
+        { key: 'policies', label: t('deviceAccess.tabs.policies'), children: <PolicyPanel operatorCode={operatorCode} t={t} allowed={canPublish} onDrilldownRule={(policyVersionId, matchedRuleId) => { setRuleDrilldown({ policyVersionId, matchedRuleId }); setActiveTab('states'); }} /> },
+        { key: 'lists', label: t('deviceAccess.tabs.lists'), children: <AccessListPanel operatorCode={operatorCode} t={t} allowed={canManageList} businessEnabled={runtimeSettings.data?.enabled ?? false} /> },
+        { key: 'candidates', label: t('deviceAccess.tabs.candidates'), children: <CandidatePanel operatorCode={operatorCode} t={t} allowed={canReview} businessEnabled={runtimeSettings.data?.enabled ?? false} initialSerialNumber={candidateSerialNumber} /> },
         { key: 'actions', label: t('deviceAccess.tabs.actions'), children: <AccessActionsPanel operatorCode={operatorCode} t={t} allowed={canAction} /> },
       ]} />
     </ListPageLayout>

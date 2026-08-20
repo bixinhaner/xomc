@@ -1,6 +1,7 @@
 package deviceaccess
 
 import (
+	"bytes"
 	"math"
 	"net"
 	"slices"
@@ -10,6 +11,17 @@ import (
 type Evaluator struct{}
 
 func (Evaluator) Evaluate(input EvaluationInput) Decision {
+	if profile, ok := matchingBypassProfile(input); ok {
+		return Decision{
+			State:           AccessStateAccepted,
+			EffectiveAction: EffectiveActionBypass,
+			ReasonCode:      ReasonBypassProfileMatched,
+			Checks: []DecisionCheck{{
+				CheckID: profile.ID, CheckType: ConditionTypeIdentity, Result: CheckPassed,
+				ExpectedSummary: "bypass_profile:" + profile.Name,
+			}},
+		}
+	}
 	if input.AuthenticationRequired && !input.Authenticated {
 		return reject(AccessStateRejected, EffectiveActionReject, ReasonAuthenticationFailed)
 	}
@@ -28,6 +40,17 @@ func (Evaluator) Evaluate(input EvaluationInput) Decision {
 		decision.MatchedEntryID = entry.ID
 		return decision
 	}
+	// Allowlisted devices bypass ordinary access-control evidence and planning
+	// rules. Protocol authentication, retired assets, revoked entries and the
+	// denylist remain higher-priority safety gates above this branch.
+	if entry, ok := matchingListEntry(input, ListEntryTypeAllow); ok {
+		return Decision{
+			State:           AccessStateAccepted,
+			EffectiveAction: EffectiveActionAccept,
+			ReasonCode:      ReasonAllowlistMatched,
+			MatchedEntryID:  entry.ID,
+		}
+	}
 
 	if input.Evidence.Identity == CheckFailed {
 		return reject(AccessStateRejected, EffectiveActionReject, ReasonIdentityMismatch)
@@ -42,21 +65,19 @@ func (Evaluator) Evaluate(input EvaluationInput) Decision {
 		return review(AccessStateReviewRequired, ReasonOwnershipUnverified, nil)
 	}
 
-	if entry, ok := matchingListEntry(input, ListEntryTypeAllow); ok {
-		return Decision{
-			State:           AccessStateAccepted,
-			EffectiveAction: EffectiveActionAccept,
-			ReasonCode:      ReasonAllowlistMatched,
-			MatchedEntryID:  entry.ID,
-		}
-	}
 	applicable := make([]CompiledRule, 0, len(input.Policy.Rules))
 	for _, rule := range input.Policy.Rules {
 		if rule.Enabled && serialScopeMatches(rule.SerialScope, input.SerialNumber) && len(rule.Conditions) > 0 {
 			applicable = append(applicable, rule)
 		}
 	}
+	slices.SortStableFunc(applicable, func(left, right CompiledRule) int {
+		return left.Priority - right.Priority
+	})
 	if len(applicable) == 0 {
+		if input.Policy.DefaultAction == PolicyDefaultActionReview {
+			return review(AccessStateReviewRequired, ReasonNoApplicableRule, nil)
+		}
 		return reject(AccessStateRejected, EffectiveActionReject, ReasonNoApplicableRule)
 	}
 
@@ -87,13 +108,13 @@ func (Evaluator) Evaluate(input EvaluationInput) Decision {
 
 	switch {
 	case hasSystemError:
-		return review(AccessStateReviewRequired, ReasonEvidenceSystemError, checks)
+		return evidenceFailureDecision(input, ReasonEvidenceSystemError, checks)
 	case hasCollectionFailure:
-		return review(AccessStateCollecting, ReasonEvidenceCollectionFailed, checks)
+		return evidenceFailureDecision(input, ReasonEvidenceCollectionFailed, checks)
 	case hasStale:
-		return review(AccessStateCollecting, ReasonEvidenceStale, checks)
+		return evidenceFailureDecision(input, ReasonEvidenceStale, checks)
 	case hasMissing:
-		return review(AccessStateCollecting, ReasonEvidenceMissing, checks)
+		return evidenceFailureDecision(input, ReasonEvidenceMissing, checks)
 	case (input.ExistingState == AccessStateAccepted || input.ExistingState == AccessStateRevalidating) && !input.ConfirmedMismatch:
 		return review(AccessStateRevalidating, ReasonRuleMismatchPendingConfirmation, checks)
 	case input.ConfirmedMismatch:
@@ -105,6 +126,50 @@ func (Evaluator) Evaluate(input EvaluationInput) Decision {
 		decision.Checks = checks
 		return decision
 	}
+}
+
+func matchingBypassProfile(input EvaluationInput) (BypassProfile, bool) {
+	profiles := append([]BypassProfile(nil), input.Policy.BypassProfiles...)
+	slices.SortStableFunc(profiles, func(left, right BypassProfile) int { return left.Priority - right.Priority })
+	for _, profile := range profiles {
+		if !profile.Enabled || (profile.ValidFrom != nil && input.EvaluatedAt.Before(*profile.ValidFrom)) ||
+			(profile.ValidUntil != nil && !input.EvaluatedAt.Before(*profile.ValidUntil)) {
+			continue
+		}
+		if profile.SerialScope != nil && !serialScopeMatches(*profile.SerialScope, input.SerialNumber) {
+			continue
+		}
+		if len(profile.OUIs) > 0 && !containsFold(profile.OUIs, input.OUI) {
+			continue
+		}
+		if len(profile.ProductClasses) > 0 && !containsFold(profile.ProductClasses, input.ProductClass) {
+			continue
+		}
+		return profile, true
+	}
+	return BypassProfile{}, false
+}
+
+func containsFold(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), target) {
+			return true
+		}
+	}
+	return false
+}
+
+func evidenceFailureDecision(input EvaluationInput, reason ReasonCode, checks []DecisionCheck) Decision {
+	if input.CollectionDeadline == nil || input.EvaluatedAt.Before(*input.CollectionDeadline) {
+		return review(AccessStateCollecting, reason, checks)
+	}
+	if input.Policy.FailureMode == FailureModeReviewHold {
+		return review(AccessStateReviewRequired, reason, checks)
+	}
+	decision := reject(AccessStateRejected, EffectiveActionReject, reason)
+	decision.Checks = checks
+	return decision
 }
 
 func reject(state AccessState, action EffectiveAction, reason ReasonCode) Decision {
@@ -199,7 +264,7 @@ func evaluateCondition(input EvaluationInput, condition CompiledCondition) (Deci
 	}
 
 	if !exists || evidence.Status == EvidenceStatusMissing {
-		if condition.Type == ConditionTypeGPS && condition.GeoFence != nil && condition.GeoFence.AllowMissing {
+		if condition.Type == ConditionTypeGPS && conditionAllowsMissingGPS(condition) {
 			check.Result = CheckSkipped
 			return check, conditionOutcomePassed
 		}
@@ -296,11 +361,52 @@ func conditionMatches(condition CompiledCondition, evidence EvidenceValue) (bool
 			return false, true
 		}
 		return network.Contains(ip), true
+	case ConditionOperatorIPRange:
+		ranges := condition.IPRanges
+		if condition.IPRange != nil {
+			ranges = append(ranges, *condition.IPRange)
+		}
+		if len(ranges) == 0 {
+			return false, false
+		}
+		observed, observedBits := comparableIP(evidence.Text)
+		if observed == nil {
+			return false, false
+		}
+		for _, value := range ranges {
+			start, startBits := comparableIP(value.Start)
+			end, endBits := comparableIP(value.End)
+			if start == nil || end == nil || startBits != endBits || startBits != observedBits || bytes.Compare(start, end) > 0 {
+				return false, false
+			}
+			if bytes.Compare(observed, start) >= 0 && bytes.Compare(observed, end) <= 0 {
+				return true, true
+			}
+		}
+		return false, true
 	case ConditionOperatorWithinRadius:
 		if condition.GeoFence == nil || condition.GeoFence.RadiusMeters < 0 || evidence.Point == nil {
 			return false, false
 		}
 		return distanceMeters(condition.GeoFence.Center, *evidence.Point) <= condition.GeoFence.RadiusMeters, true
+	case ConditionOperatorWithinBounds:
+		bounds := condition.GeoBoundsAny
+		if condition.GeoBounds != nil {
+			bounds = append(bounds, *condition.GeoBounds)
+		}
+		if len(bounds) == 0 || evidence.Point == nil {
+			return false, false
+		}
+		for _, value := range bounds {
+			if !validGeoBounds(value) {
+				return false, false
+			}
+			if evidence.Point.Latitude >= value.MinLatitude && evidence.Point.Latitude <= value.MaxLatitude &&
+				evidence.Point.Longitude >= value.MinLongitude && evidence.Point.Longitude <= value.MaxLongitude {
+				return true, true
+			}
+		}
+		return false, true
 	default:
 		return false, false
 	}
@@ -318,9 +424,61 @@ func expectedSummary(condition CompiledCondition) string {
 			return "geofence;allow_missing=true"
 		}
 		return "geofence"
+	case ConditionOperatorIPRange:
+		if len(condition.IPRanges) > 0 {
+			parts := make([]string, 0, len(condition.IPRanges))
+			for _, value := range condition.IPRanges {
+				parts = append(parts, value.Start+"-"+value.End)
+			}
+			return strings.Join(parts, ",")
+		}
+		if condition.IPRange == nil {
+			return ""
+		}
+		return condition.IPRange.Start + "-" + condition.IPRange.End
+	case ConditionOperatorWithinBounds:
+		for _, bounds := range condition.GeoBoundsAny {
+			if bounds.AllowMissing {
+				return "geo_bounds_any;allow_missing=true"
+			}
+		}
+		if condition.GeoBounds != nil && condition.GeoBounds.AllowMissing {
+			return "geo_bounds;allow_missing=true"
+		}
+		return "geo_bounds"
 	default:
 		return condition.Expected
 	}
+}
+
+func conditionAllowsMissingGPS(condition CompiledCondition) bool {
+	if condition.GeoFence != nil && condition.GeoFence.AllowMissing ||
+		condition.GeoBounds != nil && condition.GeoBounds.AllowMissing {
+		return true
+	}
+	for _, bounds := range condition.GeoBoundsAny {
+		if bounds.AllowMissing {
+			return true
+		}
+	}
+	return false
+}
+
+func comparableIP(value string) (net.IP, int) {
+	ip := net.ParseIP(value)
+	if ip == nil {
+		return nil, 0
+	}
+	if ipv4 := ip.To4(); ipv4 != nil {
+		return ipv4, net.IPv4len
+	}
+	return ip.To16(), net.IPv6len
+}
+
+func validGeoBounds(bounds GeoBounds) bool {
+	return bounds.MinLatitude >= -90 && bounds.MaxLatitude <= 90 &&
+		bounds.MinLongitude >= -180 && bounds.MaxLongitude <= 180 &&
+		bounds.MinLatitude <= bounds.MaxLatitude && bounds.MinLongitude <= bounds.MaxLongitude
 }
 
 func observedSummary(evidence EvidenceValue) string {

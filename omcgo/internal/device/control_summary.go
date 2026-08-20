@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -14,6 +15,7 @@ import (
 
 const (
 	DeviceControlSourceGeofence = "geofence"
+	DeviceControlSourceAccess   = "device_access"
 
 	DeviceControlPhaseDeactivating   = "deactivating"
 	DeviceControlPhaseVerifying      = "verifying"
@@ -53,6 +55,11 @@ type DeviceControlSummaryReader interface {
 
 type DeviceControlParameterState struct {
 	Path  string `json:"path"`
+	Value string `json:"value"`
+}
+
+type accessParameterValue struct {
+	Name  string `json:"name"`
 	Value string `json:"value"`
 }
 
@@ -379,6 +386,18 @@ func (r *PgDeviceControlSummaryReader) ListHistoryByDeviceID(
 	if err := r.pool.QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("count device control history: %w", err)
 	}
+	accessCountQuery, accessCountArgs, err := storage.Psql.Select("COUNT(*)").
+		From("device_access_actions action").Where(sq.Eq{"action.device_id": deviceID}).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build device access control history count: %w", err)
+	}
+	var accessTotal int64
+	if err := r.pool.QueryRow(ctx, accessCountQuery, accessCountArgs...).Scan(&accessTotal); err != nil {
+		return nil, fmt.Errorf("count device access control history: %w", err)
+	}
+	total += accessTotal
+	offset := (page - 1) * pageSize
+	fetchLimit := offset + pageSize
 
 	query, args, err := storage.Psql.
 		Select(
@@ -400,8 +419,7 @@ func (r *PgDeviceControlSummaryReader) ListHistoryByDeviceID(
 		LeftJoin("geofence_evaluations evaluation ON evaluation.id = action.trigger_evaluation_id").
 		Where(sq.Eq{"action.device_id": deviceID}).
 		OrderBy("action.created_at DESC", "action.id DESC").
-		Limit(uint64(pageSize)).
-		Offset(uint64((page - 1) * pageSize)).
+		Limit(uint64(fetchLimit)).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build device control history: %w", err)
@@ -463,9 +481,158 @@ func (r *PgDeviceControlSummaryReader) ListHistoryByDeviceID(
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate device control history: %w", err)
 	}
+	accessItems, err := r.listDeviceAccessControlHistory(ctx, deviceID, fetchLimit)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, accessItems...)
+	sort.SliceStable(items, func(left, right int) bool {
+		if items[left].CreatedAt.Equal(items[right].CreatedAt) {
+			return items[left].ID.String() > items[right].ID.String()
+		}
+		return items[left].CreatedAt.After(items[right].CreatedAt)
+	})
+	if offset >= len(items) {
+		items = []DeviceControlActionHistory{}
+	} else {
+		end := offset + pageSize
+		if end > len(items) {
+			end = len(items)
+		}
+		items = items[offset:end]
+	}
 	return &DeviceControlActionHistoryList{
 		Items: items, Total: total, Page: page, PageSize: pageSize,
 	}, nil
+}
+
+func (r *PgDeviceControlSummaryReader) listDeviceAccessControlHistory(
+	ctx context.Context,
+	deviceID uuid.UUID,
+	limit int,
+) ([]DeviceControlActionHistory, error) {
+	baseline := latestAccessAttemptSummary("baseline_gpv", "response_summary")
+	write := latestAccessAttemptSummary("spv", "request_summary")
+	readback := latestAccessAttemptSummary("readback_gpv", "response_summary")
+	query, args, err := storage.Psql.Select(
+		"action.id", "action.recovery_of_action_id", "decision.id", "decision.reason_code",
+		"decision.decision_version", "action.action_type", "action.status",
+		"baseline.summary", "write_attempt.summary", "readback.summary",
+		"COALESCE(action.error_message, '')", "action.created_at", "action.updated_at", "action.completed_at",
+	).From("device_access_actions action").
+		Join("device_access_decisions decision ON decision.id = action.decision_id").
+		JoinClause(sq.Expr("LEFT JOIN LATERAL (?) baseline ON TRUE", baseline)).
+		JoinClause(sq.Expr("LEFT JOIN LATERAL (?) write_attempt ON TRUE", write)).
+		JoinClause(sq.Expr("LEFT JOIN LATERAL (?) readback ON TRUE", readback)).
+		Where(sq.Eq{"action.device_id": deviceID}).
+		OrderBy("action.created_at DESC", "action.id DESC").Limit(uint64(limit)).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build device access control history: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query device access control history: %w", err)
+	}
+	defer rows.Close()
+	items := make([]DeviceControlActionHistory, 0, limit)
+	for rows.Next() {
+		var item DeviceControlActionHistory
+		var actionType, actionStatus string
+		var baselineRaw, writeRaw, readbackRaw []byte
+		if err := rows.Scan(
+			&item.ID, &item.ParentActionID, &item.SourceID, &item.ReasonCode,
+			&item.EffectiveStateVersion, &actionType, &actionStatus,
+			&baselineRaw, &writeRaw, &readbackRaw, &item.LastError,
+			&item.CreatedAt, &item.UpdatedAt, &item.CompletedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan device access control history: %w", err)
+		}
+		item.SourceType = DeviceControlSourceAccess
+		item.ActionType = mapAccessActionType(actionType)
+		item.BeforeState = accessResponseParameterStates(baselineRaw)
+		item.RequestedState = accessRequestParameterStates(writeRaw)
+		item.VerifiedState = accessResponseParameterStates(readbackRaw)
+		if len(item.VerifiedState) == 0 && len(item.RequestedState) == 0 {
+			// A containment action that found RF already disabled completes after
+			// the baseline GPV; that same real observation is its verification.
+			item.VerifiedState = append([]DeviceControlParameterState(nil), item.BeforeState...)
+		}
+		item.Status = mapAccessActionStatus(actionStatus, len(item.VerifiedState) > 0)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate device access control history: %w", err)
+	}
+	return items, nil
+}
+
+func latestAccessAttemptSummary(phase, column string) sq.SelectBuilder {
+	selectedColumn := "attempt.response_summary AS summary"
+	if column == "request_summary" {
+		selectedColumn = "attempt.request_summary AS summary"
+	}
+	return sq.Select(selectedColumn).From("device_access_action_attempts attempt").
+		Where("attempt.action_id = action.id").Where(sq.Eq{"attempt.phase": phase, "attempt.status": "succeeded"}).
+		OrderBy("attempt.attempt_no DESC", "attempt.completed_at DESC NULLS LAST", "attempt.id DESC").Limit(1)
+}
+
+func mapAccessActionType(actionType string) string {
+	if actionType == "rf_on" {
+		return "activate"
+	}
+	return "deactivate"
+}
+
+func mapAccessActionStatus(status string, hasVerifiedGPV bool) string {
+	switch status {
+	case "pending_dispatch", "retry_wait":
+		return "pending"
+	case "dispatching":
+		return "executing"
+	case "verifying":
+		return "verifying"
+	case "succeeded":
+		if hasVerifiedGPV {
+			return "verified"
+		}
+		return "evidence_missing"
+	default:
+		return "failed"
+	}
+}
+
+func accessResponseParameterStates(raw []byte) []DeviceControlParameterState {
+	var wrapper struct {
+		Result struct {
+			Values []accessParameterValue `json:"standard_parameter_values"`
+		} `json:"result"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &wrapper) != nil {
+		return []DeviceControlParameterState{}
+	}
+	return accessParameterStates(wrapper.Result.Values)
+}
+
+func accessRequestParameterStates(raw []byte) []DeviceControlParameterState {
+	var wrapper struct {
+		Parameters struct {
+			Values []accessParameterValue `json:"values"`
+		} `json:"parameters"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &wrapper) != nil {
+		return []DeviceControlParameterState{}
+	}
+	return accessParameterStates(wrapper.Parameters.Values)
+}
+
+func accessParameterStates(values []accessParameterValue) []DeviceControlParameterState {
+	states := make([]DeviceControlParameterState, 0, len(values))
+	for _, value := range values {
+		if value.Name != "" {
+			states = append(states, DeviceControlParameterState{Path: value.Name, Value: value.Value})
+		}
+	}
+	return states
 }
 
 func unmarshalDeviceControlState(data []byte, target *[]DeviceControlParameterState) error {

@@ -14,7 +14,7 @@ import (
 func TestManagementProductNameProjectionsMatchDeviceListSemantics(t *testing.T) {
 	assert.Equal(t, "COALESCE(NULLIF(d.model_name, ''), '')", accessStateProductNameSQL)
 	assert.Equal(t, "COALESCE(NULLIF(d.model_name, ''), '')", accessListProductNameSQL)
-	assert.Contains(t, actionColumns, "COALESCE(NULLIF(d.model_name, ''), '')")
+	assert.Contains(t, actionColumns, "COALESCE(NULLIF(d.model_name, ''), NULLIF(c.product_class, ''), '')")
 	assert.NotContains(t, actionColumns, "device_name")
 }
 

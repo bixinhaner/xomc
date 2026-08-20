@@ -488,7 +488,7 @@ export interface DeviceControlEvaluationEvidence {
 export interface DeviceControlActionHistory {
   id: string;
   parentActionId?: string;
-  sourceType: 'geofence';
+  sourceType: 'geofence' | 'device_access';
   sourceId?: string;
   sourceName: string;
   reasonCode: string;

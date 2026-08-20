@@ -149,9 +149,8 @@ func initDeviceModule(c *Container) error {
 	}
 
 	// InformHandler (subscribes to events)
-	// #17: 默认运营商不再硬编码 CMCC，而是经 CarrierRegistry 注入——OUI 解析失败时
-	// 用注册表给出的默认运营商兜底（registry 优先 CMCC，无 CMCC 时取确定性首位）。
-	// registry 为空（理论上不会发生，启动期已注册 cmcc/ctcc/cucc）时退回 CarrierCMCC。
+	// defaultCarrier 也作为未知但不歧义身份进入候选审核时的租户范围；
+	// 歧义 OUI/ProductClass 仍禁止回退，不能静默归属为正式设备。
 	defaultCarrier := model.CarrierCMCC
 	if c.Carriers != nil {
 		if dc := c.Carriers.DefaultCarrier(); dc != "" {
@@ -197,6 +196,12 @@ func initDeviceModule(c *Container) error {
 			),
 		)
 		c.DeviceAccessHTTPHandler.SetRuntimeSettingsStore(runtimeSettings)
+		importService := deviceaccess.NewImportService(deviceaccess.NewPgImportStore(c.PgPool))
+		importService.SetIdentityVisibilityChecker(identityVisibility)
+		c.DeviceAccessHTTPHandler.SetImportPreviewService(importService)
+		c.DeviceAccessHTTPHandler.SetImportBatchMutationService(importService)
+		c.DeviceAccessHTTPHandler.SetImportBatchReadService(importService)
+		c.DeviceAccessHTTPHandler.SetRuleDimensionGovernanceService(importService)
 		managementActionStore := deviceaccess.NewPgActionStore(c.PgPool)
 		managementStore := deviceaccess.NewPgManagementStore(c.PgPool, managementActionStore)
 		managementStore.SetCandidateOwnershipRegistrar(candidateOwnershipRegistrar{repository: regRepo})
@@ -208,6 +213,7 @@ func initDeviceModule(c *Container) error {
 			managementActionStore, nil, accessRepository, c.Carriers, logger,
 		)
 		actionReader.SetRuntimeSettingsReader(runtimeSettings)
+		actionReader.SetIdentityVisibilityChecker(identityVisibility)
 		c.DeviceAccessHTTPHandler.SetActionReader(actionReader)
 		logger.Info("device access gate initialized; business switch defaults to disabled")
 	}

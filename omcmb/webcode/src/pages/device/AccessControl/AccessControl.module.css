@@ -1,0 +1,41 @@
+.pageTabs :global(.ant-tabs-nav) {
+  margin-bottom: 12px;
+}
+
+.tableToolbar,
+.filterBar {
+  display: flex;
+  width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.dataTable :global(.ant-table-thead > tr > th) {
+  white-space: nowrap;
+}
+
+.dataTable :global(.ant-table-cell) {
+  vertical-align: middle;
+}
+
+.dataTable :global(.ant-table-pagination.ant-pagination) {
+  margin-block: 12px 0;
+}
+
+.policyName {
+  display: block;
+  width: 100%;
+  max-width: 288px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.iconActions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  white-space: nowrap;
+}

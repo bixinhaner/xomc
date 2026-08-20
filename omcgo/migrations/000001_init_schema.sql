@@ -1256,6 +1256,9 @@ CREATE TABLE public.device_access_policy_versions (
     version bigint NOT NULL,
     status character varying(16) DEFAULT 'draft'::character varying NOT NULL,
     default_action character varying(16) DEFAULT 'reject'::character varying NOT NULL,
+	failure_mode character varying(16) DEFAULT 'fail_closed'::character varying NOT NULL,
+	collection_timeout_seconds integer DEFAULT 900 NOT NULL,
+	bypass_profiles jsonb DEFAULT '[]'::jsonb NOT NULL,
     content_hash character varying(64) NOT NULL,
     change_summary text,
     impact_summary jsonb DEFAULT '{}'::jsonb NOT NULL,
@@ -1263,7 +1266,9 @@ CREATE TABLE public.device_access_policy_versions (
     published_by uuid,
     published_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT device_access_policy_versions_default_action_check CHECK ((default_action)::text = 'reject'::text),
+    CONSTRAINT device_access_policy_versions_default_action_check CHECK (((default_action)::text = ANY ((ARRAY['reject'::character varying, 'review'::character varying])::text[]))),
+	CONSTRAINT device_access_policy_versions_failure_mode_check CHECK (((failure_mode)::text = ANY ((ARRAY['fail_closed'::character varying, 'review_hold'::character varying])::text[]))),
+	CONSTRAINT device_access_policy_versions_collection_timeout_check CHECK (((collection_timeout_seconds >= 60) AND (collection_timeout_seconds <= 86400))),
     CONSTRAINT device_access_policy_versions_content_hash_check CHECK (((content_hash)::text ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT device_access_policy_versions_status_check CHECK (((status)::text = ANY ((ARRAY['draft'::character varying, 'published'::character varying, 'retired'::character varying])::text[]))),
     CONSTRAINT device_access_policy_versions_version_check CHECK ((version > 0))
@@ -1279,10 +1284,12 @@ CREATE TABLE public.device_access_rules (
     policy_version_id uuid NOT NULL,
     name character varying(128) NOT NULL,
     enabled boolean DEFAULT true NOT NULL,
+    priority integer DEFAULT 0 NOT NULL,
     serial_scope_type character varying(16) DEFAULT 'all'::character varying NOT NULL,
     serial_scope jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_order integer DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT device_access_rules_priority_check CHECK ((priority >= 0)),
     CONSTRAINT device_access_rules_scope_type_check CHECK (((serial_scope_type)::text = ANY ((ARRAY['all'::character varying, 'list'::character varying, 'prefix'::character varying, 'range'::character varying])::text[])))
 );
 
@@ -1301,8 +1308,78 @@ CREATE TABLE public.device_access_conditions (
     evidence_ttl_seconds integer DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT device_access_conditions_type_check CHECK (((condition_type)::text = ANY ((ARRAY['tac'::character varying, 'ecgi'::character varying, 'observed_ip'::character varying, 'gps'::character varying])::text[]))),
-    CONSTRAINT device_access_conditions_operator_check CHECK (((operator)::text = ANY ((ARRAY['equal'::character varying, 'in'::character varying, 'cidr'::character varying, 'within_radius'::character varying])::text[]))),
+    CONSTRAINT device_access_conditions_operator_check CHECK (((operator)::text = ANY ((ARRAY['equal'::character varying, 'in'::character varying, 'cidr'::character varying, 'ip_range'::character varying, 'within_radius'::character varying, 'within_bounds'::character varying])::text[]))),
     CONSTRAINT device_access_conditions_ttl_check CHECK ((evidence_ttl_seconds >= 0))
+);
+
+
+--
+-- Name: device_access_import_batches; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.device_access_import_batches (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    carrier character varying(16) NOT NULL,
+    import_type character varying(24) NOT NULL,
+    entry_type character varying(16),
+    target_policy_version_id uuid,
+    target_rule_id uuid,
+    dimension character varying(16),
+    mode character varying(16) NOT NULL,
+    failure_policy character varying(16) NOT NULL,
+    status character varying(24) DEFAULT 'uploaded'::character varying NOT NULL,
+    source_filename character varying(255) NOT NULL,
+	content_sha256 character varying(64) NOT NULL,
+	scope_sha256 character varying(64),
+    total_count integer DEFAULT 0 NOT NULL,
+    valid_count integer DEFAULT 0 NOT NULL,
+    invalid_count integer DEFAULT 0 NOT NULL,
+    changed_count integer DEFAULT 0 NOT NULL,
+    snapshot jsonb DEFAULT '{}'::jsonb NOT NULL,
+    idempotency_key character varying(192),
+    created_by uuid,
+    committed_by uuid,
+    rolled_back_by uuid,
+	reversal_of_batch_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    committed_at timestamp with time zone,
+    rolled_back_at timestamp with time zone,
+    CONSTRAINT device_access_import_batches_pkey PRIMARY KEY (id),
+	CONSTRAINT device_access_import_batches_reversal_fkey FOREIGN KEY (reversal_of_batch_id) REFERENCES public.device_access_import_batches(id),
+    CONSTRAINT device_access_import_batches_type_check CHECK (((import_type)::text = ANY ((ARRAY['access_list'::character varying, 'rule_dimension'::character varying])::text[]))),
+    CONSTRAINT device_access_import_batches_entry_type_check CHECK ((entry_type IS NULL OR (entry_type)::text = ANY ((ARRAY['deny'::character varying, 'allow'::character varying, 'revoked'::character varying])::text[]))),
+    CONSTRAINT device_access_import_batches_dimension_check CHECK ((dimension IS NULL OR (dimension)::text = ANY ((ARRAY['sn'::character varying, 'tac'::character varying, 'ecgi'::character varying, 'ip'::character varying, 'gps'::character varying])::text[]))),
+    CONSTRAINT device_access_import_batches_mode_check CHECK (((mode)::text = ANY ((ARRAY['append'::character varying, 'replace'::character varying])::text[]))),
+    CONSTRAINT device_access_import_batches_failure_policy_check CHECK (((failure_policy)::text = ANY ((ARRAY['strict'::character varying, 'valid_only'::character varying])::text[]))),
+    CONSTRAINT device_access_import_batches_status_check CHECK (((status)::text = ANY ((ARRAY['uploaded'::character varying, 'validated'::character varying, 'committing'::character varying, 'committed'::character varying, 'failed'::character varying, 'rolled_back'::character varying])::text[]))),
+	CONSTRAINT device_access_import_batches_hash_check CHECK (((content_sha256)::text ~ '^[0-9a-f]{64}$'::text)),
+	CONSTRAINT device_access_import_batches_scope_hash_check CHECK ((scope_sha256 IS NULL OR (scope_sha256)::text ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT device_access_import_batches_count_check CHECK (((total_count >= 0) AND (valid_count >= 0) AND (invalid_count >= 0) AND (changed_count >= 0) AND (valid_count <= total_count) AND (invalid_count <= total_count) AND (changed_count <= total_count))),
+    CONSTRAINT device_access_import_batches_target_check CHECK ((((import_type)::text = 'access_list'::text AND entry_type IS NOT NULL AND target_policy_version_id IS NULL AND target_rule_id IS NULL AND dimension IS NULL) OR ((import_type)::text = 'rule_dimension'::text AND entry_type IS NULL AND target_policy_version_id IS NOT NULL AND target_rule_id IS NOT NULL AND dimension IS NOT NULL)))
+);
+
+
+--
+-- Name: device_access_import_rows; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.device_access_import_rows (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    batch_id uuid NOT NULL,
+    row_number integer NOT NULL,
+    raw_value jsonb DEFAULT '{}'::jsonb NOT NULL,
+    normalized_value jsonb,
+    validation_status character varying(16) NOT NULL,
+    error_code character varying(64),
+    error_message text,
+    target_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT device_access_import_rows_pkey PRIMARY KEY (id),
+    CONSTRAINT device_access_import_rows_batch_fkey FOREIGN KEY (batch_id) REFERENCES public.device_access_import_batches(id) ON DELETE CASCADE,
+    CONSTRAINT device_access_import_rows_batch_row_key UNIQUE (batch_id, row_number),
+    CONSTRAINT device_access_import_rows_number_check CHECK ((row_number > 0)),
+    CONSTRAINT device_access_import_rows_status_check CHECK (((validation_status)::text = ANY ((ARRAY['valid'::character varying, 'invalid'::character varying, 'duplicate'::character varying, 'no_change'::character varying])::text[])))
 );
 
 
@@ -1323,11 +1400,13 @@ CREATE TABLE public.device_access_list_entries (
     status character varying(16) DEFAULT 'active'::character varying NOT NULL,
     created_by uuid,
     approved_by uuid,
+    source_batch_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT device_access_list_entries_type_check CHECK (((entry_type)::text = ANY ((ARRAY['deny'::character varying, 'allow'::character varying, 'revoked'::character varying])::text[]))),
     CONSTRAINT device_access_list_entries_identity_type_check CHECK (((identity_type)::text = ANY ((ARRAY['serial_number'::character varying, 'certificate_fingerprint'::character varying])::text[]))),
     CONSTRAINT device_access_list_entries_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'disabled'::character varying])::text[]))),
+    CONSTRAINT device_access_list_entries_source_batch_id_fkey FOREIGN KEY (source_batch_id) REFERENCES public.device_access_import_batches(id),
     CONSTRAINT device_access_list_entries_validity_check CHECK (((valid_until IS NULL) OR (valid_until > valid_from)))
 );
 
@@ -1343,6 +1422,8 @@ CREATE TABLE public.device_access_candidates (
     oui character varying(6) NOT NULL,
     product_class character varying(64),
     software_version character varying(64),
+    technology character varying(16) DEFAULT 'lte'::character varying NOT NULL,
+    rf_control_paths jsonb DEFAULT '[]'::jsonb NOT NULL,
     observed_remote_ip inet,
     device_id uuid,
     first_seen_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -1459,12 +1540,62 @@ CREATE TABLE public.device_access_decision_checks (
 
 
 --
+-- Name: device_access_decision_archives; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.device_access_decision_archives (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    decision_id uuid NOT NULL,
+    archived_by uuid NOT NULL,
+    reason text NOT NULL,
+    archived_at timestamp with time zone DEFAULT now() NOT NULL,
+    restored_by uuid,
+    restored_at timestamp with time zone,
+    CONSTRAINT device_access_decision_archives_pkey PRIMARY KEY (id),
+    CONSTRAINT device_access_decision_archives_restore_check CHECK (((restored_by IS NULL AND restored_at IS NULL) OR (restored_by IS NOT NULL AND restored_at IS NOT NULL)))
+);
+
+
+--
+-- Name: device_access_identity_snapshots; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.device_access_identity_snapshots (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    request_id character varying(128) NOT NULL,
+    decision_id uuid,
+    device_id uuid,
+    candidate_id uuid,
+    carrier character varying(16) NOT NULL,
+    serial_number character varying(64) NOT NULL,
+    device_code character varying(128),
+    cloud_key character varying(256),
+    oui character varying(6),
+    product_class character varying(64),
+    raw_remote_ip inet,
+    observed_remote_ip inet,
+    inform_event character varying(64),
+    inform_time timestamp with time zone NOT NULL,
+    identity_source character varying(32) NOT NULL,
+    identity_status character varying(24) NOT NULL,
+    identity_reason_code character varying(64),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT device_access_identity_snapshots_pkey PRIMARY KEY (id),
+    CONSTRAINT device_access_identity_snapshots_request_key UNIQUE (carrier, serial_number, request_id),
+    CONSTRAINT device_access_identity_snapshots_status_check CHECK (((identity_status)::text = ANY ((ARRAY['resolved'::character varying, 'unresolved'::character varying, 'conflict'::character varying, 'ambiguous'::character varying])::text[])))
+);
+
+
+--
 -- Name: device_access_actions; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.device_access_actions (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    device_id uuid NOT NULL,
+    device_id uuid,
+    candidate_id uuid,
+    bound_session_id character varying(128),
+    bound_request_id character varying(128),
     decision_id uuid NOT NULL,
     action_type character varying(32) NOT NULL,
     direction character varying(16) NOT NULL,
@@ -1476,6 +1607,11 @@ CREATE TABLE public.device_access_actions (
     idempotency_key character varying(192) NOT NULL,
     requested_by uuid,
     attempts integer DEFAULT 0 NOT NULL,
+    max_attempts integer DEFAULT 3 NOT NULL,
+    next_attempt_at timestamp with time zone,
+    last_failure_code character varying(64),
+    dead_at timestamp with time zone,
+    manual_repair_required boolean DEFAULT false NOT NULL,
     error_message text,
     dispatched_at timestamp with time zone,
     completed_at timestamp with time zone,
@@ -1483,9 +1619,39 @@ CREATE TABLE public.device_access_actions (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT device_access_actions_action_type_check CHECK (((action_type)::text = ANY ((ARRAY['rf_off'::character varying, 'rf_on'::character varying])::text[]))),
     CONSTRAINT device_access_actions_direction_check CHECK (((direction)::text = ANY ((ARRAY['contain'::character varying, 'release'::character varying])::text[]))),
-    CONSTRAINT device_access_actions_status_check CHECK (((status)::text = ANY ((ARRAY['pending_dispatch'::character varying, 'dispatching'::character varying, 'succeeded'::character varying, 'failed'::character varying, 'cancelled'::character varying])::text[]))),
-    CONSTRAINT device_access_actions_attempts_check CHECK ((attempts >= 0)),
-    CONSTRAINT device_access_actions_type_direction_check CHECK ((((action_type)::text = 'rf_off'::text AND (direction)::text = 'contain'::text) OR ((action_type)::text = 'rf_on'::text AND (direction)::text = 'release'::text)))
+    CONSTRAINT device_access_actions_status_check CHECK (((status)::text = ANY ((ARRAY['pending_dispatch'::character varying, 'dispatching'::character varying, 'verifying'::character varying, 'retry_wait'::character varying, 'succeeded'::character varying, 'failed'::character varying, 'dead'::character varying, 'cancelled'::character varying])::text[]))),
+    CONSTRAINT device_access_actions_attempts_check CHECK (((attempts >= 0) AND (max_attempts > 0) AND (attempts <= max_attempts))),
+    CONSTRAINT device_access_actions_type_direction_check CHECK ((((action_type)::text = 'rf_off'::text AND (direction)::text = 'contain'::text) OR ((action_type)::text = 'rf_on'::text AND (direction)::text = 'release'::text))),
+    CONSTRAINT device_access_actions_target_check CHECK (((device_id IS NOT NULL AND candidate_id IS NULL) OR (device_id IS NULL AND candidate_id IS NOT NULL))),
+    CONSTRAINT device_access_actions_candidate_type_check CHECK ((candidate_id IS NULL OR ((action_type)::text = 'rf_off'::text AND (direction)::text = 'contain'::text)))
+);
+
+
+--
+-- Name: device_access_action_attempts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.device_access_action_attempts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    action_id uuid NOT NULL,
+    attempt_no integer NOT NULL,
+    phase character varying(24) NOT NULL,
+    device_task_id uuid,
+    command_key character varying(192),
+    status character varying(16) NOT NULL,
+    fault_code character varying(64),
+    failure_code character varying(64),
+    error_message text,
+    request_summary jsonb DEFAULT '{}'::jsonb NOT NULL,
+    response_summary jsonb DEFAULT '{}'::jsonb NOT NULL,
+    trace_id character varying(128),
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    CONSTRAINT device_access_action_attempts_pkey PRIMARY KEY (id),
+    CONSTRAINT device_access_action_attempts_action_phase_key UNIQUE (action_id, attempt_no, phase),
+    CONSTRAINT device_access_action_attempts_number_check CHECK ((attempt_no > 0)),
+    CONSTRAINT device_access_action_attempts_phase_check CHECK (((phase)::text = ANY ((ARRAY['baseline_gpv'::character varying, 'spv'::character varying, 'readback_gpv'::character varying])::text[]))),
+    CONSTRAINT device_access_action_attempts_status_check CHECK (((status)::text = ANY ((ARRAY['queued'::character varying, 'sent'::character varying, 'succeeded'::character varying, 'failed'::character varying, 'timeout'::character varying, 'cancelled'::character varying])::text[])))
 );
 
 
@@ -5476,11 +5642,15 @@ CREATE TABLE public.notification_history (
     status character varying(32) NOT NULL,
     error_message text,
     alarm_id uuid,
+	 source_type character varying(32) DEFAULT ''::character varying NOT NULL,
+	 source_id uuid,
+	 event_id uuid,
+	 correlation_id character varying(192) DEFAULT ''::character varying NOT NULL,
     retry_count integer DEFAULT 0 NOT NULL,
     sent_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT notification_history_channel_check CHECK (((channel)::text = ANY (ARRAY[('email'::character varying)::text, ('sms'::character varying)::text, ('webhook'::character varying)::text]))),
-    CONSTRAINT notification_history_status_check CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('sent'::character varying)::text, ('failed'::character varying)::text, ('dead_letter'::character varying)::text])))
+    CONSTRAINT notification_history_channel_check CHECK (((channel)::text = ANY (ARRAY[('email'::character varying)::text, ('sms'::character varying)::text, ('webhook'::character varying)::text, ('system'::character varying)::text]))),
+    CONSTRAINT notification_history_status_check CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('sent'::character varying)::text, ('failed'::character varying)::text, ('dead_letter'::character varying)::text, ('not_configured'::character varying)::text])))
 );
 
 
@@ -13759,6 +13929,22 @@ CREATE INDEX idx_device_access_actions_status ON public.device_access_actions US
 
 
 --
+-- Name: idx_device_access_actions_retry; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_access_actions_retry ON public.device_access_actions USING btree (status, next_attempt_at, id) WHERE ((status)::text = ANY ((ARRAY['pending_dispatch'::character varying, 'retry_wait'::character varying, 'dispatching'::character varying, 'verifying'::character varying])::text[]));
+
+CREATE INDEX idx_device_access_actions_audit_time ON public.device_access_actions USING btree (created_at DESC, status, id);
+
+
+--
+-- Name: idx_device_access_action_attempts_action; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_access_action_attempts_action ON public.device_access_action_attempts USING btree (action_id, attempt_no, phase);
+
+
+--
 -- Name: idx_device_access_candidates_expiry; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -13778,12 +13964,53 @@ CREATE INDEX idx_device_access_decision_checks_decision ON public.device_access_
 
 CREATE INDEX idx_device_access_decisions_identity_time ON public.device_access_decisions USING btree (carrier, serial_number, occurred_at DESC, id);
 
+CREATE INDEX idx_device_access_decisions_rule_time ON public.device_access_decisions USING btree (matched_rule_id, occurred_at DESC, id) WHERE (matched_rule_id IS NOT NULL);
+
+CREATE INDEX idx_device_access_decisions_policy_result ON public.device_access_decisions USING btree (policy_version_id, decision, reason_code, occurred_at DESC);
+
+
+--
+-- Name: idx_device_access_decision_archives_decision; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_access_decision_archives_decision ON public.device_access_decision_archives USING btree (decision_id, archived_at DESC, id);
+
+CREATE UNIQUE INDEX uq_device_access_decision_archives_active ON public.device_access_decision_archives USING btree (decision_id) WHERE (restored_at IS NULL);
+
 
 --
 -- Name: idx_device_access_evidence_latest; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_device_access_evidence_latest ON public.device_access_evidence USING btree (carrier, serial_number, evidence_type, evidence_version DESC);
+
+
+--
+-- Name: idx_device_access_import_batches_carrier_time; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_access_import_batches_carrier_time ON public.device_access_import_batches USING btree (carrier, created_at DESC, id);
+
+
+--
+-- Name: idx_device_access_import_batches_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_access_import_batches_status ON public.device_access_import_batches USING btree (status, updated_at, id);
+
+
+--
+-- Name: idx_device_access_import_rows_batch_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_access_import_rows_batch_status ON public.device_access_import_rows USING btree (batch_id, validation_status, row_number);
+
+
+--
+-- Name: idx_device_access_identity_snapshots_identity_time; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_device_access_identity_snapshots_identity_time ON public.device_access_identity_snapshots USING btree (carrier, serial_number, inform_time DESC, id);
 
 
 --
@@ -13827,12 +14054,28 @@ CREATE INDEX idx_device_access_states_device ON public.device_access_states USIN
 
 CREATE INDEX idx_device_access_states_recheck ON public.device_access_states USING btree (next_recheck_at, id) WHERE (next_recheck_at IS NOT NULL);
 
+CREATE INDEX idx_device_access_states_audit ON public.device_access_states USING btree (carrier, effective_decision, reason_code, last_decided_at DESC);
+
 
 --
 -- Name: uq_device_access_policy_sets_enabled_carrier; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX uq_device_access_policy_sets_enabled_carrier ON public.device_access_policy_sets USING btree (carrier) WHERE (enabled = true);
+
+
+--
+-- Name: uq_device_access_rules_version_priority; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_device_access_rules_version_priority ON public.device_access_rules USING btree (policy_version_id, priority);
+
+
+--
+-- Name: uq_device_access_import_batches_idempotency; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_device_access_import_batches_idempotency ON public.device_access_import_batches USING btree (carrier, idempotency_key) WHERE (idempotency_key IS NOT NULL);
 
 
 --
@@ -14990,7 +15233,6 @@ CREATE INDEX idx_notification_history_status ON public.notification_history USIN
 --
 
 CREATE INDEX idx_notification_history_template_id ON public.notification_history USING btree (template_id);
-
 
 --
 -- Name: idx_notification_templates_channel; Type: INDEX; Schema: public; Owner: -
@@ -19925,6 +20167,14 @@ ALTER TABLE ONLY public.dashboard_widgets
 --
 
 ALTER TABLE ONLY public.device_access_actions
+    ADD CONSTRAINT device_access_actions_candidate_id_fkey FOREIGN KEY (candidate_id) REFERENCES public.device_access_candidates(id);
+
+
+--
+-- Name: device_access_actions device_access_actions_decision_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_access_actions
     ADD CONSTRAINT device_access_actions_decision_id_fkey FOREIGN KEY (decision_id) REFERENCES public.device_access_decisions(id);
 
 
@@ -19934,6 +20184,38 @@ ALTER TABLE ONLY public.device_access_actions
 
 ALTER TABLE ONLY public.device_access_actions
     ADD CONSTRAINT device_access_actions_recovery_of_action_id_fkey FOREIGN KEY (recovery_of_action_id) REFERENCES public.device_access_actions(id);
+
+
+--
+-- Name: device_access_action_attempts device_access_action_attempts_action_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_access_action_attempts
+    ADD CONSTRAINT device_access_action_attempts_action_fkey FOREIGN KEY (action_id) REFERENCES public.device_access_actions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: device_access_decision_archives device_access_decision_archives_decision_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_access_decision_archives
+    ADD CONSTRAINT device_access_decision_archives_decision_fkey FOREIGN KEY (decision_id) REFERENCES public.device_access_decisions(id);
+
+
+--
+-- Name: device_access_identity_snapshots device_access_identity_snapshots_candidate_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_access_identity_snapshots
+    ADD CONSTRAINT device_access_identity_snapshots_candidate_fkey FOREIGN KEY (candidate_id) REFERENCES public.device_access_candidates(id);
+
+
+--
+-- Name: device_access_identity_snapshots device_access_identity_snapshots_decision_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_access_identity_snapshots
+    ADD CONSTRAINT device_access_identity_snapshots_decision_fkey FOREIGN KEY (decision_id) REFERENCES public.device_access_decisions(id);
 
 
 --
@@ -20006,6 +20288,22 @@ ALTER TABLE ONLY public.device_access_policy_versions
 
 ALTER TABLE ONLY public.device_access_rules
     ADD CONSTRAINT device_access_rules_policy_version_id_fkey FOREIGN KEY (policy_version_id) REFERENCES public.device_access_policy_versions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: device_access_import_batches device_access_import_batches_policy_version_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_access_import_batches
+    ADD CONSTRAINT device_access_import_batches_policy_version_fkey FOREIGN KEY (target_policy_version_id) REFERENCES public.device_access_policy_versions(id);
+
+
+--
+-- Name: device_access_import_batches device_access_import_batches_rule_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.device_access_import_batches
+    ADD CONSTRAINT device_access_import_batches_rule_fkey FOREIGN KEY (target_rule_id) REFERENCES public.device_access_rules(id);
 
 
 --
@@ -21979,6 +22277,9 @@ CREATE TABLE IF NOT EXISTS public.device_access_policy_versions (
     version bigint NOT NULL,
     status varchar(16) DEFAULT 'draft' NOT NULL,
     default_action varchar(16) DEFAULT 'reject' NOT NULL,
+	failure_mode varchar(16) DEFAULT 'fail_closed' NOT NULL,
+	collection_timeout_seconds integer DEFAULT 900 NOT NULL,
+	bypass_profiles jsonb DEFAULT '[]'::jsonb NOT NULL,
     content_hash varchar(64) NOT NULL,
     change_summary text,
     impact_summary jsonb DEFAULT '{}'::jsonb NOT NULL,
@@ -21991,7 +22292,11 @@ CREATE TABLE IF NOT EXISTS public.device_access_policy_versions (
     CONSTRAINT device_access_policy_versions_policy_set_id_fkey
         FOREIGN KEY (policy_set_id) REFERENCES public.device_access_policy_sets(id) ON DELETE CASCADE,
     CONSTRAINT device_access_policy_versions_default_action_check
-        CHECK (default_action = 'reject'),
+        CHECK (default_action IN ('reject', 'review')),
+	CONSTRAINT device_access_policy_versions_failure_mode_check
+		CHECK (failure_mode IN ('fail_closed', 'review_hold')),
+	CONSTRAINT device_access_policy_versions_collection_timeout_check
+		CHECK (collection_timeout_seconds BETWEEN 60 AND 86400),
     CONSTRAINT device_access_policy_versions_content_hash_check
         CHECK (content_hash ~ '^[0-9a-f]{64}$'),
     CONSTRAINT device_access_policy_versions_status_check
@@ -22002,15 +22307,55 @@ CREATE TABLE IF NOT EXISTS public.device_access_policy_versions (
 ALTER TABLE public.device_access_policy_versions
     ALTER COLUMN default_action SET DEFAULT 'reject';
 
-UPDATE public.device_access_policy_versions
-SET default_action = 'reject'
-WHERE default_action <> 'reject';
-
 ALTER TABLE public.device_access_policy_versions
-    DROP CONSTRAINT IF EXISTS device_access_policy_versions_default_action_check;
+	ADD COLUMN IF NOT EXISTS failure_mode varchar(16) DEFAULT 'fail_closed' NOT NULL,
+	ADD COLUMN IF NOT EXISTS collection_timeout_seconds integer DEFAULT 900 NOT NULL,
+	ADD COLUMN IF NOT EXISTS bypass_profiles jsonb DEFAULT '[]'::jsonb NOT NULL;
+
+-- Existing pre-release databases may carry the original reject-only check
+-- under a non-canonical name. Remove every check that constrains this column
+-- before installing the single current contract.
+-- +goose StatementBegin
+DO $$
+DECLARE
+    stale_constraint record;
+BEGIN
+    FOR stale_constraint IN
+        SELECT constraint_row.conname
+        FROM pg_catalog.pg_constraint constraint_row
+        WHERE constraint_row.conrelid = 'public.device_access_policy_versions'::regclass
+          AND constraint_row.contype = 'c'
+          AND constraint_row.conkey = ARRAY[(
+              SELECT attribute_row.attnum
+              FROM pg_catalog.pg_attribute attribute_row
+              WHERE attribute_row.attrelid = constraint_row.conrelid
+                AND attribute_row.attname = 'default_action'
+          )]::smallint[]
+          AND pg_get_constraintdef(constraint_row.oid) ILIKE '%default_action%'
+    LOOP
+        EXECUTE format(
+            'ALTER TABLE public.device_access_policy_versions DROP CONSTRAINT %I',
+            stale_constraint.conname
+        );
+    END LOOP;
+END
+$$;
+-- +goose StatementEnd
 ALTER TABLE public.device_access_policy_versions
     ADD CONSTRAINT device_access_policy_versions_default_action_check
-    CHECK (default_action = 'reject');
+    CHECK (default_action IN ('reject', 'review'));
+
+ALTER TABLE public.device_access_policy_versions
+	DROP CONSTRAINT IF EXISTS device_access_policy_versions_failure_mode_check;
+ALTER TABLE public.device_access_policy_versions
+	ADD CONSTRAINT device_access_policy_versions_failure_mode_check
+	CHECK (failure_mode IN ('fail_closed', 'review_hold'));
+
+ALTER TABLE public.device_access_policy_versions
+	DROP CONSTRAINT IF EXISTS device_access_policy_versions_collection_timeout_check;
+ALTER TABLE public.device_access_policy_versions
+	ADD CONSTRAINT device_access_policy_versions_collection_timeout_check
+	CHECK (collection_timeout_seconds BETWEEN 60 AND 86400);
 
 -- +goose StatementBegin
 DO $$
@@ -22035,6 +22380,7 @@ CREATE TABLE IF NOT EXISTS public.device_access_rules (
     policy_version_id uuid NOT NULL,
     name varchar(128) NOT NULL,
     enabled boolean DEFAULT true NOT NULL,
+    priority integer DEFAULT 0 NOT NULL,
     serial_scope_type varchar(16) DEFAULT 'all' NOT NULL,
     serial_scope jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_order integer DEFAULT 0 NOT NULL,
@@ -22042,9 +22388,37 @@ CREATE TABLE IF NOT EXISTS public.device_access_rules (
     CONSTRAINT device_access_rules_pkey PRIMARY KEY (id),
     CONSTRAINT device_access_rules_policy_version_id_fkey
         FOREIGN KEY (policy_version_id) REFERENCES public.device_access_policy_versions(id) ON DELETE CASCADE,
+    CONSTRAINT device_access_rules_priority_check CHECK (priority >= 0),
     CONSTRAINT device_access_rules_scope_type_check
         CHECK (serial_scope_type IN ('all', 'list', 'prefix', 'range'))
 );
+
+ALTER TABLE public.device_access_rules
+    ADD COLUMN IF NOT EXISTS priority integer;
+
+UPDATE public.device_access_rules
+SET priority = created_order
+WHERE priority IS NULL;
+
+ALTER TABLE public.device_access_rules
+    ALTER COLUMN priority SET DEFAULT 0,
+    ALTER COLUMN priority SET NOT NULL;
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.device_access_rules'::regclass
+          AND conname = 'device_access_rules_priority_check'
+    ) THEN
+        ALTER TABLE public.device_access_rules
+            ADD CONSTRAINT device_access_rules_priority_check CHECK (priority >= 0);
+    END IF;
+END
+$$;
+-- +goose StatementEnd
 
 CREATE TABLE IF NOT EXISTS public.device_access_conditions (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -22061,8 +22435,118 @@ CREATE TABLE IF NOT EXISTS public.device_access_conditions (
     CONSTRAINT device_access_conditions_type_check
         CHECK (condition_type IN ('tac', 'ecgi', 'observed_ip', 'gps')),
     CONSTRAINT device_access_conditions_operator_check
-        CHECK (operator IN ('equal', 'in', 'cidr', 'within_radius')),
+        CHECK (operator IN ('equal', 'in', 'cidr', 'ip_range', 'within_radius', 'within_bounds')),
     CONSTRAINT device_access_conditions_ttl_check CHECK (evidence_ttl_seconds >= 0)
+);
+
+ALTER TABLE public.device_access_conditions
+    DROP CONSTRAINT IF EXISTS device_access_conditions_operator_check;
+ALTER TABLE public.device_access_conditions
+    ADD CONSTRAINT device_access_conditions_operator_check
+    CHECK (operator IN ('equal', 'in', 'cidr', 'ip_range', 'within_radius', 'within_bounds'));
+
+CREATE TABLE IF NOT EXISTS public.device_access_import_batches (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    carrier varchar(16) NOT NULL,
+    import_type varchar(24) NOT NULL,
+    entry_type varchar(16),
+    target_policy_version_id uuid,
+    target_rule_id uuid,
+    dimension varchar(16),
+    mode varchar(16) NOT NULL,
+    failure_policy varchar(16) NOT NULL,
+    status varchar(24) DEFAULT 'uploaded' NOT NULL,
+    source_filename varchar(255) NOT NULL,
+	content_sha256 varchar(64) NOT NULL,
+	scope_sha256 varchar(64),
+    total_count integer DEFAULT 0 NOT NULL,
+    valid_count integer DEFAULT 0 NOT NULL,
+    invalid_count integer DEFAULT 0 NOT NULL,
+    changed_count integer DEFAULT 0 NOT NULL,
+    snapshot jsonb DEFAULT '{}'::jsonb NOT NULL,
+    idempotency_key varchar(192),
+    created_by uuid,
+    committed_by uuid,
+    rolled_back_by uuid,
+	reversal_of_batch_id uuid,
+    created_at timestamptz DEFAULT now() NOT NULL,
+    updated_at timestamptz DEFAULT now() NOT NULL,
+    committed_at timestamptz,
+    rolled_back_at timestamptz,
+    CONSTRAINT device_access_import_batches_pkey PRIMARY KEY (id),
+    CONSTRAINT device_access_import_batches_policy_version_fkey
+        FOREIGN KEY (target_policy_version_id) REFERENCES public.device_access_policy_versions(id),
+    CONSTRAINT device_access_import_batches_rule_fkey
+        FOREIGN KEY (target_rule_id) REFERENCES public.device_access_rules(id),
+	CONSTRAINT device_access_import_batches_reversal_fkey
+		FOREIGN KEY (reversal_of_batch_id) REFERENCES public.device_access_import_batches(id),
+    CONSTRAINT device_access_import_batches_type_check
+        CHECK (import_type IN ('access_list', 'rule_dimension')),
+    CONSTRAINT device_access_import_batches_entry_type_check
+        CHECK (entry_type IS NULL OR entry_type IN ('deny', 'allow', 'revoked')),
+    CONSTRAINT device_access_import_batches_dimension_check
+        CHECK (dimension IS NULL OR dimension IN ('sn', 'tac', 'ecgi', 'ip', 'gps')),
+    CONSTRAINT device_access_import_batches_mode_check CHECK (mode IN ('append', 'replace')),
+    CONSTRAINT device_access_import_batches_failure_policy_check
+        CHECK (failure_policy IN ('strict', 'valid_only')),
+    CONSTRAINT device_access_import_batches_status_check
+        CHECK (status IN ('uploaded', 'validated', 'committing', 'committed', 'failed', 'rolled_back')),
+	CONSTRAINT device_access_import_batches_hash_check CHECK (content_sha256 ~ '^[0-9a-f]{64}$'),
+	CONSTRAINT device_access_import_batches_scope_hash_check CHECK (scope_sha256 IS NULL OR scope_sha256 ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT device_access_import_batches_count_check CHECK (
+        total_count >= 0 AND valid_count >= 0 AND invalid_count >= 0 AND changed_count >= 0
+        AND valid_count <= total_count AND invalid_count <= total_count AND changed_count <= total_count
+    ),
+    CONSTRAINT device_access_import_batches_target_check CHECK (
+        (import_type = 'access_list' AND entry_type IS NOT NULL
+            AND target_policy_version_id IS NULL AND target_rule_id IS NULL AND dimension IS NULL)
+        OR (import_type = 'rule_dimension' AND entry_type IS NULL
+            AND target_policy_version_id IS NOT NULL AND target_rule_id IS NOT NULL AND dimension IS NOT NULL)
+    )
+);
+
+ALTER TABLE public.device_access_import_batches
+    ADD COLUMN IF NOT EXISTS scope_sha256 varchar(64),
+	ADD COLUMN IF NOT EXISTS reversal_of_batch_id uuid;
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+	IF NOT EXISTS (
+		SELECT 1 FROM pg_catalog.pg_constraint
+		WHERE conrelid = 'public.device_access_import_batches'::regclass
+		  AND conname = 'device_access_import_batches_reversal_fkey'
+	) THEN
+		ALTER TABLE public.device_access_import_batches
+			ADD CONSTRAINT device_access_import_batches_reversal_fkey
+			FOREIGN KEY (reversal_of_batch_id) REFERENCES public.device_access_import_batches(id);
+	END IF;
+END $$;
+-- +goose StatementEnd
+ALTER TABLE public.device_access_import_batches
+    DROP CONSTRAINT IF EXISTS device_access_import_batches_scope_hash_check;
+ALTER TABLE public.device_access_import_batches
+    ADD CONSTRAINT device_access_import_batches_scope_hash_check
+        CHECK (scope_sha256 IS NULL OR scope_sha256 ~ '^[0-9a-f]{64}$');
+
+CREATE TABLE IF NOT EXISTS public.device_access_import_rows (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    batch_id uuid NOT NULL,
+    row_number integer NOT NULL,
+    raw_value jsonb DEFAULT '{}'::jsonb NOT NULL,
+    normalized_value jsonb,
+    validation_status varchar(16) NOT NULL,
+    error_code varchar(64),
+    error_message text,
+    target_id uuid,
+    created_at timestamptz DEFAULT now() NOT NULL,
+    CONSTRAINT device_access_import_rows_pkey PRIMARY KEY (id),
+    CONSTRAINT device_access_import_rows_batch_fkey
+        FOREIGN KEY (batch_id) REFERENCES public.device_access_import_batches(id) ON DELETE CASCADE,
+    CONSTRAINT device_access_import_rows_batch_row_key UNIQUE (batch_id, row_number),
+    CONSTRAINT device_access_import_rows_number_check CHECK (row_number > 0),
+    CONSTRAINT device_access_import_rows_status_check
+        CHECK (validation_status IN ('valid', 'invalid', 'duplicate', 'no_change'))
 );
 
 CREATE TABLE IF NOT EXISTS public.device_access_list_entries (
@@ -22078,6 +22562,7 @@ CREATE TABLE IF NOT EXISTS public.device_access_list_entries (
     status varchar(16) DEFAULT 'active' NOT NULL,
     created_by uuid,
     approved_by uuid,
+    source_batch_id uuid,
     created_at timestamptz DEFAULT now() NOT NULL,
     updated_at timestamptz DEFAULT now() NOT NULL,
     CONSTRAINT device_access_list_entries_pkey PRIMARY KEY (id),
@@ -22093,6 +22578,26 @@ CREATE TABLE IF NOT EXISTS public.device_access_list_entries (
         CHECK (valid_until IS NULL OR valid_until > valid_from)
 );
 
+ALTER TABLE public.device_access_list_entries
+    ADD COLUMN IF NOT EXISTS source_batch_id uuid;
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.device_access_list_entries'::regclass
+          AND conname = 'device_access_list_entries_source_batch_id_fkey'
+    ) THEN
+        ALTER TABLE public.device_access_list_entries
+            ADD CONSTRAINT device_access_list_entries_source_batch_id_fkey
+            FOREIGN KEY (source_batch_id) REFERENCES public.device_access_import_batches(id);
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+
 CREATE TABLE IF NOT EXISTS public.device_access_candidates (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     carrier varchar(16) NOT NULL,
@@ -22100,6 +22605,8 @@ CREATE TABLE IF NOT EXISTS public.device_access_candidates (
     oui varchar(6) NOT NULL,
     product_class varchar(64),
     software_version varchar(64),
+    technology varchar(16) DEFAULT 'lte' NOT NULL,
+    rf_control_paths jsonb DEFAULT '[]'::jsonb NOT NULL,
     observed_remote_ip inet,
     device_id uuid,
     first_seen_at timestamptz DEFAULT now() NOT NULL,
@@ -22117,6 +22624,10 @@ CREATE TABLE IF NOT EXISTS public.device_access_candidates (
     CONSTRAINT device_access_candidates_review_status_check
         CHECK (review_status IN ('pending', 'approved', 'rejected', 'expired'))
 );
+
+ALTER TABLE public.device_access_candidates
+    ADD COLUMN IF NOT EXISTS technology varchar(16) DEFAULT 'lte' NOT NULL,
+    ADD COLUMN IF NOT EXISTS rf_control_paths jsonb DEFAULT '[]'::jsonb NOT NULL;
 
 CREATE TABLE IF NOT EXISTS public.device_access_evidence (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -22231,9 +22742,59 @@ CREATE TABLE IF NOT EXISTS public.device_access_decision_checks (
         CHECK (result IN ('passed', 'failed', 'missing', 'stale', 'error', 'skipped'))
 );
 
+CREATE TABLE IF NOT EXISTS public.device_access_decision_archives (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    decision_id uuid NOT NULL,
+    archived_by uuid NOT NULL,
+    reason text NOT NULL,
+    archived_at timestamptz DEFAULT now() NOT NULL,
+    restored_by uuid,
+    restored_at timestamptz,
+    CONSTRAINT device_access_decision_archives_pkey PRIMARY KEY (id),
+    CONSTRAINT device_access_decision_archives_decision_fkey
+        FOREIGN KEY (decision_id) REFERENCES public.device_access_decisions(id),
+    CONSTRAINT device_access_decision_archives_restore_check CHECK (
+        (restored_by IS NULL AND restored_at IS NULL)
+        OR (restored_by IS NOT NULL AND restored_at IS NOT NULL)
+    )
+);
+
+CREATE TABLE IF NOT EXISTS public.device_access_identity_snapshots (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    request_id varchar(128) NOT NULL,
+    decision_id uuid,
+    device_id uuid,
+    candidate_id uuid,
+    carrier varchar(16) NOT NULL,
+    serial_number varchar(64) NOT NULL,
+    device_code varchar(128),
+    cloud_key varchar(256),
+    oui varchar(6),
+    product_class varchar(64),
+    raw_remote_ip inet,
+    observed_remote_ip inet,
+    inform_event varchar(64),
+    inform_time timestamptz NOT NULL,
+    identity_source varchar(32) NOT NULL,
+    identity_status varchar(24) NOT NULL,
+    identity_reason_code varchar(64),
+    created_at timestamptz DEFAULT now() NOT NULL,
+    CONSTRAINT device_access_identity_snapshots_pkey PRIMARY KEY (id),
+    CONSTRAINT device_access_identity_snapshots_request_key UNIQUE (carrier, serial_number, request_id),
+    CONSTRAINT device_access_identity_snapshots_decision_fkey
+        FOREIGN KEY (decision_id) REFERENCES public.device_access_decisions(id),
+    CONSTRAINT device_access_identity_snapshots_candidate_fkey
+        FOREIGN KEY (candidate_id) REFERENCES public.device_access_candidates(id),
+    CONSTRAINT device_access_identity_snapshots_status_check
+        CHECK (identity_status IN ('resolved', 'unresolved', 'conflict', 'ambiguous'))
+);
+
 CREATE TABLE IF NOT EXISTS public.device_access_actions (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    device_id uuid NOT NULL,
+    device_id uuid,
+    candidate_id uuid,
+    bound_session_id varchar(128),
+    bound_request_id varchar(128),
     decision_id uuid NOT NULL,
     action_type varchar(32) NOT NULL,
     direction varchar(16) NOT NULL,
@@ -22245,6 +22806,11 @@ CREATE TABLE IF NOT EXISTS public.device_access_actions (
     idempotency_key varchar(192) NOT NULL,
     requested_by uuid,
     attempts integer DEFAULT 0 NOT NULL,
+    max_attempts integer DEFAULT 3 NOT NULL,
+    next_attempt_at timestamptz,
+    last_failure_code varchar(64),
+    dead_at timestamptz,
+    manual_repair_required boolean DEFAULT false NOT NULL,
     error_message text,
     dispatched_at timestamptz,
     completed_at timestamptz,
@@ -22254,21 +22820,75 @@ CREATE TABLE IF NOT EXISTS public.device_access_actions (
     CONSTRAINT device_access_actions_idempotency_key_key UNIQUE (idempotency_key),
     CONSTRAINT device_access_actions_decision_id_fkey
         FOREIGN KEY (decision_id) REFERENCES public.device_access_decisions(id),
+    CONSTRAINT device_access_actions_candidate_id_fkey
+        FOREIGN KEY (candidate_id) REFERENCES public.device_access_candidates(id),
     CONSTRAINT device_access_actions_recovery_of_action_id_fkey
         FOREIGN KEY (recovery_of_action_id) REFERENCES public.device_access_actions(id),
     CONSTRAINT device_access_actions_action_type_check CHECK (action_type IN ('rf_off', 'rf_on')),
     CONSTRAINT device_access_actions_direction_check CHECK (direction IN ('contain', 'release')),
     CONSTRAINT device_access_actions_status_check
-        CHECK (status IN ('pending_dispatch', 'dispatching', 'succeeded', 'failed', 'cancelled')),
-    CONSTRAINT device_access_actions_attempts_check CHECK (attempts >= 0),
+        CHECK (status IN ('pending_dispatch', 'dispatching', 'verifying', 'retry_wait', 'succeeded', 'failed', 'dead', 'cancelled')),
+    CONSTRAINT device_access_actions_attempts_check
+        CHECK (attempts >= 0 AND max_attempts > 0 AND attempts <= max_attempts),
     CONSTRAINT device_access_actions_type_direction_check CHECK (
         (action_type = 'rf_off' AND direction = 'contain')
         OR (action_type = 'rf_on' AND direction = 'release')
+    ),
+    CONSTRAINT device_access_actions_target_check CHECK (
+        (device_id IS NOT NULL AND candidate_id IS NULL)
+        OR (device_id IS NULL AND candidate_id IS NOT NULL)
+    ),
+    CONSTRAINT device_access_actions_candidate_type_check CHECK (
+        candidate_id IS NULL OR (action_type = 'rf_off' AND direction = 'contain')
     )
 );
 
 ALTER TABLE public.device_access_actions
-    ADD COLUMN IF NOT EXISTS rf_change_paths jsonb DEFAULT '[]'::jsonb NOT NULL;
+    ALTER COLUMN device_id DROP NOT NULL,
+    ADD COLUMN IF NOT EXISTS candidate_id uuid,
+    ADD COLUMN IF NOT EXISTS bound_session_id varchar(128),
+    ADD COLUMN IF NOT EXISTS bound_request_id varchar(128),
+    ADD COLUMN IF NOT EXISTS rf_change_paths jsonb DEFAULT '[]'::jsonb NOT NULL,
+    ADD COLUMN IF NOT EXISTS max_attempts integer DEFAULT 3 NOT NULL,
+    ADD COLUMN IF NOT EXISTS next_attempt_at timestamptz,
+    ADD COLUMN IF NOT EXISTS last_failure_code varchar(64),
+    ADD COLUMN IF NOT EXISTS dead_at timestamptz,
+    ADD COLUMN IF NOT EXISTS manual_repair_required boolean DEFAULT false NOT NULL;
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'device_access_actions_candidate_id_fkey'
+    ) THEN
+        ALTER TABLE public.device_access_actions
+            ADD CONSTRAINT device_access_actions_candidate_id_fkey
+            FOREIGN KEY (candidate_id) REFERENCES public.device_access_candidates(id);
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'device_access_actions_target_check'
+    ) THEN
+        ALTER TABLE public.device_access_actions
+            ADD CONSTRAINT device_access_actions_target_check CHECK (
+                (device_id IS NOT NULL AND candidate_id IS NULL)
+                OR (device_id IS NULL AND candidate_id IS NOT NULL)
+            );
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'device_access_actions_candidate_type_check'
+    ) THEN
+        ALTER TABLE public.device_access_actions
+            ADD CONSTRAINT device_access_actions_candidate_type_check CHECK (
+                candidate_id IS NULL OR (action_type = 'rf_off' AND direction = 'contain')
+            );
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+
+UPDATE public.device_access_actions
+SET max_attempts = GREATEST(max_attempts, attempts, 1)
+WHERE max_attempts < attempts OR max_attempts <= 0;
 
 -- Actions created before per-path ownership was introduced cannot be safely
 -- recovered and must not block a fresh containment action forever.
@@ -22295,11 +22915,58 @@ WHERE status IN ('pending_approval', 'approved');
 
 ALTER TABLE public.device_access_actions
     DROP CONSTRAINT IF EXISTS device_access_actions_status_check,
+    DROP CONSTRAINT IF EXISTS device_access_actions_attempts_check,
     ALTER COLUMN status SET DEFAULT 'pending_dispatch';
 
 ALTER TABLE public.device_access_actions
     ADD CONSTRAINT device_access_actions_status_check
-        CHECK (status IN ('pending_dispatch', 'dispatching', 'succeeded', 'failed', 'cancelled'));
+        CHECK (status IN ('pending_dispatch', 'dispatching', 'verifying', 'retry_wait', 'succeeded', 'failed', 'dead', 'cancelled')),
+    ADD CONSTRAINT device_access_actions_attempts_check
+        CHECK (attempts >= 0 AND max_attempts > 0 AND attempts <= max_attempts);
+
+CREATE TABLE IF NOT EXISTS public.device_access_action_attempts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    action_id uuid NOT NULL,
+    attempt_no integer NOT NULL,
+    phase varchar(24) NOT NULL,
+    device_task_id uuid,
+    command_key varchar(192),
+    status varchar(16) NOT NULL,
+    fault_code varchar(64),
+    failure_code varchar(64),
+    error_message text,
+    request_summary jsonb DEFAULT '{}'::jsonb NOT NULL,
+    response_summary jsonb DEFAULT '{}'::jsonb NOT NULL,
+    trace_id varchar(128),
+    started_at timestamptz DEFAULT now() NOT NULL,
+    completed_at timestamptz,
+    CONSTRAINT device_access_action_attempts_pkey PRIMARY KEY (id),
+    CONSTRAINT device_access_action_attempts_action_fkey
+        FOREIGN KEY (action_id) REFERENCES public.device_access_actions(id) ON DELETE CASCADE,
+    CONSTRAINT device_access_action_attempts_action_phase_key UNIQUE (action_id, attempt_no, phase),
+    CONSTRAINT device_access_action_attempts_number_check CHECK (attempt_no > 0),
+    CONSTRAINT device_access_action_attempts_phase_check
+        CHECK (phase IN ('baseline_gpv', 'spv', 'readback_gpv')),
+    CONSTRAINT device_access_action_attempts_status_check
+        CHECK (status IN ('queued', 'sent', 'succeeded', 'failed', 'timeout', 'cancelled'))
+);
+
+-- A pre-attempt-instrumentation action cannot remain a successful fact when
+-- no GPV/SPV/readback evidence exists. Do not fabricate an attempt; quarantine
+-- the historical record for explicit operator review and optional retry.
+UPDATE public.device_access_actions action
+SET status = 'dead',
+    last_failure_code = 'evidence_missing',
+    error_message = COALESCE(NULLIF(action.error_message, ''), 'historical RF action has no attempt evidence'),
+    dead_at = COALESCE(action.dead_at, action.completed_at, now()),
+    manual_repair_required = true,
+    updated_at = GREATEST(action.updated_at, COALESCE(action.completed_at, action.updated_at))
+WHERE action.status = 'succeeded'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM public.device_access_action_attempts attempt
+      WHERE attempt.action_id = action.id
+  );
 
 CREATE TABLE IF NOT EXISTS public.device_access_outbox (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -22324,6 +22991,32 @@ CREATE TABLE IF NOT EXISTS public.device_access_outbox (
 
 CREATE INDEX IF NOT EXISTS idx_device_access_actions_status
     ON public.device_access_actions (status, updated_at, id);
+CREATE INDEX IF NOT EXISTS idx_device_access_actions_retry
+    ON public.device_access_actions (status, next_attempt_at, id)
+    WHERE status IN ('pending_dispatch', 'retry_wait', 'dispatching', 'verifying');
+CREATE INDEX IF NOT EXISTS idx_device_access_actions_audit_time
+    ON public.device_access_actions (created_at DESC, status, id);
+CREATE INDEX IF NOT EXISTS idx_device_access_action_attempts_action
+    ON public.device_access_action_attempts (action_id, attempt_no, phase);
+
+ALTER TABLE public.notification_history
+    ADD COLUMN IF NOT EXISTS source_type varchar(32) DEFAULT '' NOT NULL,
+    ADD COLUMN IF NOT EXISTS source_id uuid,
+    ADD COLUMN IF NOT EXISTS event_id uuid,
+    ADD COLUMN IF NOT EXISTS correlation_id varchar(192) DEFAULT '' NOT NULL;
+ALTER TABLE public.notification_history
+    DROP CONSTRAINT IF EXISTS notification_history_channel_check,
+    DROP CONSTRAINT IF EXISTS notification_history_status_check;
+ALTER TABLE public.notification_history
+    ADD CONSTRAINT notification_history_channel_check
+        CHECK (channel IN ('email', 'sms', 'webhook', 'system')),
+    ADD CONSTRAINT notification_history_status_check
+        CHECK (status IN ('pending', 'sent', 'failed', 'dead_letter', 'not_configured'));
+CREATE UNIQUE INDEX IF NOT EXISTS uq_notification_history_event
+    ON public.notification_history (event_id) WHERE event_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_notification_history_source
+    ON public.notification_history (source_type, source_id, created_at DESC)
+    WHERE source_type <> '';
 CREATE INDEX IF NOT EXISTS idx_device_access_candidates_expiry
     ON public.device_access_candidates (review_status, expires_at, id)
     WHERE review_status = 'pending';
@@ -22331,8 +23024,25 @@ CREATE INDEX IF NOT EXISTS idx_device_access_decision_checks_decision
     ON public.device_access_decision_checks (decision_id, id);
 CREATE INDEX IF NOT EXISTS idx_device_access_decisions_identity_time
     ON public.device_access_decisions (carrier, serial_number, occurred_at DESC, id);
+CREATE INDEX IF NOT EXISTS idx_device_access_decisions_rule_time
+    ON public.device_access_decisions (matched_rule_id, occurred_at DESC, id)
+    WHERE matched_rule_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_device_access_decisions_policy_result
+    ON public.device_access_decisions (policy_version_id, decision, reason_code, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_device_access_decision_archives_decision
+    ON public.device_access_decision_archives (decision_id, archived_at DESC, id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_device_access_decision_archives_active
+    ON public.device_access_decision_archives (decision_id) WHERE restored_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_device_access_evidence_latest
     ON public.device_access_evidence (carrier, serial_number, evidence_type, evidence_version DESC);
+CREATE INDEX IF NOT EXISTS idx_device_access_import_batches_carrier_time
+    ON public.device_access_import_batches (carrier, created_at DESC, id);
+CREATE INDEX IF NOT EXISTS idx_device_access_import_batches_status
+    ON public.device_access_import_batches (status, updated_at, id);
+CREATE INDEX IF NOT EXISTS idx_device_access_import_rows_batch_status
+    ON public.device_access_import_rows (batch_id, validation_status, row_number);
+CREATE INDEX IF NOT EXISTS idx_device_access_identity_snapshots_identity_time
+    ON public.device_access_identity_snapshots (carrier, serial_number, inform_time DESC, id);
 CREATE INDEX IF NOT EXISTS idx_device_access_list_entries_effective
     ON public.device_access_list_entries (carrier, entry_type, status, valid_from, valid_until);
 CREATE INDEX IF NOT EXISTS idx_device_access_list_entries_identity
@@ -22342,10 +23052,17 @@ CREATE INDEX IF NOT EXISTS idx_device_access_outbox_dispatch
     WHERE status IN ('pending', 'failed');
 CREATE INDEX IF NOT EXISTS idx_device_access_policy_versions_set_status
     ON public.device_access_policy_versions (policy_set_id, status, version DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_device_access_rules_version_priority
+    ON public.device_access_rules (policy_version_id, priority);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_device_access_import_batches_idempotency
+    ON public.device_access_import_batches (carrier, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_device_access_states_device
     ON public.device_access_states (device_id) WHERE device_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_device_access_states_recheck
     ON public.device_access_states (next_recheck_at, id) WHERE next_recheck_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_device_access_states_audit
+    ON public.device_access_states (carrier, effective_decision, reason_code, last_decided_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_device_access_policy_sets_enabled_carrier
     ON public.device_access_policy_sets (carrier) WHERE enabled = true;
 
@@ -22359,13 +23076,18 @@ BEGIN
         'public.device_access_policy_versions',
         'public.device_access_rules',
         'public.device_access_conditions',
+        'public.device_access_import_batches',
+        'public.device_access_import_rows',
         'public.device_access_list_entries',
         'public.device_access_candidates',
         'public.device_access_evidence',
         'public.device_access_states',
         'public.device_access_decisions',
         'public.device_access_decision_checks',
+        'public.device_access_decision_archives',
+        'public.device_access_identity_snapshots',
         'public.device_access_actions',
+        'public.device_access_action_attempts',
         'public.device_access_outbox'
     ] LOOP
         IF to_regclass(required_relation) IS NULL THEN

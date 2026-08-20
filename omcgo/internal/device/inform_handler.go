@@ -230,7 +230,7 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 	h.logger.Info("handleBootstrap: calling DeviceService.RegisterFromInform",
 		zap.String("serial_number", payload.DeviceId.SerialNumber))
 
-	registration, admitted, err := h.registerFromInformIfAdmitted(ctx, payload, inform, carrierCode, evt.ID)
+	registration, admitted, err := h.registerFromInformIfAdmitted(ctx, payload, inform, carrierCode, evt.ID, AccessTriggerInformFirstSeen)
 	if errors.Is(err, commonerrors.ErrNotFound) {
 		h.logger.Info("handleBootstrap: device is in recycle bin, skipping auto-register",
 			zap.String("serial_number", payload.DeviceId.SerialNumber),
@@ -314,7 +314,7 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 		if resolveErr != nil {
 			return fmt.Errorf("resolve reboot carrier: %w", resolveErr)
 		}
-		registration, admitted, regErr := h.registerFromInformIfAdmitted(ctx, payload, inform, carrierCode, evt.ID)
+		registration, admitted, regErr := h.registerFromInformIfAdmitted(ctx, payload, inform, carrierCode, evt.ID, AccessTriggerInformBoot)
 		if errors.Is(regErr, commonerrors.ErrNotFound) {
 			h.logger.Info("handleRebootComplete: device is in recycle bin, skipping auto-register",
 				zap.String("serial_number", sn),
@@ -344,7 +344,7 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 		preRebootSnapshot := *device
 		preRebootDevice = &preRebootSnapshot
 		preRebootRunTime = h.service.GetDevicePreRebootRunTime(ctx, device.ID)
-		if _, accessErr := h.evaluateInformAccess(ctx, payload, inform, device.Carrier, evt.ID); accessErr != nil {
+		if _, accessErr := h.evaluateInformAccess(ctx, payload, inform, device.Carrier, evt.ID, AccessTriggerInformBoot); accessErr != nil {
 			return fmt.Errorf("evaluate reboot access: %w", accessErr)
 		}
 
@@ -411,7 +411,7 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 		if resolveErr != nil {
 			return fmt.Errorf("resolve periodic carrier: %w", resolveErr)
 		}
-		registration, admitted, regErr := h.registerFromInformIfAdmitted(ctx, payload, inform, carrierCode, evt.ID)
+		registration, admitted, regErr := h.registerFromInformIfAdmitted(ctx, payload, inform, carrierCode, evt.ID, AccessTriggerInformFirstSeen)
 		if errors.Is(regErr, commonerrors.ErrNotFound) {
 			h.logger.Info("handlePeriodic: device is in recycle bin, skipping auto-register",
 				zap.String("serial_number", sn),
@@ -444,7 +444,11 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 	// Access state is evaluated independently from online/lifecycle state. A
 	// rejected result freezes protected tasks but does not falsify the heartbeat
 	// or force the formal device row offline.
-	if _, accessErr := h.evaluateInformAccess(ctx, payload, inform, device.Carrier, evt.ID); accessErr != nil {
+	triggerType := AccessTriggerInformPeriodic
+	if !device.IsOnline {
+		triggerType = AccessTriggerInformReconnected
+	}
+	if _, accessErr := h.evaluateInformAccess(ctx, payload, inform, device.Carrier, evt.ID, triggerType); accessErr != nil {
 		return fmt.Errorf("evaluate periodic access: %w", accessErr)
 	}
 
@@ -493,7 +497,7 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 		if resolveErr != nil {
 			return fmt.Errorf("resolve stale-cache carrier: %w", resolveErr)
 		}
-		registration, admitted, regErr := h.registerFromInformIfAdmitted(ctx, payload, inform, carrierCode, evt.ID)
+		registration, admitted, regErr := h.registerFromInformIfAdmitted(ctx, payload, inform, carrierCode, evt.ID, AccessTriggerInformFirstSeen)
 		if errors.Is(regErr, commonerrors.ErrNotFound) {
 			h.logger.Info("handlePeriodic: recycle-bin device skipped during stale-cache fall-through",
 				zap.String("serial_number", sn),
@@ -529,8 +533,9 @@ func (h *InformHandler) registerFromInformIfAdmitted(
 	inform *tr069.InformMessage,
 	carrierCode model.CarrierCode,
 	eventID string,
+	triggerType string,
 ) (*InformRegistration, bool, error) {
-	decision, err := h.evaluateInformAccess(ctx, payload, inform, carrierCode, eventID)
+	decision, err := h.evaluateInformAccess(ctx, payload, inform, carrierCode, eventID, triggerType)
 	if err != nil {
 		return nil, false, fmt.Errorf("admit device inform: %w", err)
 	}
@@ -557,20 +562,33 @@ func (h *InformHandler) evaluateInformAccess(
 	inform *tr069.InformMessage,
 	carrierCode model.CarrierCode,
 	eventID string,
+	triggerType string,
 ) (AccessDecision, error) {
 	if h.accessGate == nil {
 		return AccessDecision{State: AccessDecisionBypassed}, nil
 	}
+	identityPolicy := carrier.DefaultAccessIdentityPolicy()
+	if h.carrierRegistry != nil {
+		if resolved, err := h.carrierRegistry.AccessIdentityPolicy(carrierCode); err == nil {
+			identityPolicy = resolved
+		}
+	}
 	return h.accessGate.Admit(ctx, AccessObservation{
-		Carrier:         carrierCode,
-		SerialNumber:    inform.DeviceId.SerialNumber,
-		OUI:             inform.DeviceId.OUI,
-		ProductClass:    inform.DeviceId.ProductClass,
-		SoftwareVersion: informSoftwareVersion(inform.ParameterList),
-		RemoteIP:        payload.RemoteIP,
-		Authenticated:   payload.Authenticated,
-		AuthMethod:      payload.AuthMethod,
-		CredentialID:    payload.CredentialID,
+		Carrier:            carrierCode,
+		SerialNumber:       inform.DeviceId.SerialNumber,
+		OUI:                inform.DeviceId.OUI,
+		ProductClass:       inform.DeviceId.ProductClass,
+		SoftwareVersion:    informSoftwareVersion(inform.ParameterList),
+		RemoteIP:           payload.RemoteIP,
+		Authenticated:      payload.Authenticated,
+		AuthMethod:         payload.AuthMethod,
+		CredentialID:       payload.CredentialID,
+		DeviceCode:         firstInformParameter(inform, identityPolicy.DeviceCodePaths),
+		CloudKey:           firstInformParameter(inform, identityPolicy.CloudKeyPaths),
+		DeviceCodeRequired: identityPolicy.DeviceCodeRequired,
+		CloudKeyRequired:   identityPolicy.CloudKeyRequired,
+		TriggerType:        triggerType,
+		InformEvent:        firstInformEvent(payload.Events),
 		CarrierIdentityResolved: h.carrierIdentityResolved(
 			inform.DeviceId.OUI,
 			inform.DeviceId.ProductClass,
@@ -579,6 +597,27 @@ func (h *InformHandler) evaluateInformAccess(
 		Inform:  inform,
 		EventID: eventID,
 	})
+}
+
+func firstInformParameter(inform *tr069.InformMessage, paths []string) string {
+	if inform == nil {
+		return ""
+	}
+	for _, path := range paths {
+		if value := strings.TrimSpace(findParamValue(inform.ParameterList, path)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstInformEvent(events []string) string {
+	for _, value := range events {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (h *InformHandler) carrierIdentityResolved(oui, productClass string, expected model.CarrierCode) bool {
@@ -590,8 +629,10 @@ func (h *InformHandler) carrierIdentityResolved(oui, productClass string, expect
 }
 
 // resolveCarrier resolves the carrier from the complete TR-069 device
-// identity. Unknown identities retain the deployment default for historical
-// compatibility; ambiguous shared OUIs return an error and never fall back.
+// identity. Ambiguous identities never fall back. An unknown identity uses the
+// configured deployment carrier so access control can durably place it in the
+// candidate-review workflow; CarrierIdentityResolved remains false and prevents
+// it from being treated as an owned, known device.
 func (h *InformHandler) resolveCarrier(oui, productClass string) (model.CarrierCode, error) {
 	if h.carrierRegistry != nil {
 		code, err := h.carrierRegistry.ResolveByIdentity(oui, productClass)
@@ -601,6 +642,9 @@ func (h *InformHandler) resolveCarrier(oui, productClass string) (model.CarrierC
 		if code != "" {
 			return code, nil
 		}
+	}
+	if h.defaultCarrier == "" {
+		return "", fmt.Errorf("%w: oui=%q product_class=%q", carrier.ErrUnresolvedCarrier, oui, productClass)
 	}
 	return h.defaultCarrier, nil
 }
