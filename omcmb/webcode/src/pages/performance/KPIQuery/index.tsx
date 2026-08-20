@@ -13,6 +13,7 @@ import {
   Alert,
   Button,
   Card,
+  Drawer,
   Form,
   Input,
   Modal,
@@ -24,8 +25,8 @@ import {
   Empty,
   App,
   Tabs,
-  List,
   Popconfirm,
+  Pagination,
   Spin,
   DatePicker,
   Divider,
@@ -50,6 +51,7 @@ import {
   FullscreenOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useIntl } from 'react-intl';
@@ -106,6 +108,7 @@ import {
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
+const TEMPLATE_PAGE_SIZE = 20;
 
 const GRANULARITY_OPTIONS: { labelKey: string; value: Granularity }[] = [
   { labelKey: 'perf.dashboard.granular15min', value: '15min' },
@@ -170,6 +173,15 @@ interface SaveTemplateFormState {
   visibility: TemplateVisibility;
   payload: QueryTemplatePayload;
   customRange: [dayjs.Dayjs, dayjs.Dayjs] | null;
+}
+
+interface RegularReportFormState {
+  open: boolean;
+  template: QueryTemplate | null;
+  enabled: boolean;
+  sendTime: string;
+  periods: RegularReportPeriod[];
+  emailEnabled: boolean;
   recipientText: string;
 }
 
@@ -181,7 +193,6 @@ const createBlankSaveTemplateForm = (open: boolean): SaveTemplateFormState => ({
   visibility: 'private',
   payload: createDefaultTemplatePayload(),
   customRange: null,
-  recipientText: '',
 });
 
 export default function KPIQuery() {
@@ -221,28 +232,54 @@ export default function KPIQuery() {
   // ── 模板侧栏状态 ─────────────────────────────────────────────────
   const [templateTab, setTemplateTab] = useState<'public' | 'private'>(restoredState.templateTab);
   const [activeTemplateId, setActiveTemplateId] = useState<string | undefined>(restoredState.activeTemplateId);
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [templatePages, setTemplatePages] = useState<Record<TemplateVisibility, number>>({
+    public: 1,
+    private: 1,
+  });
   const [detailTemplateId, setDetailTemplateId] = useState<string | undefined>(undefined);
   // 左侧模板栏折叠态也属于本页轻量现场；不保存模板列表结果。
   const [sidebarCollapsed, setSidebarCollapsed] = useState(restoredState.sidebarCollapsed);
 
-  const { data: templatesData, isLoading: templatesLoading, refetch: refetchTemplates } =
-    useQueryTemplates({ pageSize: 200 });
+  const publicTemplateQuery = useQueryTemplates({
+    visibility: 'public',
+    search: templateSearch.trim() || undefined,
+    page: templatePages.public,
+    pageSize: TEMPLATE_PAGE_SIZE,
+  });
+  const privateTemplateQuery = useQueryTemplates({
+    visibility: 'private',
+    search: templateSearch.trim() || undefined,
+    page: templatePages.private,
+    pageSize: TEMPLATE_PAGE_SIZE,
+  });
   const createMut = useCreateQueryTemplate();
   const updateMut = useUpdateQueryTemplate();
   const deleteMut = useDeleteQueryTemplate();
   const createExport = useCreateKpiExport();
 
   const publicTemplates = useMemo(
-    () => (templatesData?.items ?? []).filter((tpl) => tpl.visibility === 'public'),
-    [templatesData],
+    () => publicTemplateQuery.data?.items ?? [],
+    [publicTemplateQuery.data?.items],
   );
   const privateTemplates = useMemo(
-    () => (templatesData?.items ?? []).filter((tpl) => tpl.visibility === 'private'),
-    [templatesData],
+    () => privateTemplateQuery.data?.items ?? [],
+    [privateTemplateQuery.data?.items],
+  );
+  const templatesLoading = publicTemplateQuery.isLoading || privateTemplateQuery.isLoading;
+  const refetchTemplates = () => Promise.all([
+    publicTemplateQuery.refetch(),
+    privateTemplateQuery.refetch(),
+  ]);
+  const activeTemplate = useMemo(() => {
+    return [...publicTemplates, ...privateTemplates].find((tpl) => tpl.id === activeTemplateId) ?? null;
+  }, [activeTemplateId, privateTemplates, publicTemplates]);
+  const canConfigureActiveReport = Boolean(
+    activeTemplate && (isSuperAdmin || activeTemplate.creatorId === currentUser?.id),
   );
   const detailTemplate = useMemo(
-    () => (templatesData?.items ?? []).find((tpl) => tpl.id === detailTemplateId) ?? null,
-    [detailTemplateId, templatesData],
+    () => [...publicTemplates, ...privateTemplates].find((tpl) => tpl.id === detailTemplateId) ?? null,
+    [detailTemplateId, privateTemplates, publicTemplates],
   );
 
   const granularityOptions = useMemo(
@@ -256,6 +293,15 @@ export default function KPIQuery() {
 
   // ── 存为模板 Modal ───────────────────────────────────────────────
   const [saveForm, setSaveForm] = useState<SaveTemplateFormState>(() => createBlankSaveTemplateForm(false));
+  const [reportForm, setReportForm] = useState<RegularReportFormState>({
+    open: false,
+    template: null,
+    enabled: false,
+    sendTime: '08:00',
+    periods: ['daily'],
+    emailEnabled: true,
+    recipientText: '',
+  });
 
   // ── 查询执行状态 ─────────────────────────────────────────────────
   // submitted 是真正用于查询的快照；表单编辑时不立即查询，等用户点"查询"
@@ -557,7 +603,6 @@ export default function KPIQuery() {
       visibility: 'private',
       payload: { ...payload },
       customRange,
-      recipientText: payload.regularReport?.recipients.join('; ') ?? '',
     });
   };
 
@@ -577,7 +622,6 @@ export default function KPIQuery() {
         tpl.payload.timeRangePreset === 'custom' && tpl.payload.absoluteStart && tpl.payload.absoluteEnd
           ? [dayjs(tpl.payload.absoluteStart), dayjs(tpl.payload.absoluteEnd)]
           : null,
-      recipientText: tpl.payload.regularReport?.recipients.join('; ') ?? '',
     });
   };
 
@@ -586,6 +630,19 @@ export default function KPIQuery() {
     const { labels } = await resolveTemplateMetricPaths(dt, tpl.payload.metricPaths);
     setMetricLabels((prev) => ({ ...prev, ...labels }));
     setDetailTemplateId(tpl.id);
+  };
+
+  const handleOpenRegularReport = (tpl: QueryTemplate) => {
+    const report = tpl.payload.regularReport;
+    setReportForm({
+      open: true,
+      template: tpl,
+      enabled: report?.enabled ?? false,
+      sendTime: report?.sendTime ?? '08:00',
+      periods: report?.periods ?? ['daily'],
+      emailEnabled: report?.emailEnabled ?? true,
+      recipientText: report?.recipients.join('; ') ?? '',
+    });
   };
 
   const handleSaveTemplate = async () => {
@@ -600,31 +657,9 @@ export default function KPIQuery() {
     if (warnIfSelectionExceedsLimit(saveForm.payload)) {
       return;
     }
-    const report = saveForm.payload.regularReport
-      ? { ...saveForm.payload.regularReport, recipients: splitEmailRecipients(saveForm.recipientText) }
-      : undefined;
-    if (report?.enabled) {
-      if (saveForm.payload.deviceSns.length === 0) {
-        message.warning(t('perf.kpiQuery.selectDeviceRequired'));
-        return;
-      }
-      if (saveForm.payload.metricPaths.length === 0) {
-        message.warning(t('perf.kpiQuery.selectMetricRequired'));
-        return;
-      }
-      if (report.periods.length === 0) {
-        message.warning(t('perf.kpiQuery.regularReport.periodRequired'));
-        return;
-      }
-      if (!report.emailEnabled || report.recipients.length === 0) {
-        message.warning(t('perf.kpiQuery.regularReport.recipientRequired'));
-        return;
-      }
-    }
     // 保存时回填 custom 模式的绝对时间（使用 Modal 内部的 payload + customRange，不是主表单）
     const payloadToSave: QueryTemplatePayload = {
       ...saveForm.payload,
-      regularReport: report,
       absoluteStart:
         saveForm.payload.timeRangePreset === 'custom' && saveForm.customRange
           ? toSystemTimezoneRFC3339(saveForm.customRange[0], systemTimezone) ?? saveForm.customRange[0].toISOString()
@@ -693,6 +728,68 @@ export default function KPIQuery() {
     }
   };
 
+  const handleSaveRegularReport = async () => {
+    const tpl = reportForm.template;
+    if (!tpl) return;
+
+    const regularReport = {
+      enabled: reportForm.enabled,
+      sendTime: reportForm.sendTime,
+      periods: reportForm.periods,
+      emailEnabled: reportForm.emailEnabled,
+      recipients: splitEmailRecipients(reportForm.recipientText),
+    };
+    if (regularReport.enabled) {
+      if (tpl.payload.deviceSns.length === 0) {
+        message.warning(t('perf.kpiQuery.selectDeviceRequired'));
+        return;
+      }
+      if (tpl.payload.metricPaths.length === 0) {
+        message.warning(t('perf.kpiQuery.selectMetricRequired'));
+        return;
+      }
+      if (regularReport.periods.length === 0) {
+        message.warning(t('perf.kpiQuery.regularReport.periodRequired'));
+        return;
+      }
+      if (!regularReport.emailEnabled || regularReport.recipients.length === 0) {
+        message.warning(t('perf.kpiQuery.regularReport.recipientRequired'));
+        return;
+      }
+    }
+
+    try {
+      const updated = await updateMut.mutateAsync({
+        id: tpl.id,
+        input: {
+          name: tpl.name,
+          description: tpl.description,
+          visibility: tpl.visibility,
+          payload: { ...tpl.payload, regularReport },
+        },
+      });
+      if (activeTemplateId === updated.id) {
+        setPayload((current) => ({ ...current, regularReport: updated.payload.regularReport }));
+      }
+      setReportForm((current) => ({ ...current, open: false }));
+      message.success(t('perf.kpiQuery.regularReport.saved'));
+    } catch (err) {
+      const e = err as Error & { response?: { status?: number } };
+      if (e?.response?.status === 403) {
+        message.error(t('perf.kpiQuery.noPermissionPublic'));
+      } else {
+        message.error(t('perf.kpiQuery.saveFailed', { msg: e.message }));
+      }
+    }
+  };
+
+  const handleEditRegularReportScope = () => {
+    const tpl = reportForm.template;
+    if (!tpl) return;
+    setReportForm((current) => ({ ...current, open: false }));
+    void handleOpenUpdateModal(tpl);
+  };
+
   const handleDeleteTemplate = async (id: string) => {
     try {
       await deleteMut.mutateAsync(id);
@@ -734,87 +831,125 @@ export default function KPIQuery() {
   // ── 渲染辅助 ─────────────────────────────────────────────────────
   const renderTemplateItem = (tpl: QueryTemplate) => {
     const canEdit = isSuperAdmin || tpl.creatorId === currentUser?.id;
+    const isActive = activeTemplateId === tpl.id;
     return (
-      <List.Item
+      <div
         key={tpl.id}
+        data-template-id={tpl.id}
         style={{
-          padding: '8px 12px',
+          padding: 0,
+          margin: '0 8px 8px',
           cursor: 'pointer',
-          background: activeTemplateId === tpl.id ? token.colorBgTextHover : 'transparent',
-          borderRadius: 4,
+          background: isActive ? token.colorBgTextHover : 'transparent',
+          border: `1px solid ${isActive ? token.colorPrimaryBorder : 'transparent'}`,
+          borderRadius: 6,
         }}
         onClick={() => void handleSelectTemplate(tpl)}
-        actions={
-          [
-            <Tooltip key="detail" title={t('perf.kpiQuery.detail.title')}>
-              <Button
-                type="text"
-                size="small"
-                icon={<EyeOutlined />}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void handleOpenDetail(tpl);
-                }}
-              />
-            </Tooltip>,
-            ...(canEdit ? [
-                <Tooltip key="edit" title={t('common.edit')}>
+      >
+        <div style={{ width: '100%', minWidth: 0, padding: '10px 12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Text strong ellipsis={{ tooltip: tpl.name }} style={{ flex: 1, minWidth: 0 }}>
+              {tpl.name}
+            </Text>
+            <Space size={0} onClick={(event) => event.stopPropagation()}>
+              <Tooltip title={t('perf.kpiQuery.detail.title')}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<EyeOutlined />}
+                  aria-label={t('perf.kpiQuery.detail.title')}
+                  onClick={() => void handleOpenDetail(tpl)}
+                />
+              </Tooltip>
+              {canEdit && (
+                <Tooltip title={t('common.edit')}>
                   <Button
                     type="text"
                     size="small"
                     icon={<EditOutlined />}
                     aria-label={t('common.edit')}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void handleOpenUpdateModal(tpl);
-                    }}
+                    onClick={() => void handleOpenUpdateModal(tpl)}
                   />
-                </Tooltip>,
-                <Popconfirm
-                  key="del"
-                  title={t('perf.kpiQuery.confirmDeleteTemplate')}
-                  onConfirm={(e) => {
-                    e?.stopPropagation();
-                    void handleDeleteTemplate(tpl.id);
-                  }}
-                  onCancel={(e) => e?.stopPropagation()}
-                >
-                  <Button
-                    type="text"
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                </Popconfirm>,
-              ] : []),
-          ]
-        }
-      >
-        <List.Item.Meta
-          title={
-            <Space style={{ width: '100%', minWidth: 0 }}>
-              <Text ellipsis={{ tooltip: tpl.name }} style={{ flex: 1, minWidth: 0 }}>
-                {tpl.name}
-              </Text>
+                </Tooltip>
+              )}
               {tpl.payload.regularReport?.enabled && (
-                <Tag color="blue" style={{ marginInlineEnd: 0 }}>
-                  {t('perf.kpiQuery.regularReport.title')}
-                </Tag>
+                <Tooltip title={t('perf.kpiQuery.regularReport.enabledStatus')}>
+                  <span
+                    role="img"
+                    aria-label={t('perf.kpiQuery.regularReport.enabledStatus')}
+                    style={{ color: token.colorPrimary, display: 'inline-flex', paddingInline: 8 }}
+                  >
+                    <ClockCircleOutlined />
+                  </span>
+                </Tooltip>
+              )}
+              {canEdit && (
+                <>
+                  <Popconfirm
+                    title={t('perf.kpiQuery.confirmDeleteTemplate')}
+                    onConfirm={() => void handleDeleteTemplate(tpl.id)}
+                  >
+                    <Button
+                      type="text"
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      aria-label={t('common.delete')}
+                    />
+                  </Popconfirm>
+                </>
               )}
             </Space>
-          }
-          description={
-            tpl.description ? (
-              <Text type="secondary" ellipsis style={{ fontSize: 12 }}>
-                {tpl.description}
-              </Text>
-            ) : null
-          }
-        />
-      </List.Item>
+          </div>
+          {tpl.description && (
+            <Text type="secondary" ellipsis style={{ display: 'block', minWidth: 0, marginTop: 4, fontSize: 12 }}>
+              {tpl.description}
+            </Text>
+          )}
+        </div>
+      </div>
     );
   };
+
+  const renderTemplatePanel = (
+    visibility: TemplateVisibility,
+    templates: QueryTemplate[],
+    total: number,
+    emptyText: string,
+  ) => (
+    <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingTop: 8 }}>
+        <Spin spinning={templatesLoading}>
+          {templates.length > 0
+            ? templates.map(renderTemplateItem)
+            : <Empty description={emptyText} />}
+        </Spin>
+      </div>
+      {total > TEMPLATE_PAGE_SIZE && (
+        <div
+          style={{
+            flexShrink: 0,
+            padding: '8px 12px',
+            borderTop: `1px solid ${token.colorBorderSecondary}`,
+            textAlign: 'center',
+          }}
+        >
+          <Pagination
+            simple
+            size="small"
+            current={templatePages[visibility]}
+            pageSize={TEMPLATE_PAGE_SIZE}
+            total={total}
+            showSizeChanger={false}
+            onChange={(page) => {
+              setTemplatePages((current) => ({ ...current, [visibility]: page }));
+              setActiveTemplateId(undefined);
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
 
   const sidebar = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -852,47 +987,61 @@ export default function KPIQuery() {
             </Tooltip>
           </Space>
         </Space>
+        <Text type="secondary" style={{ display: 'block', marginTop: 6, fontSize: 12, lineHeight: 1.5 }}>
+          {t('perf.kpiQuery.regularReport.sidebarHint')}
+        </Text>
+        <Input
+          allowClear
+          size="small"
+          prefix={<SearchOutlined />}
+          value={templateSearch}
+          placeholder={t('perf.kpiQuery.searchTemplatePlaceholder')}
+          style={{ marginTop: 10 }}
+          onChange={(event) => {
+            setTemplateSearch(event.target.value);
+            setTemplatePages({ public: 1, private: 1 });
+            setActiveTemplateId(undefined);
+          }}
+        />
       </div>
       <Tabs
         activeKey={templateTab}
-        onChange={(k) => setTemplateTab(k as 'public' | 'private')}
+        onChange={(k) => {
+          setTemplateTab(k as 'public' | 'private');
+          setActiveTemplateId(undefined);
+        }}
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}
+        tabBarStyle={{ marginBottom: 0, paddingInline: 12 }}
         items={[
           {
             key: 'public',
             label: (
               <span>
-                <TeamOutlined /> {t('perf.kpiQuery.public')} ({publicTemplates.length})
+                <TeamOutlined /> {t('perf.kpiQuery.public')} ({publicTemplateQuery.data?.total ?? 0})
               </span>
             ),
-            children: (
-              <Spin spinning={templatesLoading}>
-                <List
-                  dataSource={publicTemplates}
-                  renderItem={renderTemplateItem}
-                  locale={{ emptyText: <Empty description={t('perf.kpiQuery.noPublicTemplates')} /> }}
-                />
-              </Spin>
+            children: renderTemplatePanel(
+              'public',
+              publicTemplates,
+              publicTemplateQuery.data?.total ?? 0,
+              t('perf.kpiQuery.noPublicTemplates'),
             ),
           },
           {
             key: 'private',
             label: (
               <span>
-                <UserOutlined /> {t('perf.kpiQuery.private')} ({privateTemplates.length})
+                <UserOutlined /> {t('perf.kpiQuery.private')} ({privateTemplateQuery.data?.total ?? 0})
               </span>
             ),
-            children: (
-              <Spin spinning={templatesLoading}>
-                <List
-                  dataSource={privateTemplates}
-                  renderItem={renderTemplateItem}
-                  locale={{ emptyText: <Empty description={t('perf.kpiQuery.noPrivateTemplates')} /> }}
-                />
-              </Spin>
+            children: renderTemplatePanel(
+              'private',
+              privateTemplates,
+              privateTemplateQuery.data?.total ?? 0,
+              t('perf.kpiQuery.noPrivateTemplates'),
             ),
           },
         ]}
-        style={{ flex: 1, overflow: 'auto', padding: '0 8px' }}
       />
     </div>
   );
@@ -1033,7 +1182,7 @@ export default function KPIQuery() {
                     <Tooltip
                       title={metricSummaryTooltip(payload.metricPaths)}
                       placement="topLeft"
-                      overlayStyle={{ maxWidth: 520 }}
+                      styles={{ root: { maxWidth: 520 } }}
                     >
                       <Input
                         readOnly
@@ -1122,6 +1271,26 @@ export default function KPIQuery() {
                 <Button icon={<SaveOutlined />} disabled={!hasAvailableDeviceTypes} onClick={handleOpenSaveAsModal}>
                   {t('perf.kpiQuery.saveAsTemplate')}
                 </Button>
+                <Tooltip
+                  title={
+                    !activeTemplate
+                      ? t('perf.kpiQuery.selectTemplateHint')
+                      : canConfigureActiveReport
+                        ? t('perf.kpiQuery.regularReport.configure')
+                        : t('common.noPermission')
+                  }
+                >
+                  <span>
+                    <Button
+                      icon={<ClockCircleOutlined />}
+                      aria-label={t('perf.kpiQuery.regularReport.action')}
+                      disabled={!canConfigureActiveReport}
+                      onClick={() => activeTemplate && handleOpenRegularReport(activeTemplate)}
+                    >
+                      {t('perf.kpiQuery.regularReport.action')}
+                    </Button>
+                  </span>
+                </Tooltip>
                 <Button
                   icon={<ExportOutlined />}
                   onClick={handleExport}
@@ -1403,7 +1572,7 @@ export default function KPIQuery() {
                 <Tooltip
                   title={metricSummaryTooltip(saveForm.payload.metricPaths)}
                   placement="topLeft"
-                  overlayStyle={{ maxWidth: 520 }}
+                  styles={{ root: { maxWidth: 520 } }}
                 >
                   <Input
                     readOnly
@@ -1422,92 +1591,129 @@ export default function KPIQuery() {
               </Space.Compact>
             </Form.Item>
 
-            <Divider titlePlacement="left" style={{ margin: '16px 0' }}>
-              {t('perf.kpiQuery.regularReport.title')}
-            </Divider>
+          </Form>
+        </Modal>
 
-            <Form.Item label={t('perf.kpiQuery.regularReport.enable')} style={{ marginBottom: 12 }}>
-              <Switch
-                checked={saveForm.payload.regularReport?.enabled ?? false}
-                onChange={(enabled) => setSaveForm((s) => ({
-                  ...s,
-                  payload: {
-                    ...s.payload,
-                    regularReport: {
-                      enabled,
-                      sendTime: s.payload.regularReport?.sendTime ?? '08:00',
-                      periods: s.payload.regularReport?.periods ?? ['daily'],
-                      emailEnabled: s.payload.regularReport?.emailEnabled ?? true,
-                      recipients: s.payload.regularReport?.recipients ?? [],
-                    },
-                  },
-                }))}
-              />
-            </Form.Item>
+        <Drawer
+          title={
+            <Space>
+              <ClockCircleOutlined />
+              <span>{t('perf.kpiQuery.regularReport.title')}</span>
+              {reportForm.template && <Text type="secondary">· {reportForm.template.name}</Text>}
+            </Space>
+          }
+          open={reportForm.open}
+          onClose={() => setReportForm((current) => ({ ...current, open: false }))}
+          size={560}
+          destroyOnHidden
+          footer={
+            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+              <Button onClick={() => setReportForm((current) => ({ ...current, open: false }))}>
+                {t('common.cancel')}
+              </Button>
+              <Button type="primary" loading={updateMut.isPending} onClick={handleSaveRegularReport}>
+                {t('common.save')}
+              </Button>
+            </Space>
+          }
+        >
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            title={t('perf.kpiQuery.regularReport.hint')}
+            description={t('perf.kpiQuery.regularReport.workflowHint')}
+          />
 
-            {saveForm.payload.regularReport?.enabled && (
-              <>
-                <Alert
-                  type="info"
-                  showIcon
-                  style={{ marginBottom: 12 }}
-                  message={t('perf.kpiQuery.regularReport.hint')}
+          <Card
+            size="small"
+            title={t('perf.kpiQuery.regularReport.scopeTitle')}
+            extra={
+              <Button type="link" size="small" onClick={handleEditRegularReportScope}>
+                {t('perf.kpiQuery.regularReport.editScope')}
+              </Button>
+            }
+            style={{ marginBottom: 16 }}
+          >
+            <Space wrap>
+              <Tag>{t('perf.kpiQuery.regularReport.deviceCount', { count: reportForm.template?.payload.deviceSns.length ?? 0 })}</Tag>
+              <Tag>{t('perf.kpiQuery.regularReport.metricCount', { count: reportForm.template?.payload.metricPaths.length ?? 0 })}</Tag>
+            </Space>
+            <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+              {t('perf.kpiQuery.regularReport.scopeHint')}
+            </Text>
+          </Card>
+
+          <Card
+            size="small"
+            title={t('perf.kpiQuery.regularReport.scheduleConfig')}
+            extra={
+              <Space size={8}>
+                <Text type="secondary">
+                  {t(reportForm.enabled ? 'common.enabled' : 'common.disabled')}
+                </Text>
+                <Switch
+                  aria-label={t('perf.kpiQuery.regularReport.enable')}
+                  checked={reportForm.enabled}
+                  onChange={(enabled) => setReportForm((current) => ({ ...current, enabled }))}
                 />
+              </Space>
+            }
+          >
+            {!reportForm.enabled ? (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={t('perf.kpiQuery.regularReport.disabledHint')}
+              />
+            ) : (
+              <Form layout="vertical">
                 <Space wrap size="large" align="start">
                   <Form.Item label={t('perf.kpiQuery.regularReport.sendTime')} required>
                     <TimePicker
                       format="HH:mm"
                       minuteStep={1}
-                      value={dayjs(`2000-01-01T${saveForm.payload.regularReport.sendTime}:00`)}
-                      onChange={(value) => value && setSaveForm((s) => ({
-                        ...s,
-                        payload: {
-                          ...s.payload,
-                          regularReport: { ...s.payload.regularReport!, sendTime: value.format('HH:mm') },
-                        },
+                      value={dayjs(`2000-01-01T${reportForm.sendTime}:00`)}
+                      onChange={(value) => value && setReportForm((current) => ({
+                        ...current,
+                        sendTime: value.format('HH:mm'),
                       }))}
                     />
                   </Form.Item>
                   <Form.Item label={t('perf.kpiQuery.regularReport.period')} required>
                     <Checkbox.Group
-                      value={saveForm.payload.regularReport.periods}
+                      value={reportForm.periods}
                       options={REGULAR_REPORT_PERIODS.map((item) => ({ value: item.value, label: t(item.labelKey) }))}
-                      onChange={(values) => setSaveForm((s) => ({
-                        ...s,
-                        payload: {
-                          ...s.payload,
-                          regularReport: { ...s.payload.regularReport!, periods: values as RegularReportPeriod[] },
-                        },
+                      onChange={(values) => setReportForm((current) => ({
+                        ...current,
+                        periods: values as RegularReportPeriod[],
                       }))}
                     />
                   </Form.Item>
                 </Space>
+                <Divider style={{ margin: '0 0 16px' }} />
                 <Form.Item label={t('perf.kpiQuery.regularReport.emailEnable')} style={{ marginBottom: 12 }}>
                   <Switch
-                    checked={saveForm.payload.regularReport.emailEnabled}
-                    onChange={(emailEnabled) => setSaveForm((s) => ({
-                      ...s,
-                      payload: {
-                        ...s.payload,
-                        regularReport: { ...s.payload.regularReport!, emailEnabled },
-                      },
-                    }))}
+                    checked={reportForm.emailEnabled}
+                    onChange={(emailEnabled) => setReportForm((current) => ({ ...current, emailEnabled }))}
                   />
                 </Form.Item>
-                {saveForm.payload.regularReport.emailEnabled && (
-                  <Form.Item label={t('perf.kpiQuery.regularReport.recipients')} required>
+                {reportForm.emailEnabled && (
+                  <Form.Item label={t('perf.kpiQuery.regularReport.recipients')} required style={{ marginBottom: 0 }}>
                     <Input.TextArea
-                      rows={2}
-                      value={saveForm.recipientText}
+                      rows={3}
+                      value={reportForm.recipientText}
                       placeholder={t('perf.kpiQuery.regularReport.recipientsPlaceholder')}
-                      onChange={(event) => setSaveForm((s) => ({ ...s, recipientText: event.target.value }))}
+                      onChange={(event) => setReportForm((current) => ({
+                        ...current,
+                        recipientText: event.target.value,
+                      }))}
                     />
                   </Form.Item>
                 )}
-              </>
+              </Form>
             )}
-          </Form>
-        </Modal>
+          </Card>
+        </Drawer>
       </div>
       </div>
     </div>

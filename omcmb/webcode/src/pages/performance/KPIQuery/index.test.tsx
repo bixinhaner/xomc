@@ -10,9 +10,11 @@ import { buildKpiQueryStateSnapshot, PM_KPI_QUERY_PAGE_KEY } from './kpiQuerySta
 
 const refetchAggSpy = vi.fn();
 const createTemplateSpy = vi.fn();
+const updateTemplateSpy = vi.fn();
 const createExportSpy = vi.fn();
 const metricPickerRenderSpy = vi.hoisted(() => vi.fn());
 const aggregatedQuerySpy = vi.hoisted(() => vi.fn());
+const queryTemplateMockCache = vi.hoisted(() => new Map<string, unknown>());
 const aggregatedQueryState = vi.hoisted(() => ({
   current: {
     data: [] as unknown[],
@@ -73,14 +75,48 @@ const overLimitTemplate: QueryTemplate = {
   updatedAt: '2026-01-01T00:00:00Z',
 };
 
+const noMetricTemplate: QueryTemplate = {
+  id: 'tpl-no-metric',
+  name: '无指标模板',
+  visibility: 'private',
+  creatorId: 'user-1',
+  description: '',
+  payload: {
+    deviceSns: ['SN-OK'],
+    metricPaths: [],
+    granularity: '15min',
+    timeRangePreset: 'last_1h',
+    deviceType: 'ENB',
+  },
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z',
+};
+
 vi.mock('@core/hooks/api/usePmQuery', () => ({
-  useQueryTemplates: () => ({
-    data: { items: [validTemplate, overLimitTemplate], total: 2 },
-    isLoading: false,
-    refetch: vi.fn(),
-  }),
+  useQueryTemplates: (params?: { visibility?: string; search?: string; page?: number; pageSize?: number }) => {
+    const cacheKey = JSON.stringify(params ?? {});
+    const cached = queryTemplateMockCache.get(cacheKey);
+    if (cached) return cached;
+    const allTemplates = [validTemplate, overLimitTemplate, noMetricTemplate];
+    const filtered = allTemplates.filter((template) => (
+      (!params?.visibility || template.visibility === params.visibility)
+      && (!params?.search || template.name.includes(params.search))
+    ));
+    const page = params?.page ?? 1;
+    const pageSize = params?.pageSize ?? 50;
+    const response = {
+      data: {
+        items: filtered.slice((page - 1) * pageSize, page * pageSize),
+        total: filtered.length,
+      },
+      isLoading: false,
+      refetch: vi.fn(),
+    };
+    queryTemplateMockCache.set(cacheKey, response);
+    return response;
+  },
   useCreateQueryTemplate: () => ({ mutateAsync: createTemplateSpy, isPending: false }),
-  useUpdateQueryTemplate: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateQueryTemplate: () => ({ mutateAsync: updateTemplateSpy, isPending: false }),
   useDeleteQueryTemplate: () => ({ mutateAsync: vi.fn() }),
   useAggregatedMetricsByDevices: (
     baseParams: Record<string, unknown>,
@@ -179,6 +215,17 @@ function renderPage() {
   );
 }
 
+function resetUpdateTemplateMock() {
+  updateTemplateSpy.mockReset();
+  updateTemplateSpy.mockImplementation(async ({ id, input }) => ({
+    id,
+    creatorId: 'user-1',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-02T00:00:00Z',
+    ...input,
+  }));
+}
+
 async function selectOverLimitTemplate() {
   fireEvent.click(screen.getByText('老模板-超限设备'));
   await waitFor(() => {
@@ -193,18 +240,33 @@ async function findModalByTitle(title: string) {
   return modal as HTMLElement;
 }
 
+async function findDrawerByTitle(title: string) {
+  const titleNode = await screen.findByText(title);
+  const drawer = titleNode.closest('.ant-drawer');
+  expect(drawer).toBeTruthy();
+  return drawer as HTMLElement;
+}
+
+function templateListItem(name: string) {
+  const item = screen.getByText(name).closest('[data-template-id]');
+  expect(item).toBeTruthy();
+  return item as HTMLElement;
+}
+
 afterEach(() => {
   vi.useRealTimers();
 });
 
 describe('KPIQuery 顶部 tab 现场保持', () => {
   beforeEach(() => {
+    queryTemplateMockCache.clear();
     usePmPageStateStore.setState({ pages: {} });
     sessionStorage.clear();
     refetchAggSpy.mockClear();
     aggregatedQuerySpy.mockClear();
     aggregatedQueryState.current = { data: [], total: 0, truncated: false };
     createTemplateSpy.mockReset();
+    resetUpdateTemplateMock();
     createExportSpy.mockReset();
     technologyDictionaryState.current = technologyDictionaryState.defaultDictionary;
   });
@@ -417,11 +479,13 @@ describe('KPIQuery 顶部 tab 现场保持', () => {
 
 describe('KPIQuery 模板数量限制', () => {
   beforeEach(() => {
+    queryTemplateMockCache.clear();
     usePmPageStateStore.setState({ pages: {} });
     sessionStorage.clear();
     refetchAggSpy.mockClear();
     aggregatedQuerySpy.mockClear();
     createTemplateSpy.mockReset();
+    resetUpdateTemplateMock();
     createExportSpy.mockReset();
     technologyDictionaryState.current = technologyDictionaryState.defaultDictionary;
   });
@@ -509,11 +573,13 @@ describe('KPIQuery 模板数量限制', () => {
 
 describe('KPIQuery 模板弹窗初始值', () => {
   beforeEach(() => {
+    queryTemplateMockCache.clear();
     usePmPageStateStore.setState({ pages: {} });
     sessionStorage.clear();
     refetchAggSpy.mockClear();
     aggregatedQuerySpy.mockClear();
     createTemplateSpy.mockReset();
+    resetUpdateTemplateMock();
     createExportSpy.mockReset();
     metricPickerRenderSpy.mockClear();
     technologyDictionaryState.current = technologyDictionaryState.defaultDictionary;
@@ -584,31 +650,100 @@ describe('KPIQuery 模板弹窗初始值', () => {
     expect(within(dialog).getByText('近 1 小时')).toBeTruthy();
   });
 
-  it('启用定时报表但未选择指标时阻止保存模板', async () => {
+  it('新建查询模板不再混入定时报表配置', async () => {
     renderPage();
 
+    expect(screen.getByRole('button', { name: '定时报表' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '新建查询模板' }));
     const dialog = await findModalByTitle('新建查询模板');
-    fireEvent.change(within(dialog).getByPlaceholderText('例如：eNB 基础 KPI'), {
-      target: { value: '无指标定时报表' },
-    });
-    fireEvent.click(within(dialog).getAllByRole('button', { name: '列表选' })[0]);
-    fireEvent.click(await screen.findByRole('button', { name: '模拟选择设备' }));
+
+    expect(within(dialog).queryByText('KPI 定时报表')).toBeNull();
+    expect(within(dialog).queryByRole('switch')).toBeNull();
+    expect(within(dialog).getByText('查询配置')).toBeTruthy();
+  }, 15_000);
+
+  it('模板总量超过当前页时显示接口真实总数', () => {
+    const pageItems = Array.from({ length: 2 }, (_, index) => ({
+      ...validTemplate,
+      id: `tpl-page-${index + 1}`,
+      name: `分页模板-${index + 1}`,
+    }));
+    queryTemplateMockCache.set(
+      JSON.stringify({ visibility: 'public', page: 1, pageSize: 20 }),
+      {
+        data: { items: pageItems, total: 25 },
+        isLoading: false,
+        refetch: vi.fn(),
+      },
+    );
+
+    renderPage();
+
+    expect(screen.getByRole('tab', { name: /公共 \(25\)/ })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: '模板详情' })).toHaveLength(2);
+  }, 15_000);
+
+  it('选择模板后从查询操作栏独立配置并保存 KPI 定时报表', async () => {
+    renderPage();
+
+    const item = templateListItem('正常模板');
+    expect(within(item).queryByRole('button', { name: '定时报表' })).toBeNull();
+    fireEvent.click(item);
     await waitFor(() => {
-      expect(within(dialog).getByPlaceholderText('点击右侧按钮选择设备')).toHaveValue('已选 1 个：SN-NEW');
+      expect(screen.getByRole('button', { name: '定时报表' })).toBeEnabled();
     });
-    fireEvent.click(within(dialog).getByRole('switch'));
-    await within(dialog).findByText('系统按配置时间生成最近一个完整统计周期的 CSV，并作为邮件附件发送。发件账号在系统设置中统一配置。');
-    fireEvent.change(within(dialog).getByPlaceholderText('多个邮箱用分号、逗号或换行分隔'), {
+    fireEvent.click(screen.getByRole('button', { name: '定时报表' }));
+
+    const drawer = await findDrawerByTitle('KPI 定时报表');
+    expect(drawer).toHaveTextContent('正常模板');
+    expect(within(drawer).getByText('设备 1 台')).toBeTruthy();
+    expect(within(drawer).getByText('指标 1 个')).toBeTruthy();
+    fireEvent.click(within(drawer).getByRole('switch', { name: '启用定时报表' }));
+    fireEvent.change(within(drawer).getByPlaceholderText('多个邮箱用分号、逗号或换行分隔'), {
       target: { value: 'ops@example.com' },
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }));
+    fireEvent.click(within(drawer).getByRole('button', { name: /保\s*存/ }));
 
     await waitFor(() => {
-      expect(createTemplateSpy).not.toHaveBeenCalled();
-      expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('');
+      expect(updateTemplateSpy).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'tpl-valid',
+        input: expect.objectContaining({
+          payload: expect.objectContaining({
+            regularReport: {
+              enabled: true,
+              sendTime: '08:00',
+              periods: ['daily'],
+              emailEnabled: true,
+              recipients: ['ops@example.com'],
+            },
+          }),
+        }),
+      }));
     });
-  });
+  }, 15_000);
+
+  it('没有指标的模板不能启用定时报表', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('tab', { name: /私有/ }));
+    const item = templateListItem('无指标模板');
+    fireEvent.click(item);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '定时报表' })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole('button', { name: '定时报表' }));
+    const drawer = await findDrawerByTitle('KPI 定时报表');
+    fireEvent.click(within(drawer).getByRole('switch', { name: '启用定时报表' }));
+    fireEvent.change(within(drawer).getByPlaceholderText('多个邮箱用分号、逗号或换行分隔'), {
+      target: { value: 'ops@example.com' },
+    });
+    fireEvent.click(within(drawer).getByRole('button', { name: /保\s*存/ }));
+
+    await waitFor(() => {
+      expect(updateTemplateSpy).not.toHaveBeenCalled();
+      expect(within(drawer).getByText('指标 0 个')).toBeTruthy();
+    });
+  }, 15_000);
 
   it('编辑模板弹窗仍回填待编辑模板数据', async () => {
     renderPage();
