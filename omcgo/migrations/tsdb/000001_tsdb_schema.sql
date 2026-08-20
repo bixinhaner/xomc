@@ -1581,7 +1581,7 @@ ALTER TABLE public.pm_aggregation_windows
     ADD CONSTRAINT chk_pm_aggregation_windows_status
         CHECK (status IN (
             'open', 'finalizing', 'prepared', 'published', 'failed', 'rebuilding',
-            'orphaned', 'retired'
+            'orphaned', 'retired', 'abandoned'
         ));
 
 CREATE INDEX idx_pm_windows_prepared_publication
@@ -1789,6 +1789,38 @@ CREATE INDEX IF NOT EXISTS idx_pm_aggregation_rollup_unacknowledged
     WHERE consumed_at IS NULL
       AND barrier_eligible
       AND published_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_outbox_retention_consumed
+    ON public.pm_aggregation_outbox (published_at, event_id)
+    WHERE consumed_at IS NOT NULL
+      AND barrier_eligible;
+
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_outbox_retention_legacy
+    ON public.pm_aggregation_outbox (published_at, event_id)
+    WHERE NOT barrier_eligible
+      AND published_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_rollup_retention_consumed
+    ON public.pm_aggregation_rollup_outbox (published_at, event_id)
+    WHERE consumed_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_windows_published_retention
+    ON public.pm_aggregation_windows (
+        published_at, window_start, task_version_id, entity_key, granularity
+    )
+    WHERE status = 'published';
+
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_windows_recovery_retention
+    ON public.pm_aggregation_windows (
+        recovery_terminal_at, window_start, task_version_id, entity_key, granularity
+    )
+    WHERE status IN ('retired', 'orphaned');
+
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_windows_abandoned_retention
+    ON public.pm_aggregation_windows (
+        updated_at, window_start, task_version_id, entity_key, granularity
+    )
+    WHERE status = 'abandoned';
 
 
 -- +goose Down

@@ -496,18 +496,6 @@ func markRollupFailed(ctx context.Context, tx pgx.Tx, eventID uuid.UUID, publish
 	return err
 }
 
-func (r *RollupOutboxRepository) DeletePublishedBefore(ctx context.Context, before time.Time) error {
-	query, args, err := storage.Psql.Delete("pm_aggregation_rollup_outbox").
-		Where(sq.Lt{"published_at": before}).
-		Where("consumed_at IS NOT NULL").
-		ToSql()
-	if err != nil {
-		return err
-	}
-	_, err = r.pool.Exec(ctx, query, args...)
-	return err
-}
-
 func (r *RollupOutboxRepository) ListSnapshots(
 	ctx context.Context,
 	taskVersionID uuid.UUID,
@@ -748,9 +736,7 @@ func (r *RollupOutboxRelay) SetMetrics(metrics *Metrics) *RollupOutboxRelay {
 
 func (r *RollupOutboxRelay) Run(ctx context.Context) error {
 	ticker := time.NewTicker(r.interval)
-	cleanup := time.NewTicker(time.Hour)
 	defer ticker.Stop()
-	defer cleanup.Stop()
 	go runRedeliveryLoop(ctx, r.redeliveryEvery, func() {
 		r.requeueStale(ctx)
 	})
@@ -768,10 +754,6 @@ func (r *RollupOutboxRelay) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-cleanup.C:
-			if err := r.repo.DeletePublishedBefore(ctx, time.Now().UTC().Add(-24*time.Hour)); err != nil {
-				r.logger.Warn("cleanup PM rollup outbox", zap.Error(err))
-			}
 		case <-ticker.C:
 		}
 	}

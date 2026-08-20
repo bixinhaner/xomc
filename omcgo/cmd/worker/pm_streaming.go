@@ -199,9 +199,7 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	}
 	relay := pmstream.NewOutboxRelay(
 		outboxRepo, w.EventBus, logger,
-	).SetBatch(cfg.OutboxBatch).
-		SetRetention(cfg.OutboxRetention, cfg.ReplayRetention).
-		SetMetrics(streamMetrics)
+	).SetBatch(cfg.OutboxBatch).SetMetrics(streamMetrics)
 	rollupRelay := pmstream.NewRollupOutboxRelay(
 		rollupOutboxRepo, w.EventBus, logger,
 	).SetBatch(cfg.OutboxBatch).SetMetrics(streamMetrics)
@@ -215,6 +213,14 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	redisSweeper := pmstream.NewRedisStateSweeper(
 		store, windowRepo, pmRedisSweepSafetyThreshold, streamMetrics, logger,
 	)
+	runtimeCleaner := pmstream.NewRuntimeCleaner(
+		outboxRepo, rollupOutboxRepo, windowRepo, logger,
+	).SetConfig(pmstream.RuntimeCleanupConfig{
+		BatchSize: cfg.CleanupBatch, Interval: cfg.CleanupInterval,
+		MaxDuration:     cfg.CleanupMaxDuration,
+		OutboxRetention: cfg.OutboxRetention, ReplayRetention: cfg.ReplayRetention,
+		VacuumEnabled: cfg.CleanupVacuum,
+	}).SetMetrics(streamMetrics)
 	publishedVersionRepairer := pmstream.NewPublishedVersionRepairerWithLocationProvider(
 		windowRepo, snapshot, locationProvider, logger,
 	)
@@ -240,11 +246,14 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	go redisSweeper.Run(
 		ctx, pmRedisSweepInterval, pmRedisSweepScanLimit, pmRedisSweepUnlinkBatch,
 	)
+	go runtimeCleaner.Run(ctx)
 	streamMetrics.Ready.Set(1)
 	logger.Info("PM streaming aggregation ready",
 		zap.String("timezone", locationProvider().String()),
 		zap.Duration("close_grace", cfg.CloseGrace),
 		zap.Duration("window_ttl", cfg.WindowTTL),
+		zap.Int("cleanup_batch", cfg.CleanupBatch),
+		zap.Duration("cleanup_max_duration", cfg.CleanupMaxDuration),
 		zap.Bool("redis_v2_write_enabled", cfg.RedisV2WriteEnabled))
 }
 

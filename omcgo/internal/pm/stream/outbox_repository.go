@@ -86,17 +86,6 @@ func InsertOutbox(
 	return nil
 }
 
-func (r *OutboxRepository) DeleteReplayBefore(ctx context.Context, before time.Time) error {
-	if _, err := r.pool.Exec(
-		ctx,
-		"SELECT drop_chunks('public.pm_aggregation_replay_sources', older_than => $1::timestamptz)",
-		before,
-	); err != nil {
-		return fmt.Errorf("cleanup PM replay source chunks: %w", err)
-	}
-	return nil
-}
-
 // MarkConsumed advances the durable consumer barrier only after every
 // contribution from the event has been committed to its Redis/SQL window.
 func (r *OutboxRepository) MarkConsumed(ctx context.Context, eventID uuid.UUID) error {
@@ -209,32 +198,6 @@ func markOutboxFailed(ctx context.Context, tx pgx.Tx, eventID uuid.UUID, publish
 	}
 	if _, err := tx.Exec(ctx, query, args...); err != nil {
 		return fmt.Errorf("mark PM aggregation outbox failed: %w", err)
-	}
-	return nil
-}
-
-func (r *OutboxRepository) DeletePublishedBefore(
-	ctx context.Context,
-	before, legacyBefore time.Time,
-) error {
-	query, args, err := storage.Psql.Delete("pm_aggregation_outbox").
-		Where(sq.Or{
-			sq.And{
-				sq.Lt{"published_at": before},
-				sq.Expr("consumed_at IS NOT NULL"),
-				sq.Eq{"barrier_eligible": true},
-			},
-			sq.And{
-				sq.Lt{"published_at": legacyBefore},
-				sq.Eq{"barrier_eligible": false},
-			},
-		}).
-		ToSql()
-	if err != nil {
-		return fmt.Errorf("build cleanup PM aggregation outbox SQL: %w", err)
-	}
-	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
-		return fmt.Errorf("cleanup PM aggregation outbox: %w", err)
 	}
 	return nil
 }

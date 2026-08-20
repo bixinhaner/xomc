@@ -27,6 +27,10 @@ func TestMetricsExposeStreamingHealthWithoutHighCardinalityLabels(t *testing.T) 
 	metrics.RedisSampledEstimatedBytes.WithLabelValues("hourly").Set(4096)
 	metrics.RedisSweeperDeletedTotal.Inc()
 	metrics.RedisWriteErrorsTotal.Inc()
+	metrics.RuntimeCleanupRowsTotal.WithLabelValues("outbox").Add(10)
+	metrics.RuntimeCleanupErrorsTotal.WithLabelValues("outbox").Inc()
+	metrics.RuntimeCleanupDuration.WithLabelValues("outbox").Observe(0.01)
+	metrics.RuntimeCleanupBacklog.WithLabelValues("outbox").Set(20)
 	metrics.DailyVersionExpectedSlotsMismatchTotal.Inc()
 	metrics.ResultReplaceSeconds.Observe(0.01)
 	metrics.WindowsPreparedTotal.Inc()
@@ -66,6 +70,10 @@ func TestMetricsExposeStreamingHealthWithoutHighCardinalityLabels(t *testing.T) 
 		"omc_pm_aggregation_redis_sampled_estimated_bytes",
 		"omc_pm_aggregation_redis_sweeper_deleted_total",
 		"omc_pm_aggregation_redis_write_errors_total",
+		"omc_pm_aggregation_runtime_cleanup_rows_total",
+		"omc_pm_aggregation_runtime_cleanup_errors_total",
+		"omc_pm_aggregation_runtime_cleanup_duration_seconds",
+		"omc_pm_aggregation_runtime_cleanup_backlog",
 		"omc_pm_aggregation_daily_version_expected_slots_mismatch_total",
 		"omc_pm_aggregation_result_replace_seconds",
 		"omc_pm_aggregation_rebuild_snapshot_pages_total",
