@@ -776,6 +776,72 @@ describe('parameter config workbook', () => {
     ]);
   });
 
+  it('uses n-prefixed LTE bandwidth values for BLN, BLQ, MLN and MLQ workbook dropdowns', async () => {
+    const metadata = {
+      deviceType: 'eNB' as const,
+      quickSettingsGroups: [{
+        id: 'enb-cell', titleZh: '小区参数', titleEn: 'Cell Parameters', multiInstance: false,
+        params: [
+          {
+            name: 'DLBandWidth', titleZh: '下行带宽', titleEn: 'BLN/BLQ/MLQ DL Bandwidth', type: 'enum',
+            standardPath: 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth',
+            enumOptions: [{ value: '25', label: '5MHz' }, { value: '50', label: '10MHz' }],
+          },
+          {
+            name: 'Bandwidth', titleZh: '下行带宽', titleEn: 'MLN DL Bandwidth', type: 'enum',
+            standardPath: 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth',
+            enumOptions: [{ value: '25', label: '5MHz' }, { value: '50', label: '10MHz' }],
+          },
+          {
+            name: 'ULBandWidth', titleZh: '上行带宽', titleEn: 'BLN/BLQ/MLN/MLQ UL Bandwidth', type: 'enum',
+            standardPath: 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth',
+            enumOptions: [{ value: '25', label: '5MHz' }, { value: '50', label: '10MHz' }],
+          },
+        ],
+      }],
+      quickSettingFields: getParamConfigExportFields('eNB'),
+    };
+    const workbook = await enrichParamConfigWorkbook(
+      createParamConfigTemplateWorkbook('eNB', metadata),
+      metadata,
+    );
+    const cell = workbook.getWorksheet('CELL')!;
+    const headers = cell.getRow(1).values as string[];
+    for (const header of ['BLN/BLQ/MLQ DL Bandwidth', 'MLN DL Bandwidth', 'BLN/BLQ/MLN/MLQ UL Bandwidth']) {
+      const column = headers.indexOf(header);
+      const formula = String(cell.getCell(2, column).dataValidation.formulae?.[0] ?? '');
+      const options = formula.replace(/^"|"$/g, '').split(',');
+      expect(options).toContain('n50');
+      expect(options.every((option) => option.startsWith('n'))).toBe(true);
+    }
+
+    const roundTrip = await workbook.xlsx.writeBuffer();
+    const edited = XLSX.read(roundTrip, { type: 'array' });
+    const worksheet = edited.Sheets.CELL;
+    for (const [header, value] of [
+      ['Serial Number', 'SN-BW-001'],
+      ['BLN/BLQ/MLQ DL Bandwidth', 'n50'],
+      ['MLN DL Bandwidth', 'n50'],
+      ['BLN/BLQ/MLN/MLQ UL Bandwidth', 'n50'],
+    ] as const) {
+      worksheet[XLSX.utils.encode_cell({ r: 1, c: headers.indexOf(header) - 1 })] = {
+        t: 's',
+        v: value,
+      };
+    }
+
+    expect(parseParamConfigWorkbook(
+      XLSX.write(edited, { type: 'array', bookType: 'xlsx' }),
+      'eNB',
+      'now',
+      metadata,
+    )[0].sheetParameters?.CELL?.[0]).toMatchObject({
+      'BLN/BLQ/MLQ DL Bandwidth': 'n50',
+      'MLN DL Bandwidth': 'n50',
+      'BLN/BLQ/MLN/MLQ UL Bandwidth': 'n50',
+    });
+  });
+
   it('rejects template generation when the product has no public parameters', () => {
     expect(() => createParamConfigTemplateWorkbook('gNB', {
       deviceType: 'gNB',

@@ -50,7 +50,7 @@ describe('eNB plug-and-play quick-setting fields', () => {
     expect(ENB_IPSEC_TEMPLATE_EXTRA_FIELDS.map((field) => field.id)).toContain('FORCEENCAPS');
   });
 
-  it('uses the selected product model enum wire values', () => {
+  it('keeps LTE bandwidth options in page/import format when product metadata uses wire values', () => {
     const groups = withProductEnumOptions(ENB_QUICK_SETTING_GROUPS, [{
       id: 'enb-cell', titleZh: '', titleEn: '', multiInstance: false,
       params: [{
@@ -63,8 +63,8 @@ describe('eNB plug-and-play quick-setting fields', () => {
     }]);
 
     expect(groups[0].fields.find((field) => field.id === 'DLBandWidth')?.options).toEqual([
-      { value: '25', label: '5MHz' },
-      { value: '50', label: '10MHz' },
+      { value: 'n25', label: '5MHz' },
+      { value: 'n50', label: '10MHz' },
     ]);
   });
 

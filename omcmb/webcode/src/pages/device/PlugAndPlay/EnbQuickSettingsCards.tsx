@@ -13,6 +13,20 @@ import {
 import { getEnbProductSyncConfig } from './enbProductSyncFields';
 import { isIpsecParametersVisible } from './quickSettingsVisibility';
 
+function isLteBandwidthPath(path: string | undefined): boolean {
+  return /\.LTE\.RAN\.RF\.(?:DL|UL)Bandwidth$/i.test(path ?? '');
+}
+
+function isLteBandwidthField(name: string | undefined): boolean {
+  return /^(?:DL|UL)?BandWidth$/i.test(name ?? '');
+}
+
+function normalizeLteBandwidthOptionValue(value: string): string {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^n?(25|50|75|100)$/i);
+  return match ? `n${match[1]}` : value;
+}
+
 export function withProductEnumOptions(groups: typeof ENB_QUICK_SETTING_GROUPS, metadata: QuickSettingsGroup[]) {
   return groups.map((group) => {
     const productGroup = metadata.find((item) => item.id === group.id);
@@ -22,10 +36,16 @@ export function withProductEnumOptions(groups: typeof ENB_QUICK_SETTING_GROUPS, 
       fields: group.fields.map((field) => {
         const productParam = productGroup.params.find((item) => item.name === field.id);
         if (!productParam?.enumOptions?.length) return field;
+        const lteBandwidth = isLteBandwidthPath(productParam.standardPath)
+          || isLteBandwidthField(field.id)
+          || isLteBandwidthField(productParam.name);
         return {
           ...field,
           control: 'select' as const,
-          options: productParam.enumOptions.map((option) => ({ value: option.value, label: option.label })),
+          options: productParam.enumOptions.map((option) => ({
+            value: lteBandwidth ? normalizeLteBandwidthOptionValue(option.value) : option.value,
+            label: option.label,
+          })),
         };
       }),
     };
