@@ -47,6 +47,10 @@ type automaticAdmissionQueueRepository interface {
 	QueueRequestAndReleaseAutomaticAdmission(ctx context.Context, req *SyncRequest, nextAttemptAt time.Time, now time.Time) error
 }
 
+type runValueReader interface {
+	ListRunValues(ctx context.Context, runID uuid.UUID) ([]RunValue, error)
+}
+
 func (s *Service) WithMetrics(metrics *Metrics) *Service {
 	s.metrics = metrics
 	return s
@@ -305,6 +309,14 @@ func (s *Service) GetRequest(ctx context.Context, requestID uuid.UUID) (*SyncReq
 
 func (s *Service) GetRun(ctx context.Context, runID uuid.UUID) (*SyncRun, error) {
 	return s.repo.GetRun(ctx, runID)
+}
+
+func (s *Service) ListRunValues(ctx context.Context, runID uuid.UUID) ([]RunValue, error) {
+	reader, ok := s.repo.(runValueReader)
+	if !ok {
+		return nil, nil
+	}
+	return reader.ListRunValues(ctx, runID)
 }
 
 func (s *Service) FindRequestByIdempotency(ctx context.Context, callerType, key string) (*SyncRequest, error) {

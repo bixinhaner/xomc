@@ -149,6 +149,7 @@ func (f *fakeNBTransferTaskService) ListTasks(ctx context.Context, filter ufte.T
 type fakeNBParamSyncService struct {
 	getRequestFn        func(context.Context, uuid.UUID) (*paramsync.SyncRequest, error)
 	getRunFn            func(context.Context, uuid.UUID) (*paramsync.SyncRun, error)
+	listRunValuesFn     func(context.Context, uuid.UUID) ([]paramsync.RunValue, error)
 	findByIdempotencyFn func(context.Context, string, string) (*paramsync.SyncRequest, error)
 }
 
@@ -164,6 +165,13 @@ func (f *fakeNBParamSyncService) GetRun(ctx context.Context, id uuid.UUID) (*par
 		return nil, errors.New("no rows")
 	}
 	return f.getRunFn(ctx, id)
+}
+
+func (f *fakeNBParamSyncService) ListRunValues(ctx context.Context, id uuid.UUID) ([]paramsync.RunValue, error) {
+	if f.listRunValuesFn == nil {
+		return nil, nil
+	}
+	return f.listRunValuesFn(ctx, id)
 }
 
 func (f *fakeNBParamSyncService) FindRequestByIdempotency(ctx context.Context, callerType, key string) (*paramsync.SyncRequest, error) {
@@ -199,12 +207,16 @@ func setupDeviceFacadeRouterWithExtras(
 }
 
 func setupDeviceFacadeRouterWithParamSync(paramSyncSvc northboundParamSyncService, taskSvc northboundTaskService) *gin.Engine {
+	return setupDeviceFacadeRouterWithParamSyncAndDevice(paramSyncSvc, nil, taskSvc)
+}
+
+func setupDeviceFacadeRouterWithParamSyncAndDevice(paramSyncSvc northboundParamSyncService, deviceSvc northboundDeviceService, taskSvc northboundTaskService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	svc := &NorthboundService{logger: zap.NewNop()}
 	router := NewRouter(svc)
 	router.pageConfigService = nil
 	router.pageConfigHandler = nil
-	router.SetDeviceTaskServices(nil, taskSvc)
+	router.SetDeviceTaskServices(deviceSvc, taskSvc)
 	router.SetParamSyncService(paramSyncSvc)
 	engine := gin.New()
 	router.RegisterPublicRoutes(engine.Group("/api/v1"))
@@ -539,42 +551,100 @@ func TestLegacyFacadeTaskDetailReturnsParamSyncRequestBySourceJobID(t *testing.T
 	requestID := uuid.New()
 	runID := uuid.New()
 	sourceID := "northbound-manual:" + uuid.NewString()
+	deviceID := uuid.New()
+	const (
+		softwarePath = "Device.DeviceInfo.SoftwareVersion"
+		privatePCI   = "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID"
+		standardPCI  = "Device.Services.FAPService.1.FAPControl.LTE.PhyCellID"
+		privatePCI2  = "Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.PhyCellID"
+		standardPCI2 = "Device.Services.FAPService.2.FAPControl.LTE.PhyCellID"
+	)
 	paramSyncSvc := &fakeNBParamSyncService{
 		findByIdempotencyFn: func(_ context.Context, callerType, key string) (*paramsync.SyncRequest, error) {
 			require.Equal(t, "manual", callerType)
 			require.Equal(t, sourceID, key)
 			return &paramsync.SyncRequest{
-				ID: requestID, DeviceSN: "SN001", TriggerReason: paramsync.TriggerManual,
-				SyncScope: paramsync.SyncScopePartial, RequestedPaths: []string{"Device.DeviceInfo.SoftwareVersion"},
+				ID: requestID, DeviceID: deviceID, DeviceSN: "SN001", TriggerReason: paramsync.TriggerManual,
+				SyncScope: paramsync.SyncScopePartial, RequestedPaths: []string{softwarePath, privatePCI},
 				Status: paramsync.RequestStatusRunning, RunID: &runID, IdempotencyKey: &sourceID,
 			}, nil
 		},
 		getRunFn: func(_ context.Context, id uuid.UUID) (*paramsync.SyncRun, error) {
 			require.Equal(t, runID, id)
 			return &paramsync.SyncRun{
-				ID: runID, RequestID: requestID, DeviceSN: "SN001",
+				ID: runID, RequestID: requestID, DeviceID: deviceID, DeviceSN: "SN001",
 				TriggerReason: paramsync.TriggerManual, SyncScope: paramsync.SyncScopePartial,
 				Status: paramsync.RunStatusWaitingDevice, ExpectedTaskCount: 1,
+				Coverage: []paramsync.CoverageScope{{
+					Path: softwarePath, Complete: true,
+					Mappings: []paramsync.FrozenMapping{{StandardPath: softwarePath, PrivatePath: softwarePath, IsStorable: true}},
+				}, {
+					Path: standardPCI, Complete: true,
+					Mappings: []paramsync.FrozenMapping{{StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.PhyCellID", PrivatePath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID", IsStorable: true}},
+				}},
+			}, nil
+		},
+		listRunValuesFn: func(_ context.Context, id uuid.UUID) ([]paramsync.RunValue, error) {
+			require.Equal(t, runID, id)
+			return []paramsync.RunValue{
+				{RunID: runID, ParameterPath: softwarePath, PrivatePath: softwarePath, Value: "V100R001C00", ValueType: "string", Writable: false},
+				{RunID: runID, ParameterPath: standardPCI, PrivatePath: privatePCI, Value: "389", ValueType: "unsignedInt", Writable: true},
+				{RunID: runID, ParameterPath: standardPCI2, PrivatePath: privatePCI2, Value: "777", ValueType: "unsignedInt", Writable: true},
+				{RunID: runID, ParameterPath: "Device.DeviceInfo.ModelName", PrivatePath: "Device.DeviceInfo.ModelName", Value: "Unrelated"},
 			}, nil
 		},
 	}
 
-	router := setupDeviceFacadeRouterWithParamSync(paramSyncSvc, nil)
+	router := setupDeviceFacadeRouterWithParamSyncAndDevice(paramSyncSvc, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/v1/job/result/"+sourceID, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"jobId":"`+runID.String()+`"`)
-	require.Contains(t, rec.Body.String(), `"request_id":"`+requestID.String()+`"`)
-	require.Contains(t, rec.Body.String(), `"source_id":"`+sourceID+`"`)
-	require.Contains(t, rec.Body.String(), `"requested_paths":["Device.DeviceInfo.SoftwareVersion"]`)
+	require.Contains(t, rec.Body.String(), `"status":"waiting_device"`)
+	require.Contains(t, rec.Body.String(), `"parameters":{"Device.DeviceInfo.SoftwareVersion":"V100R001C00","Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID":"389"}`)
+	require.Contains(t, rec.Body.String(), `"total":2`)
+	require.NotContains(t, rec.Body.String(), `"items"`)
+	require.NotContains(t, rec.Body.String(), `"values"`)
+	require.NotContains(t, rec.Body.String(), `"coverage"`)
+	require.NotContains(t, rec.Body.String(), `"task_id"`)
+	require.NotContains(t, rec.Body.String(), `"method"`)
+	require.NotContains(t, rec.Body.String(), `"legacy_status"`)
+	require.NotContains(t, rec.Body.String(), `"777"`)
+	require.NotContains(t, rec.Body.String(), standardPCI2)
+	require.NotContains(t, rec.Body.String(), "Unrelated")
+}
+
+func TestLegacyParamSyncPathCoversHonorsConcreteInstances(t *testing.T) {
+	require.True(t, legacyParamSyncPathCovers(
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID",
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID",
+	))
+	require.False(t, legacyParamSyncPathCovers(
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID",
+		"Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.PhyCellID",
+	))
+	require.True(t, legacyParamSyncPathCovers(
+		"Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID",
+		"Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.PhyCellID",
+	))
+	require.True(t, legacyParamSyncPathCovers(
+		"Device.Services.FAPService.1.CellConfig.",
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID",
+	))
+	require.False(t, legacyParamSyncPathCovers(
+		"Device.Services.FAPService.1.CellConfig.",
+		"Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.PhyCellID",
+	))
 }
 
 func TestLegacyFacadeTaskDetailReturnsParamSyncRunByUUID(t *testing.T) {
 	requestID := uuid.New()
 	runID := uuid.New()
 	sourceID := "northbound-manual:" + uuid.NewString()
+	deviceID := uuid.New()
+	const softwarePath = "Device.DeviceInfo.SoftwareVersion"
 	paramSyncSvc := &fakeNBParamSyncService{
 		getRequestFn: func(_ context.Context, id uuid.UUID) (*paramsync.SyncRequest, error) {
 			if id == runID {
@@ -582,38 +652,52 @@ func TestLegacyFacadeTaskDetailReturnsParamSyncRunByUUID(t *testing.T) {
 			}
 			require.Equal(t, requestID, id)
 			return &paramsync.SyncRequest{
-				ID: requestID, DeviceSN: "SN001", TriggerReason: paramsync.TriggerManual,
-				SyncScope: paramsync.SyncScopePartial, RequestedPaths: []string{"Device.DeviceInfo.SoftwareVersion"},
+				ID: requestID, DeviceID: deviceID, DeviceSN: "SN001", TriggerReason: paramsync.TriggerManual,
+				SyncScope: paramsync.SyncScopePartial, RequestedPaths: []string{softwarePath},
 				Status: paramsync.RequestStatusSucceeded, RunID: &runID, IdempotencyKey: &sourceID,
 			}, nil
 		},
 		getRunFn: func(_ context.Context, id uuid.UUID) (*paramsync.SyncRun, error) {
 			require.Equal(t, runID, id)
 			return &paramsync.SyncRun{
-				ID: runID, RequestID: requestID, DeviceSN: "SN001",
+				ID: runID, RequestID: requestID, DeviceID: deviceID, DeviceSN: "SN001",
 				TriggerReason: paramsync.TriggerManual, SyncScope: paramsync.SyncScopePartial,
 				Status: paramsync.RunStatusSucceeded, ExpectedTaskCount: 1,
 				TerminalTaskCount: 1, ProcessedTaskCount: 1,
+				Coverage: []paramsync.CoverageScope{{
+					Path: softwarePath, Complete: true,
+					Mappings: []paramsync.FrozenMapping{{StandardPath: softwarePath, PrivatePath: softwarePath, IsStorable: true}},
+				}},
 			}, nil
 		},
 		findByIdempotencyFn: func(context.Context, string, string) (*paramsync.SyncRequest, error) {
 			return &paramsync.SyncRequest{
-				ID: requestID, DeviceSN: "SN001", TriggerReason: paramsync.TriggerManual,
-				SyncScope: paramsync.SyncScopePartial, RequestedPaths: []string{"Device.DeviceInfo.SoftwareVersion"},
+				ID: requestID, DeviceID: deviceID, DeviceSN: "SN001", TriggerReason: paramsync.TriggerManual,
+				SyncScope: paramsync.SyncScopePartial, RequestedPaths: []string{softwarePath},
 				Status: paramsync.RequestStatusSucceeded, RunID: &runID, IdempotencyKey: &sourceID,
 			}, nil
 		},
+		listRunValuesFn: func(_ context.Context, id uuid.UUID) ([]paramsync.RunValue, error) {
+			require.Equal(t, runID, id)
+			return []paramsync.RunValue{{RunID: runID, ParameterPath: softwarePath, PrivatePath: softwarePath, Value: "V200R003C10", ValueType: "string"}}, nil
+		},
 	}
 
-	router := setupDeviceFacadeRouterWithParamSync(paramSyncSvc, nil)
+	router := setupDeviceFacadeRouterWithParamSyncAndDevice(paramSyncSvc, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/v1/job/result/"+runID.String(), nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"jobId":"`+runID.String()+`"`)
-	require.Contains(t, rec.Body.String(), `"legacy_status":"2"`)
-	require.Contains(t, rec.Body.String(), `"expected_task_count":1`)
+	require.Contains(t, rec.Body.String(), `"status":"succeeded"`)
+	require.Contains(t, rec.Body.String(), `"parameters":{"Device.DeviceInfo.SoftwareVersion":"V200R003C10"}`)
+	require.Contains(t, rec.Body.String(), `"total":1`)
+	require.NotContains(t, rec.Body.String(), `"items"`)
+	require.NotContains(t, rec.Body.String(), `"values"`)
+	require.NotContains(t, rec.Body.String(), `"coverage"`)
+	require.NotContains(t, rec.Body.String(), `"expected_task_count"`)
+	require.NotContains(t, rec.Body.String(), `"legacy_status"`)
 }
 
 func TestLegacyFacadeListTasksWithoutSNUsesUFTE(t *testing.T) {

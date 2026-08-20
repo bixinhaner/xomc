@@ -25,6 +25,7 @@ var (
 	_ automaticAdmissionRepository      = (*PGRepository)(nil)
 	_ automaticAdmissionTaskRepository  = (*PGRepository)(nil)
 	_ automaticAdmissionQueueRepository = (*PGRepository)(nil)
+	_ runValueReader                    = (*PGRepository)(nil)
 )
 
 type AutomaticAdmissionStats struct {
@@ -590,6 +591,55 @@ func (r *PGRepository) GetRun(ctx context.Context, id uuid.UUID) (*SyncRun, erro
 		return nil, fmt.Errorf("build get parameter sync run: %w", err)
 	}
 	return scanRun(r.pool.QueryRow(ctx, query, args...))
+}
+
+func (r *PGRepository) ListRunValues(ctx context.Context, runID uuid.UUID) ([]RunValue, error) {
+	query, args, err := storage.Psql.Select(
+		"run_id",
+		"parameter_path",
+		"private_path",
+		"value #>> '{}' AS value",
+		"COALESCE(value_type, '')",
+		"writable",
+		"fap_instance",
+		"param_group",
+		"created_at",
+		"updated_at",
+	).From("parameter_sync_staging_values").
+		Where(sq.Eq{"run_id": runID}).
+		OrderBy("parameter_path ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list parameter sync run values: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list parameter sync run values: %w", err)
+	}
+	defer rows.Close()
+	values := make([]RunValue, 0)
+	for rows.Next() {
+		var value RunValue
+		if err := rows.Scan(
+			&value.RunID,
+			&value.ParameterPath,
+			&value.PrivatePath,
+			&value.Value,
+			&value.ValueType,
+			&value.Writable,
+			&value.FAPInstance,
+			&value.ParamGroup,
+			&value.CreatedAt,
+			&value.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan parameter sync run value: %w", err)
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate parameter sync run values: %w", err)
+	}
+	return values, nil
 }
 
 // CreateAutomaticRequest atomically reserves the per-device execution gate and

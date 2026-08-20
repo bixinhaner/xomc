@@ -48,6 +48,24 @@ type legacyLicenseCapacityParams struct {
 	hasRemain bool
 }
 
+// legacyParamSyncParameterResult 是 job/result 载荷 parameters 映射的内部组装单元，
+// 仅 Path（对外键，优先请求路径形态）与 Value 会出现在响应里。
+type legacyParamSyncParameterResult struct {
+	Path  string
+	Value string
+}
+
+type legacyParamSyncCoverageMapping struct {
+	standardPath string
+	privatePath  string
+}
+
+type legacyParamSyncParameterMatch struct {
+	requestedPath string
+	standardPath  string
+	privatePath   string
+}
+
 func (r *Router) legacyDeviceQuery(c *gin.Context) {
 	if !r.requireDeviceFacade(c) {
 		return
@@ -786,10 +804,16 @@ func (r *Router) legacyGetTask(c *gin.Context) {
 				return
 			}
 			payload := paramSyncRequestResultPayload(req)
+			var run *paramsync.SyncRun
 			if req.RunID != nil {
-				if run, runErr := r.paramSyncService.GetRun(c.Request.Context(), *req.RunID); runErr == nil && run != nil {
+				if loadedRun, runErr := r.paramSyncService.GetRun(c.Request.Context(), *req.RunID); runErr == nil && loadedRun != nil {
+					run = loadedRun
 					payload = paramSyncRunResultPayload(req, run)
 				}
+			}
+			if err := r.attachLegacyParamSyncParameterResults(c, payload, req, run); err != nil {
+				failNorthboundFacade(c, err)
+				return
 			}
 			response.OK(c, payload)
 			return
@@ -858,10 +882,15 @@ func (r *Router) lookupParamSyncJob(c *gin.Context, id uuid.UUID) (gin.H, bool, 
 			return nil, true, nil
 		}
 		payload := paramSyncRequestResultPayload(req)
+		var run *paramsync.SyncRun
 		if req.RunID != nil {
-			if run, runErr := r.paramSyncService.GetRun(c.Request.Context(), *req.RunID); runErr == nil && run != nil {
+			if loadedRun, runErr := r.paramSyncService.GetRun(c.Request.Context(), *req.RunID); runErr == nil && loadedRun != nil {
+				run = loadedRun
 				payload = paramSyncRunResultPayload(req, run)
 			}
+		}
+		if err := r.attachLegacyParamSyncParameterResults(c, payload, req, run); err != nil {
+			return nil, true, err
 		}
 		return payload, true, nil
 	}
@@ -878,7 +907,11 @@ func (r *Router) lookupParamSyncJob(c *gin.Context, id uuid.UUID) (gin.H, bool, 
 		if r.scoper != nil && run.DeviceSN != "" && !r.scoper.AuthorizeDeviceBySN(c, run.DeviceSN) {
 			return nil, true, nil
 		}
-		return paramSyncRunResultPayload(req, run), true, nil
+		payload := paramSyncRunResultPayload(req, run)
+		if err := r.attachLegacyParamSyncParameterResults(c, payload, req, run); err != nil {
+			return nil, true, err
+		}
+		return payload, true, nil
 	}
 	if err != nil && !isNotFoundLike(err) {
 		return nil, false, err
@@ -886,41 +919,305 @@ func (r *Router) lookupParamSyncJob(c *gin.Context, id uuid.UUID) (gin.H, bool, 
 	return nil, false, nil
 }
 
+func (r *Router) attachLegacyParamSyncParameterResults(c *gin.Context, payload gin.H, req *paramsync.SyncRequest, run *paramsync.SyncRun) error {
+	if payload == nil {
+		return nil
+	}
+	items, err := r.legacyParamSyncParameterResultItems(c, req, run)
+	if err != nil {
+		return err
+	}
+	parameters := make(map[string]string, len(items))
+	for _, item := range items {
+		parameters[item.Path] = item.Value
+	}
+	payload["parameters"] = parameters
+	payload["total"] = len(parameters)
+	return nil
+}
+
+func (r *Router) legacyParamSyncParameterResultItems(c *gin.Context, req *paramsync.SyncRequest, run *paramsync.SyncRun) ([]legacyParamSyncParameterResult, error) {
+	// 仅路径级任务返回值；full-sync 无 requested_paths，直接短路，
+	// 避免无谓拉取全量暂存值/设备参数。
+	if len(legacyParamSyncRequestedPaths(req)) == 0 {
+		return nil, nil
+	}
+	if run != nil && run.ID != uuid.Nil && r.paramSyncService != nil {
+		values, err := r.paramSyncService.ListRunValues(c.Request.Context(), run.ID)
+		if err != nil {
+			return nil, err
+		}
+		if items := legacyParamSyncRunValueResults(req, run, values); len(items) > 0 {
+			return items, nil
+		}
+	}
+	if !legacyParamSyncCanFallbackToDeviceValues(req, run) || r.deviceService == nil {
+		return nil, nil
+	}
+	deviceID := uuid.Nil
+	if req != nil {
+		deviceID = req.DeviceID
+	}
+	if deviceID == uuid.Nil && run != nil {
+		deviceID = run.DeviceID
+	}
+	if deviceID == uuid.Nil {
+		return nil, nil
+	}
+	params, err := r.deviceService.GetDeviceParameters(c.Request.Context(), deviceID)
+	if err != nil {
+		return nil, err
+	}
+	return legacyParamSyncDeviceParameterResults(req, run, params), nil
+}
+
+func legacyParamSyncCanFallbackToDeviceValues(req *paramsync.SyncRequest, run *paramsync.SyncRun) bool {
+	if run != nil {
+		return run.Status == paramsync.RunStatusSucceeded
+	}
+	return req != nil && req.Status == paramsync.RequestStatusSucceeded
+}
+
+func legacyParamSyncRunValueResults(req *paramsync.SyncRequest, run *paramsync.SyncRun, values []paramsync.RunValue) []legacyParamSyncParameterResult {
+	requestedPaths := legacyParamSyncRequestedPaths(req)
+	if len(requestedPaths) == 0 {
+		return nil
+	}
+	mappings := legacyParamSyncCoverageMappings(run)
+	items := make([]legacyParamSyncParameterResult, 0, len(requestedPaths))
+	for _, value := range values {
+		match, ok := legacyMatchParamSyncValue(value.ParameterPath, value.PrivatePath, requestedPaths, mappings)
+		if !ok {
+			continue
+		}
+		standardPath := firstNonEmptyString(match.standardPath, value.ParameterPath)
+		privatePath := firstNonEmptyString(match.privatePath, value.PrivatePath)
+		path := firstNonEmptyString(match.requestedPath, privatePath, standardPath)
+		items = append(items, legacyParamSyncParameterResult{
+			Path:  path,
+			Value: value.Value,
+		})
+	}
+	return items
+}
+
+func legacyParamSyncDeviceParameterResults(req *paramsync.SyncRequest, run *paramsync.SyncRun, params []model.DeviceParameter) []legacyParamSyncParameterResult {
+	requestedPaths := legacyParamSyncRequestedPaths(req)
+	if len(requestedPaths) == 0 {
+		return nil
+	}
+	mappings := legacyParamSyncCoverageMappings(run)
+	items := make([]legacyParamSyncParameterResult, 0, len(requestedPaths))
+	for _, param := range params {
+		match, ok := legacyMatchParamSyncParameter(param.ParameterPath, requestedPaths, mappings)
+		if !ok {
+			continue
+		}
+		standardPath := firstNonEmptyString(match.standardPath, param.ParameterPath)
+		path := firstNonEmptyString(match.requestedPath, match.privatePath, standardPath)
+		items = append(items, legacyParamSyncParameterResult{
+			Path:  path,
+			Value: param.ParameterValue,
+		})
+	}
+	return items
+}
+
+func legacyMatchParamSyncValue(standardPath, privatePath string, requestedPaths []string, mappings []legacyParamSyncCoverageMapping) (legacyParamSyncParameterMatch, bool) {
+	if match, ok := legacyMatchParamSyncParameter(standardPath, requestedPaths, mappings); ok {
+		if match.privatePath == "" {
+			match.privatePath = privatePath
+		}
+		return match, true
+	}
+	for _, requestedPath := range requestedPaths {
+		if legacyParamSyncPathCovers(requestedPath, privatePath) {
+			return legacyParamSyncParameterMatch{
+				requestedPath: requestedPath,
+				standardPath:  standardPath,
+				privatePath:   privatePath,
+			}, true
+		}
+	}
+	return legacyParamSyncParameterMatch{}, false
+}
+
+func legacyParamSyncRequestedPaths(req *paramsync.SyncRequest) []string {
+	if req == nil {
+		return nil
+	}
+	out := make([]string, 0, len(req.RequestedPaths))
+	seen := make(map[string]struct{}, len(req.RequestedPaths))
+	for _, path := range req.RequestedPaths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		key := strings.TrimSuffix(path, ".")
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, path)
+	}
+	return out
+}
+
+func legacyParamSyncCoverageMappings(run *paramsync.SyncRun) []legacyParamSyncCoverageMapping {
+	if run == nil {
+		return nil
+	}
+	mappings := make([]legacyParamSyncCoverageMapping, 0)
+	for _, scope := range run.Coverage {
+		for _, mapping := range scope.Mappings {
+			if strings.TrimSpace(mapping.StandardPath) == "" {
+				continue
+			}
+			mappings = append(mappings, legacyParamSyncCoverageMapping{
+				standardPath: strings.TrimSpace(mapping.StandardPath),
+				privatePath:  strings.TrimSpace(mapping.PrivatePath),
+			})
+		}
+	}
+	return mappings
+}
+
+func legacyMatchParamSyncParameter(path string, requestedPaths []string, mappings []legacyParamSyncCoverageMapping) (legacyParamSyncParameterMatch, bool) {
+	for _, requestedPath := range requestedPaths {
+		if legacyParamSyncPathCovers(requestedPath, path) {
+			return legacyParamSyncParameterMatch{
+				requestedPath: requestedPath,
+				standardPath:  path,
+			}, true
+		}
+	}
+	for _, mapping := range mappings {
+		if !legacyParamSyncPathCovers(mapping.standardPath, path) {
+			continue
+		}
+		standardPath := legacyInstantiateParamSyncPath(mapping.standardPath, mapping.standardPath, path)
+		privatePath := legacyInstantiateParamSyncPath(mapping.privatePath, mapping.standardPath, path)
+		for _, requestedPath := range requestedPaths {
+			if legacyParamSyncRequestMatchesMapping(requestedPath, path, standardPath, privatePath, mapping) {
+				return legacyParamSyncParameterMatch{
+					requestedPath: requestedPath,
+					standardPath:  standardPath,
+					privatePath:   privatePath,
+				}, true
+			}
+		}
+	}
+	return legacyParamSyncParameterMatch{}, false
+}
+
+func legacyParamSyncRequestMatchesMapping(requestedPath, actualPath, standardPath, privatePath string, mapping legacyParamSyncCoverageMapping) bool {
+	return legacyParamSyncPathCovers(requestedPath, actualPath) ||
+		legacyParamSyncPathCovers(requestedPath, standardPath) ||
+		legacyParamSyncPathCovers(requestedPath, privatePath) ||
+		legacyParamSyncPathCovers(requestedPath, mapping.standardPath) ||
+		legacyParamSyncPathCovers(requestedPath, mapping.privatePath)
+}
+
+func legacyParamSyncPathCovers(pattern, actual string) bool {
+	pattern = strings.TrimSpace(pattern)
+	actual = strings.TrimSpace(actual)
+	if pattern == "" || actual == "" {
+		return false
+	}
+	patternIsPrefix := strings.HasSuffix(pattern, ".")
+	pattern = strings.TrimSuffix(pattern, ".")
+	actual = strings.TrimSuffix(actual, ".")
+	if !legacyParamSyncPathHasInstanceWildcard(pattern) {
+		if patternIsPrefix {
+			return actual == pattern || strings.HasPrefix(actual, pattern+".")
+		}
+		return actual == pattern
+	}
+	normalizedPattern := legacyNormalizeParamSyncPath(pattern)
+	normalizedActual := legacyNormalizeParamSyncPath(actual)
+	if patternIsPrefix {
+		return normalizedActual == normalizedPattern || strings.HasPrefix(normalizedActual, normalizedPattern+".")
+	}
+	return normalizedActual == normalizedPattern
+}
+
+func legacyParamSyncPathHasInstanceWildcard(path string) bool {
+	for _, part := range strings.Split(path, ".") {
+		if part == "{i}" {
+			return true
+		}
+	}
+	return false
+}
+
+func legacyInstantiateParamSyncPath(template, standardTemplate, actualStandard string) string {
+	template = strings.TrimSpace(template)
+	if template == "" {
+		return ""
+	}
+	standardParts := strings.Split(strings.TrimSpace(standardTemplate), ".")
+	actualParts := strings.Split(strings.TrimSpace(actualStandard), ".")
+	if len(standardParts) != len(actualParts) {
+		return template
+	}
+	instances := make([]string, 0, 2)
+	for i, part := range standardParts {
+		if part == "{i}" && i < len(actualParts) {
+			instances = append(instances, actualParts[i])
+		}
+	}
+	if len(instances) == 0 {
+		return template
+	}
+	out := strings.Split(template, ".")
+	instanceIndex := 0
+	for i, part := range out {
+		if part != "{i}" || instanceIndex >= len(instances) {
+			continue
+		}
+		out[i] = instances[instanceIndex]
+		instanceIndex++
+	}
+	return strings.Join(out, ".")
+}
+
+func legacyNormalizeParamSyncPath(path string) string {
+	parts := strings.Split(path, ".")
+	for i, part := range parts {
+		if part == "" || part == "{i}" {
+			continue
+		}
+		allDigits := true
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			parts[i] = "{i}"
+		}
+	}
+	return strings.Join(parts, ".")
+}
+
+// paramSyncRequestResultPayload / paramSyncRunResultPayload 保持旧系统
+// job/result 契约的最小字段集：任务标识 + 新旧两套状态 + 结果由
+// attachLegacyParamSyncParameterResults 追加（parameters/total）。
 func paramSyncRequestResultPayload(req *paramsync.SyncRequest) gin.H {
 	if req == nil {
 		return gin.H{}
 	}
 	status := string(req.Status)
-	payload := gin.H{
-		"jobId":           req.ID.String(),
-		"task_id":         req.ID.String(),
-		"request_id":      req.ID.String(),
-		"name":            "GetParameterValues",
-		"method":          "GetParameterValues",
-		"status":          status,
-		"legacy_status":   legacyParamSyncStatus(status, req.Status.Terminal()),
-		"sn":              req.DeviceSN,
-		"device_sn":       req.DeviceSN,
-		"errorMessage":    req.ErrorMessage,
-		"error_code":      req.ResultCode,
-		"createTime":      req.CreatedAt,
-		"created_at":      req.CreatedAt,
-		"completeTime":    req.CompletedAt,
-		"completed_at":    req.CompletedAt,
-		"source":          "param_sync",
-		"source_id":       stringPtrValue(req.IdempotencyKey),
-		"trigger_reason":  req.TriggerReason,
-		"sync_scope":      req.SyncScope,
-		"requested_paths": req.RequestedPaths,
-		"result_code":     req.ResultCode,
+	return gin.H{
+		"jobId":        req.ID.String(),
+		"name":         "GetParameterValues",
+		"status":       status,
+		"sn":           req.DeviceSN,
+		"errorMessage": req.ErrorMessage,
+		"createTime":   req.CreatedAt,
+		"completeTime": req.CompletedAt,
 	}
-	if req.RunID != nil {
-		payload["run_id"] = req.RunID.String()
-	}
-	if req.ActiveRunID != nil {
-		payload["active_run_id"] = req.ActiveRunID.String()
-	}
-	return payload
 }
 
 func paramSyncRunResultPayload(req *paramsync.SyncRequest, run *paramsync.SyncRun) gin.H {
@@ -928,61 +1225,18 @@ func paramSyncRunResultPayload(req *paramsync.SyncRequest, run *paramsync.SyncRu
 		return paramSyncRequestResultPayload(req)
 	}
 	status := string(run.Status)
-	payload := gin.H{
-		"jobId":                run.ID.String(),
-		"task_id":              run.ID.String(),
-		"run_id":               run.ID.String(),
-		"request_id":           run.RequestID.String(),
-		"name":                 "GetParameterValues",
-		"method":               "GetParameterValues",
-		"status":               status,
-		"legacy_status":        legacyParamSyncStatus(status, run.Status.Terminal()),
-		"sn":                   run.DeviceSN,
-		"device_sn":            run.DeviceSN,
-		"errorMessage":         run.ErrorMessage,
-		"createTime":           run.StartedAt,
-		"created_at":           run.StartedAt,
-		"completeTime":         run.CompletedAt,
-		"completed_at":         run.CompletedAt,
-		"source":               "param_sync",
-		"source_id":            run.ID.String(),
-		"trigger_reason":       run.TriggerReason,
-		"sync_scope":           run.SyncScope,
-		"mapping_source":       run.MappingSource,
-		"mapping_version":      run.MappingVersion,
-		"coverage":             run.Coverage,
-		"task_count":           run.ExpectedTaskCount,
-		"expected_task_count":  run.ExpectedTaskCount,
-		"terminal_task_count":  run.TerminalTaskCount,
-		"processed_task_count": run.ProcessedTaskCount,
-		"failed_task_count":    run.FailedTaskCount,
+	errorMessage := run.ErrorMessage
+	if req != nil && req.ErrorMessage != "" && run.ErrorMessage == "" {
+		errorMessage = req.ErrorMessage
 	}
-	if req != nil {
-		payload["requested_paths"] = req.RequestedPaths
-		payload["result_code"] = req.ResultCode
-		payload["source_id"] = stringPtrValue(req.IdempotencyKey)
-		payload["request_status"] = req.Status
-		payload["error_code"] = req.ResultCode
-		if req.ErrorMessage != "" && run.ErrorMessage == "" {
-			payload["errorMessage"] = req.ErrorMessage
-		}
-	}
-	return payload
-}
-
-func legacyParamSyncStatus(status string, terminal bool) string {
-	switch status {
-	case "succeeded":
-		return "2"
-	case "failed", "timed_out", "cancelled", "rejected":
-		return "3"
-	case "accepted", "queued", "planning":
-		return "0"
-	default:
-		if terminal {
-			return "2"
-		}
-		return "1"
+	return gin.H{
+		"jobId":        run.ID.String(),
+		"name":         "GetParameterValues",
+		"status":       status,
+		"sn":           run.DeviceSN,
+		"errorMessage": errorMessage,
+		"createTime":   run.StartedAt,
+		"completeTime": run.CompletedAt,
 	}
 }
 
@@ -1033,13 +1287,6 @@ func isNotFoundLike(err error) bool {
 		return true
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "no rows")
-}
-
-func stringPtrValue(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
 }
 
 func (r *Router) legacyListTasks(c *gin.Context) {

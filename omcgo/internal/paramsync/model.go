@@ -202,6 +202,19 @@ type TaskResult struct {
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
+type RunValue struct {
+	RunID         uuid.UUID `json:"run_id"`
+	ParameterPath string    `json:"parameter_path"`
+	PrivatePath   string    `json:"private_path"`
+	Value         string    `json:"value"`
+	ValueType     string    `json:"value_type,omitempty"`
+	Writable      bool      `json:"writable"`
+	FAPInstance   int       `json:"fap_instance"`
+	ParamGroup    string    `json:"param_group"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
 type StartResult struct {
 	Request      *SyncRequest `json:"request"`
 	Run          *SyncRun     `json:"run,omitempty"`

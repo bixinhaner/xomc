@@ -2567,21 +2567,25 @@ Content-Type: application/json
     method: 'GET',
     url: '/api/v1/northbound/v1/job/result/{jobId}',
     auth: commonApiAuth,
-    backendSource: 'omcgo/internal/northbound/legacy_facade.go + internal/task/service.go',
+    backendSource: 'omcgo/internal/northbound/legacy_facade.go + internal/paramsync/service.go + internal/device/device_service.go',
     requestExample: `GET /api/v1/northbound/v1/job/result/cmd-20260730010000-0001
 X-Northbound-Token: <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
   "data": {
-    "id": "cmd-20260730010000-0001",
     "jobId": "cmd-20260730010000-0001",
-    "device_sn": "1202000240194",
-    "method": "SetParameterValues",
-    "status": "completed",
-    "legacy_status": "2",
-    "result_code": "0",
-    "completed_at": "2026-07-30T01:00:04+08:00"
+    "name": "GetParameterValues",
+    "status": "succeeded",
+    "sn": "1202000240194",
+    "errorMessage": "",
+    "createTime": "2026-07-30T01:00:00+08:00",
+    "completeTime": "2026-07-30T01:00:04+08:00",
+    "parameters": {
+      "Device.DeviceInfo.SoftwareVersion": "V100R001C00",
+      "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID": "389"
+    },
+    "total": 2
   }
 }`,
   },
@@ -2808,7 +2812,7 @@ const apiMetaByKey: Record<string, Partial<NorthboundApiRow>> = {
   'task-detail': {
     apiKind: '业务复用',
     fieldContract: '当前返回字段',
-    responseFields: [...currentEnvelopeFields, 'data.id', 'data.device_id?', 'data.device_sn?', 'data.method?', 'data.status', 'data.result_code?', 'data.error_message?', 'data.created_at?', 'data.completed_at?'],
+    responseFields: [...currentEnvelopeFields, 'data.jobId', 'data.name', 'data.status', 'data.sn', 'data.errorMessage', 'data.createTime', 'data.completeTime', 'data.parameters', 'data.total'],
   },
   'device-reboot': {
     apiKind: '业务复用',

@@ -478,8 +478,8 @@ func defaultAPIConfigs() []APIConfig {
 			Enabled:            false,
 			OldSystemSupported: true,
 			CurrentSupported:   true,
-			Source:             "omcgo/internal/northbound/legacy_facade.go + internal/task/service.go",
-			ResponseContract:   map[string]any{"fields": []string{"ret", "msg", "data.jobId", "data.task_id", "data.name", "data.status", "data.legacy_status", "data.sn", "data.errorMessage", "data.createTime", "data.completeTime", "data.details"}},
+			Source:             "omcgo/internal/northbound/legacy_facade.go + internal/paramsync/service.go + internal/device/device_service.go",
+			ResponseContract:   map[string]any{"fields": []string{"ret", "msg", "data.jobId", "data.name", "data.status", "data.sn", "data.errorMessage", "data.createTime", "data.completeTime", "data.parameters", "data.total", "data.details"}},
 		},
 		{
 			Key:                "task-page",

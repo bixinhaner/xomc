@@ -11,6 +11,7 @@ import (
 type northboundParamSyncService interface {
 	GetRequest(context.Context, uuid.UUID) (*paramsync.SyncRequest, error)
 	GetRun(context.Context, uuid.UUID) (*paramsync.SyncRun, error)
+	ListRunValues(context.Context, uuid.UUID) ([]paramsync.RunValue, error)
 	FindRequestByIdempotency(context.Context, string, string) (*paramsync.SyncRequest, error)
 }
 
