@@ -84,6 +84,8 @@ type TaskVersionSnapshot struct {
 	VersionNo     int
 	NewVersion    bool
 	Name          string
+	TaskEnabled   bool
+	TaskDeletedAt *time.Time
 	Enabled       bool
 	Technology    string
 	Dimension     Dimension
@@ -109,4 +111,15 @@ type TaskVersionSnapshot struct {
 	// indexed only by version ID and never matches raw PM events directly.
 	DeviceRollup    bool
 	RollupVersionID uuid.UUID
+}
+
+type RecoveryVersionState struct {
+	TaskID         uuid.UUID
+	TaskEnabled    bool
+	TaskDeletedAt  *time.Time
+	VersionID      uuid.UUID
+	VersionEnabled bool
+	EffectiveFrom  time.Time
+	EffectiveTo    *time.Time
+	PlannedEndAt   *time.Time
 }

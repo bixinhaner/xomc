@@ -952,6 +952,91 @@ func (r *WindowRepository) ListActiveAfter(
 	return r.queryWindows(ctx, query, args...)
 }
 
+func (r *WindowRepository) MarkRecoveryTerminalBatch(
+	ctx context.Context,
+	records []WindowRecord,
+	status string,
+	reason string,
+) (int64, error) {
+	if len(records) == 0 {
+		return 0, nil
+	}
+	if status != "orphaned" && status != "retired" {
+		return 0, fmt.Errorf("unsupported PM aggregation recovery terminal status %q", status)
+	}
+	predicates := make(sq.Or, 0, len(records))
+	for _, record := range records {
+		predicates = append(predicates, windowKeyPredicate(record.Key))
+	}
+	now := time.Now().UTC()
+	query, args, err := storage.Psql.Update("pm_aggregation_windows").
+		Set("recovery_original_status", sq.Expr("status")).
+		Set("status", status).
+		Set("recovery_terminal_at", now).
+		Set("recovery_terminal_reason", reason).
+		Set("runtime_cleaned_at", nil).
+		Set("last_error", reason).
+		Set("finalize_lease_owner", nil).
+		Set("finalize_lease_until", nil).
+		Set("updated_at", now).
+		Where(sq.Eq{"status": []string{"open", "failed", "finalizing"}}).
+		Where(predicates).
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build mark PM aggregation recovery terminal SQL: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("mark PM aggregation recovery terminal: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+func (r *WindowRepository) ListRecoveryRuntimeCleanupPending(
+	ctx context.Context,
+	limit uint64,
+) ([]WindowRecord, error) {
+	query, args, err := storage.Psql.Select(
+		"task_id", "task_version_id", "entity_key", "granularity", "window_start", "window_end",
+		"status", "expected_slots", "received_slots", "finalize_attempts",
+	).From("pm_aggregation_windows").
+		Where(sq.Eq{"status": []string{"orphaned", "retired"}, "runtime_cleaned_at": nil}).
+		OrderBy("recovery_terminal_at", "task_version_id", "entity_key", "granularity", "window_start").
+		Limit(limit).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list PM aggregation recovery cleanup SQL: %w", err)
+	}
+	return r.queryWindows(ctx, query, args...)
+}
+
+func (r *WindowRepository) MarkRecoveryRuntimeCleaned(
+	ctx context.Context,
+	keys []WindowKey,
+) (int64, error) {
+	if len(keys) == 0 {
+		return 0, nil
+	}
+	predicates := make(sq.Or, 0, len(keys))
+	for _, key := range keys {
+		predicates = append(predicates, windowKeyPredicate(key))
+	}
+	query, args, err := storage.Psql.Update("pm_aggregation_windows").
+		Set("runtime_cleaned_at", time.Now().UTC()).
+		Set("updated_at", time.Now().UTC()).
+		Where(sq.Eq{"status": []string{"orphaned", "retired"}, "runtime_cleaned_at": nil}).
+		Where(predicates).
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build mark PM aggregation runtime cleaned SQL: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("mark PM aggregation runtime cleaned: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (r *WindowRepository) queryWindows(
 	ctx context.Context,
 	query string,

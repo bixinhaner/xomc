@@ -537,6 +537,25 @@ func TestRedisWindowStoreDeletesLargeStateWithUnlink(t *testing.T) {
 	require.NotContains(t, hook.commands, "del")
 }
 
+func TestRedisWindowStoreDeletesVersionDefinitionsInBatches(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	store := NewRedisWindowStore(client, time.Hour)
+	versionIDs := make([]uuid.UUID, 0, 130)
+	for index := 0; index < 130; index++ {
+		versionID := uuid.New()
+		versionIDs = append(versionIDs, versionID)
+		require.NoError(t, client.Set(
+			context.Background(), redisVersionDefinitionsKey(versionID), "ISSUE353_SENTINEL", 0,
+		).Err())
+	}
+
+	require.NoError(t, store.DeleteVersionDefinitions(context.Background(), versionIDs))
+	for _, versionID := range versionIDs {
+		require.False(t, server.Exists(redisVersionDefinitionsKey(versionID)))
+	}
+}
+
 type failNthUnlinkHook struct {
 	nth   int
 	count int

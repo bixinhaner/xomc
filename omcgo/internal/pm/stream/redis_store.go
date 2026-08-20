@@ -719,6 +719,26 @@ func (s *RedisWindowStore) DeleteState(ctx context.Context, key WindowKey) error
 	return s.delete(ctx, key, false)
 }
 
+func (s *RedisWindowStore) DeleteVersionDefinitions(
+	ctx context.Context,
+	versionIDs []uuid.UUID,
+) error {
+	ids := normalizeTaskVersionIDs(versionIDs)
+	const batchSize = 128
+	for start := 0; start < len(ids); start += batchSize {
+		end := min(start+batchSize, len(ids))
+		keys := make([]string, 0, end-start)
+		for _, versionID := range ids[start:end] {
+			keys = append(keys, redisVersionDefinitionsKey(versionID))
+		}
+		if err := s.client.Unlink(ctx, keys...).Err(); err != nil {
+			s.recordRedisWriteError()
+			return fmt.Errorf("unlink PM aggregation Redis version definitions: %w", err)
+		}
+	}
+	return nil
+}
+
 func (s *RedisWindowStore) delete(ctx context.Context, key WindowKey, includeLock bool) error {
 	return s.unlink(ctx, key, includeLock, 128)
 }
