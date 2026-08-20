@@ -87,6 +87,7 @@ interface ParameterConstraint {
   type: 'bool' | 'int' | 'string' | 'enum';
   range: string;
   options?: readonly string[];
+  acceptedOptions?: readonly string[];
   condition?: string;
   dependentOptions?: Readonly<Record<string, readonly string[]>>;
   dependsOnHeader?: string;
@@ -354,6 +355,7 @@ const ENUM_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   SYNCHRONIZATION: ['GNSS', 'PTP'],
   ADDRESSTYPE: ['DHCP', 'Static', 'DHCPv6', 'Staticv6'],
 };
+const LTE_BANDWIDTH_OPTIONS = ['n25', 'n50', 'n75', 'n100'] as const;
 
 function metadataKeys(value: string): string[] {
   const normalized = canonicalHeader(value);
@@ -365,19 +367,43 @@ function normalizePath(value: string): string {
   return value.trim().replace(/\.\d+(?=\.|$)/g, '.{i}').toLowerCase();
 }
 
+function isLteBandwidthPath(value: string | undefined): boolean {
+  return /\.LTE\.RAN\.RF\.(?:DL|UL)Bandwidth$/i.test(value ?? '');
+}
+
+function normalizeLteBandwidthOption(value: string): string {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^n?(25|50|75|100)$/i);
+  return match ? `n${match[1]}` : value;
+}
+
+function lteBandwidthWorkbookOptions(options?: readonly string[]): readonly string[] {
+  const normalized = (options?.length ? options : LTE_BANDWIDTH_OPTIONS)
+    .map((option) => normalizeLteBandwidthOption(String(option)))
+    .filter((option) => LTE_BANDWIDTH_OPTIONS.includes(option as typeof LTE_BANDWIDTH_OPTIONS[number]));
+  return Array.from(new Set(normalized.length ? normalized : LTE_BANDWIDTH_OPTIONS));
+}
+
+function lteBandwidthAcceptedOptions(options: readonly string[]): readonly string[] {
+  return Array.from(new Set(options.flatMap((option) => [option, option.replace(/^n/i, '')])));
+}
+
 function quickSettingConstraint(
   param: QuickSettingsParam,
   mapping: ParamMapping | undefined,
   field: (GnbQuickSettingField & { condition?: string }) | undefined,
 ): ParameterConstraint {
   const modelConstraint = mapping ? mappingConstraint(mapping) : undefined;
+  const lteBandwidth = [param.standardPath, mapping?.standardPath, mapping?.privatePath]
+    .some(isLteBandwidthPath);
   const dependsOnHeader = field?.control === 'dl-bandwidth'
     ? 'SubcarrierSpacing(DL)'
     : field?.control === 'ul-bandwidth' ? 'SubcarrierSpacing(UL)' : undefined;
-  const options = field?.options?.map((option) => option.value)
+  const rawOptions = field?.options?.map((option) => option.value)
     ?? param.enumOptions?.map((option) => option.value)
     ?? param.checkboxOptions
     ?? modelConstraint?.options;
+  const options = lteBandwidth ? lteBandwidthWorkbookOptions(rawOptions) : rawOptions;
   const normalizedType = String(param.type ?? '').toLowerCase();
   const type = modelConstraint?.type
     ?? (normalizedType === 'boolean' || normalizedType === 'bool' ? 'bool'
@@ -394,6 +420,7 @@ function quickSettingConstraint(
     range,
     condition: field?.condition,
     options: options?.length ? options : type === 'bool' ? ['true', 'false'] : undefined,
+    acceptedOptions: lteBandwidth && options?.length ? lteBandwidthAcceptedOptions(options) : undefined,
     dependentOptions: field?.control === 'dl-bandwidth' || field?.control === 'ul-bandwidth'
       ? Object.fromEntries(Object.entries(NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS).map(([scs, entries]) => (
         [scs, entries.map((entry) => entry.value)]
@@ -995,7 +1022,8 @@ function validateMappedValue(
   if (!text) return;
   const constraint = constraintForMappedPath(mapping, metadata);
   if (!constraint) return;
-  if (constraint.options?.length && !constraint.options.map(String).includes(text)) {
+  const acceptedOptions = constraint.acceptedOptions ?? constraint.options;
+  if (acceptedOptions?.length && !acceptedOptions.map(String).includes(text)) {
     throw new ParamConfigWorkbookError('invalid_row', sheetRow, mapping.header);
   }
   // Quick-setting enums are authoritative even when the parameter model exposes
