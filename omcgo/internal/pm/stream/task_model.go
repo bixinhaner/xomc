@@ -61,21 +61,22 @@ type TaskMember struct {
 }
 
 type SaveTaskRequest struct {
-	TaskID        uuid.UUID
-	Name          string
-	Enabled       bool
-	Visibility    string
-	Creator       string
-	Technology    string
-	Dimension     Dimension
-	Granularities []Granularity
-	ObjectLDNs    []string
-	Metrics       []MetricRule
-	Counters      []CounterRule
-	Members       []TaskMember
-	Now           time.Time
-	EffectiveFrom time.Time
-	PlannedEndAt  *time.Time
+	TaskID          uuid.UUID
+	Name            string
+	Enabled         bool
+	Visibility      string
+	Creator         string
+	Technology      string
+	Dimension       Dimension
+	Granularities   []Granularity
+	ObjectLDNs      []string
+	Metrics         []MetricRule
+	Counters        []CounterRule
+	Members         []TaskMember
+	Now             time.Time
+	EffectiveFrom   time.Time
+	PlannedEndAt    *time.Time
+	SourceUpdatedAt time.Time
 }
 
 type TaskVersionSnapshot struct {

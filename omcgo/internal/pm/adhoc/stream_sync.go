@@ -51,6 +51,7 @@ func (r *PgRepository) syncStreamingTask(ctx context.Context, task *Task, enable
 		Technology: task.Technology, Dimension: pmstream.Dimension(task.Dimension),
 		Granularities: granularities, ObjectLDNs: task.ObjectLDNs,
 		Metrics: rules, Counters: counters, Members: members, PlannedEndAt: task.PlannedEndAt,
+		SourceUpdatedAt: task.UpdatedAt,
 	})
 	if err != nil {
 		return fmt.Errorf("save PM streaming task version: %w", err)

@@ -36,6 +36,7 @@ const pmRedisSweepSafetyThreshold = 30 * time.Minute
 const pmRedisSweepScanLimit = 512
 const pmRedisSweepUnlinkBatch = 128
 const pmPublishedVersionRepairInterval = time.Minute
+const pmStreamingLifecycleReconcileInterval = time.Minute
 
 type pmBuiltinReconcileFunc func(context.Context) (adhoc.BuiltinReconcileResult, error)
 type pmSnapshotReloadFunc func(context.Context) error
@@ -111,6 +112,20 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 			zap.Int("definitions", initialResult.Definitions),
 			zap.Int("failed", initialResult.Failed),
 			zap.Error(initialErr))
+	}
+	lifecycleReconciler := adhoc.NewStreamingLifecycleReconciler(
+		adhocRepo, pmStreamingLifecycleReconcileInterval, logger,
+	)
+	lifecycleCtx, lifecycleCancel := context.WithTimeout(ctx, time.Minute)
+	lifecycleResult, lifecycleErr := lifecycleReconciler.Reconcile(lifecycleCtx)
+	lifecycleCancel()
+	if lifecycleErr != nil {
+		logger.Warn("reconcile initial PM streaming task lifecycle",
+			zap.Int("candidates", lifecycleResult.Candidates),
+			zap.Int("reconciled", lifecycleResult.Reconciled),
+			zap.Int("retired", lifecycleResult.Retired),
+			zap.Int("failed", lifecycleResult.Failed),
+			zap.Error(lifecycleErr))
 	}
 	snapshot := pmstream.NewSnapshotStore(taskRepo, logger)
 	if err := snapshot.Reload(ctx); err != nil {
@@ -237,6 +252,7 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	go runPMRuleCatalogRefreshLoop(
 		ctx, builtinReconciler.Reconcile, snapshot.Reload, streamMetrics, logger,
 	)
+	go lifecycleReconciler.Run(ctx)
 	go adhoc.NewPlannedEndScheduler(adhocRepo, time.Minute, logger).Run(ctx)
 	go snapshot.RunRefresh(ctx, time.Minute)
 	go recovery.Run(ctx, time.Minute)
