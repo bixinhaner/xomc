@@ -116,6 +116,413 @@ describe('parameter configuration detail mapping', () => {
     });
   });
 
+  it('maps imported generated 5G device headers into existing page fields', () => {
+    const current = {
+      deviceType: 'gNB',
+      serialNumber: 'NR-SN-DEVICE',
+      sheetParameters: {
+        DEVICE: [{
+          'Serial Number': 'NR-SN-DEVICE',
+          'NTP Mode': '1',
+          'gNB ID Length': '24',
+        }],
+      },
+    };
+    const form = toParamConfigFormValues(current);
+
+    expect(form).toMatchObject({
+      ntpSync: '1',
+      gnbIdLength: '24',
+    });
+
+    expect(mergeParamConfigFormValues(current, {
+      ...form,
+      ntpSync: '0',
+      gnbIdLength: '32',
+    })).toMatchObject({
+      sheetParameters: {
+        DEVICE: [{
+          'NTP Mode': '0',
+          'gNB ID Length': '32',
+        }],
+      },
+    });
+  });
+
+  it('uses workbook mappings as the inverse of export when loading and saving fields', () => {
+    const current = {
+      deviceType: 'gNB',
+      serialNumber: 'NR-SN-MAPPED',
+      sheetParameters: {
+        EXPORTED_DEVICE: [{
+          'Serial Number': 'NR-SN-MAPPED',
+          'Mapped NTP Mode': '1',
+          'Mapped NTP Server 1': '192.0.2.10',
+          'Mapped gNB Length': '24',
+        }],
+      },
+      workbookMappings: [
+        {
+          displayName: 'NTP Mode',
+          sheet: 'EXPORTED_DEVICE',
+          header: 'Mapped NTP Mode',
+          trPath: 'Device.Services.FAPService.1.FAPControl.NR.RAN.Common.NTPMode',
+          source: 'system' as const,
+        },
+        {
+          displayName: 'NTP Server 1',
+          sheet: 'EXPORTED_DEVICE',
+          header: 'Mapped NTP Server 1',
+          trPath: 'Device.Services.FAPService.1.FAPControl.NR.RAN.Common.NTPServer1',
+          source: 'system' as const,
+        },
+        {
+          displayName: 'gNB ID Length',
+          sheet: 'EXPORTED_DEVICE',
+          header: 'Mapped gNB Length',
+          trPath: 'Device.Services.FAPService.1.FAPControl.NR.RAN.Common.GNBIDLength',
+          source: 'system' as const,
+        },
+      ],
+    };
+    const form = toParamConfigFormValues(current);
+
+    expect(form).toMatchObject({
+      ntpSync: '1',
+      gnbIdLength: '24',
+      sheetParameters: {
+        DEVICE: [{
+          'NTP Server1': '192.0.2.10',
+        }],
+      },
+    });
+
+    const merged = mergeParamConfigFormValues(current, {
+      ...form,
+      ntpSync: '0',
+      gnbIdLength: '32',
+      sheetParameters: {
+        ...(form.sheetParameters as Record<string, unknown>),
+        DEVICE: [{
+          ...((form.sheetParameters as Record<string, Array<Record<string, unknown>>>).DEVICE[0]),
+          'NTP Server1': '192.0.2.20',
+        }],
+      },
+    });
+
+    expect(merged.sheetParameters).toMatchObject({
+      EXPORTED_DEVICE: [{
+        'Mapped NTP Mode': '0',
+        'Mapped NTP Server 1': '192.0.2.20',
+        'Mapped gNB Length': '32',
+      }],
+    });
+  });
+
+  it('projects every imported 5G device parameter alias into page fields and saves back to the original columns', () => {
+    const cases = [
+      ['NTP Server 1', 'NTP Server1', 'Device.Time.NTPServer1', '192.0.2.1', '192.0.2.11'],
+      ['NTP Server 2', 'NTP Server2', 'Device.Time.NTPServer2', '192.0.2.2', '192.0.2.12'],
+      ['NTP Server 3', 'NTP Server3', 'Device.Time.NTPServer3', '192.0.2.3', '192.0.2.13'],
+      ['NTP Server 4', 'NTP Server4', 'Device.Time.NTPServer4', '192.0.2.4', '192.0.2.14'],
+      ['NTP Server 5', 'NTP Server5', 'Device.Time.NTPServer5', '192.0.2.5', '192.0.2.15'],
+      ['Local Time Zone', 'Local Time Zone', 'Device.Time.LocalTimeZoneName', 'UTC+08:00', 'UTC+09:00'],
+      ['URL', 'URL', 'Device.ManagementServer.URL', 'http://acs.example.test', 'http://acs2.example.test'],
+      ['Periodic Inform Enable', 'Periodic Inform Enable', 'Device.ManagementServer.PeriodicInformEnable', '1', '0'],
+      ['Periodic Inform Time', 'Periodic Inform Time', 'Device.ManagementServer.PeriodicInformTime', '2026-08-20T16:00:00Z', '2026-08-20T17:00:00Z'],
+      ['Periodic Inform Interval', 'Periodic Inform Interval', 'Device.ManagementServer.PeriodicInformInterval', '300', '600'],
+      ['PpsTimeMode', 'PpsTimeMode', 'Device.Time.PpsTimeMode', 'GPS_PPS', '1588_PPS'],
+    ] as const;
+    const current = {
+      deviceType: 'gNB',
+      serialNumber: 'NR-SN-DEVICE-ALL',
+      sheetParameters: {
+        DEVICE: [{
+          'Serial Number': 'NR-SN-DEVICE-ALL',
+          'NTP Mode': '1',
+          ...Object.fromEntries(cases.map(([sourceHeader,, , initial]) => [sourceHeader, initial])),
+        }],
+      },
+      workbookMappings: [
+        {
+          displayName: 'NTP Mode',
+          sheet: 'DEVICE',
+          header: 'NTP Mode',
+          trPath: 'Device.Time.Enable',
+          source: 'system' as const,
+        },
+        ...cases.map(([sourceHeader,, trPath]) => ({
+          displayName: sourceHeader,
+          sheet: 'DEVICE',
+          header: sourceHeader,
+          trPath,
+          source: 'system' as const,
+        })),
+      ],
+    };
+
+    const form = toParamConfigFormValues(current);
+    const formDevice = (form.sheetParameters as Record<string, Array<Record<string, unknown>>>).DEVICE[0];
+
+    expect(form.ntpSync).toBe('1');
+    for (const [, pageHeader,, initial] of cases) {
+      expect(formDevice[pageHeader], pageHeader).toBe(initial);
+    }
+
+    const submittedDevice = {
+      ...formDevice,
+      ...Object.fromEntries(cases.map(([, pageHeader,,, updated]) => [pageHeader, updated])),
+    };
+    const merged = mergeParamConfigFormValues(current, {
+      ...form,
+      ntpSync: '0',
+      sheetParameters: {
+        ...(form.sheetParameters as Record<string, Array<Record<string, unknown>>>),
+        DEVICE: [submittedDevice],
+      },
+    });
+    const savedDevice = merged.sheetParameters.DEVICE[0];
+
+    expect(savedDevice['NTP Mode']).toBe('0');
+    for (const [sourceHeader,,, , updated] of cases) {
+      expect(savedDevice[sourceHeader], sourceHeader).toBe(updated);
+    }
+  });
+
+  it('uses direct exported column aliases for every 5G device parameter even when the mapping sheet is absent', () => {
+    const cases = [
+      ['NTP Server 1', 'NTP Server1', '192.0.2.1', '192.0.2.11'],
+      ['NTP Server 2', 'NTP Server2', '192.0.2.2', '192.0.2.12'],
+      ['NTP Server 3', 'NTP Server3', '192.0.2.3', '192.0.2.13'],
+      ['NTP Server 4', 'NTP Server4', '192.0.2.4', '192.0.2.14'],
+      ['NTP Server 5', 'NTP Server5', '192.0.2.5', '192.0.2.15'],
+      ['Local Time Zone', 'Local Time Zone', 'UTC+08:00', 'UTC+09:00'],
+      ['URL', 'URL', 'http://acs.example.test', 'http://acs2.example.test'],
+      ['Periodic Inform Enable', 'Periodic Inform Enable', '1', '0'],
+      ['Periodic Inform Time', 'Periodic Inform Time', '2026-08-20T16:00:00Z', '2026-08-20T17:00:00Z'],
+      ['Periodic Inform Interval', 'Periodic Inform Interval', '300', '600'],
+      ['PpsTimeMode', 'PpsTimeMode', 'GPS_PPS', '1588_PPS'],
+    ] as const;
+    const current = {
+      deviceType: 'gNB',
+      serialNumber: 'NR-SN-DIRECT-ALL',
+      sheetParameters: {
+        DEVICE: [{
+          'Serial Number': 'NR-SN-DIRECT-ALL',
+          ...Object.fromEntries(cases.map(([sourceHeader,, initial]) => [sourceHeader, initial])),
+        }],
+      },
+    };
+    const form = toParamConfigFormValues(current);
+    const formDevice = (form.sheetParameters as Record<string, Array<Record<string, unknown>>>).DEVICE[0];
+
+    for (const [, pageHeader, initial] of cases) {
+      expect(formDevice[pageHeader], pageHeader).toBe(initial);
+    }
+
+    const merged = mergeParamConfigFormValues(current, {
+      ...form,
+      sheetParameters: {
+        ...(form.sheetParameters as Record<string, Array<Record<string, unknown>>>),
+        DEVICE: [{
+          ...formDevice,
+          ...Object.fromEntries(cases.map(([, pageHeader,, updated]) => [pageHeader, updated])),
+        }],
+      },
+    });
+
+    for (const [sourceHeader,,, updated] of cases) {
+      expect(merged.sheetParameters.DEVICE[0][sourceHeader], sourceHeader).toBe(updated);
+    }
+  });
+
+  it('projects imported 5G cell, PLMN, sync and IPsec aliases for every cell row', () => {
+    const current = {
+      deviceType: 'gNB',
+      serialNumber: 'NR-SN-MULTI-ALL',
+      sheetParameters: {
+        CELL: [
+          {
+            'Serial Number': 'NR-SN-MULTI-ALL',
+            'Cell Index': 1,
+            PCI: '101',
+            'RF Enable': '1',
+            'DL SubCarrier Spacing': '1',
+            'UL SubCarrier Spacing': '0',
+            'Num Of Tx Antenna': '2',
+            'Num Of Rx Antenna': '4',
+            'Pattern1 Periodicity': '3',
+            'Pattern1 DL Slots': '6',
+            'Pattern1 DL Symbols': '7',
+            'Pattern1 UL Slots': '8',
+            'Pattern1 UL Symbols': '9',
+            'Pattern2 Periodicity': '4',
+            'Pattern2 DL Slots': '10',
+            'Pattern2 DL Symbols': '11',
+            'Pattern2 UL Slots': '12',
+            'Pattern2 UL Symbols': '13',
+          },
+          {
+            'Serial Number': 'NR-SN-MULTI-ALL',
+            'Cell Index': 2,
+            PCI: '202',
+            'RF Enable': '0',
+            'DL SubCarrier Spacing': '2',
+            'UL SubCarrier Spacing': '1',
+            'Num Of Tx Antenna': '6',
+            'Num Of Rx Antenna': '8',
+            'Pattern1 Periodicity': '5',
+            'Pattern1 DL Slots': '16',
+            'Pattern1 DL Symbols': '17',
+            'Pattern1 UL Slots': '18',
+            'Pattern1 UL Symbols': '19',
+            'Pattern2 Periodicity': '6',
+            'Pattern2 DL Slots': '20',
+            'Pattern2 DL Symbols': '21',
+            'Pattern2 UL Slots': '22',
+            'Pattern2 UL Symbols': '23',
+          },
+        ],
+        PLMN: [{
+          'Serial Number': 'NR-SN-MULTI-ALL',
+          NCI: '1000001',
+          TAC: '100',
+          RANAC: '2',
+          'PLMN ID': '46000',
+          'AMF IP': '10.0.0.1',
+          'NGU Local Address': '192.0.2.100',
+        }],
+        '1588_CONFIGURATION': [{
+          'Serial Number': 'NR-SN-MULTI-ALL',
+          'Sync Source': 'GPS',
+          'Forced Sync': '1',
+          Profile: '1588v2',
+          Domain: '24',
+          'Transmission Mode': 'L3',
+          Interface: 'eth0',
+          'Unicast Mode': '1',
+          'Sync Interval': '-6',
+          'Delay Interval': '-4',
+        }],
+        IPSEC: [{
+          'Serial Number': 'NR-SN-MULTI-ALL',
+          'Tunnel Enable': '1',
+          Gateway: '198.51.100.1',
+          'Left Auth': 'psk',
+          'Right Auth': 'psk',
+          'Left ID': 'left-1',
+          'Right ID': 'right-1',
+          'Left Source IP': '10.10.0.1',
+          'Left Subnet': '10.10.0.0/24',
+          'Right Subnet': '10.20.0.0/24',
+          Fragmentation: '1',
+          'IKE Encryption': 'aes128',
+          'IKE DH Group': 'modp2048',
+          'IKE Authentication': 'sha256',
+          'ESP Encryption': 'aes256',
+          'ESP DH Group': 'modp2048',
+          'ESP Authentication': 'sha256',
+          'Key Life': '3600',
+          'IKE Lifetime': '7200',
+          'Rekey Margin': '120',
+          'DPD Action': 'restart',
+          'DPD Delay': '30',
+          'Left Interface': 'eth0',
+        }],
+      },
+    };
+
+    const form = toParamConfigFormValues(current);
+    const cellRows = (form.sheetParameters as Record<string, Array<Record<string, unknown>>>).CELL;
+    const plmnRow = (form.sheetParameters as Record<string, Array<Record<string, unknown>>>).PLMN[0];
+
+    expect(form).toMatchObject({
+      RFEnable: '1',
+      nci: '1000001',
+      tac: '100',
+      ranac: '2',
+      plmnId: '46000',
+      amfList: [{ amfIp: '10.0.0.1', amfPort: '' }],
+      SyncSource: 'GPS',
+      ForcedSync: '1',
+      PTPProfile: '1588v2',
+      PTPDomain: '24',
+      PTPTransmode: 'L3',
+      PTPInterface: 'eth0',
+      PTPUnicastMode: '1',
+      PTPSyncInterval: '-6',
+      PTPDelayInterval: '-4',
+      ipsecList: [expect.objectContaining({
+        TUNNEL_ENABLE: '1',
+        TUNNEL_GATEWAY: '198.51.100.1',
+        LEFT_AUTH: 'psk',
+        RIGHT_IDENTIFIER: 'right-1',
+        LEFT_INTERFACE: 'eth0',
+      })],
+    });
+    expect(plmnRow.NguBindInterface).toBe('192.0.2.100');
+    expect(cellRows[0]).toMatchObject({
+      'Cell Index': 1,
+      DLAntNum: '2',
+      ULAntNum: '4',
+      'SubcarrierSpacing(DL)': '1',
+      'SubcarrierSpacing(UL)': '0',
+      'DL ULTransmissionPeriodicity1': '3',
+      'Nrof DownlinkSlots1': '6',
+      'Nrof DownlinkSymbols1': '7',
+      'Nrof  UplinkSlots1': '8',
+      'Nrof  UplinkSymbols1': '9',
+      'DL ULTransmissionPeriodicity2': '4',
+      'Nrof  DownlinkSlots2': '10',
+      'Nrof  DownlinkSymbols2': '11',
+      'Nrof  UplinkSlots2': '12',
+      'Nrof  UplinkSymbols2': '13',
+    });
+    expect(cellRows[1]).toMatchObject({
+      'Cell Index': 2,
+      DLAntNum: '6',
+      ULAntNum: '8',
+      'SubcarrierSpacing(DL)': '2',
+      'SubcarrierSpacing(UL)': '1',
+      'DL ULTransmissionPeriodicity1': '5',
+      'Nrof DownlinkSlots1': '16',
+      'Nrof DownlinkSymbols1': '17',
+      'Nrof  UplinkSlots1': '18',
+      'Nrof  UplinkSymbols1': '19',
+      'DL ULTransmissionPeriodicity2': '6',
+      'Nrof  DownlinkSlots2': '20',
+      'Nrof  DownlinkSymbols2': '21',
+      'Nrof  UplinkSlots2': '22',
+      'Nrof  UplinkSymbols2': '23',
+    });
+
+    const merged = mergeParamConfigFormValues(current, {
+      ...form,
+      RFEnable: '0',
+      SyncSource: 'GPS,GLONASS',
+      PTPDomain: '25',
+      amfList: [{ amfIp: '10.0.0.2', amfPort: '' }],
+      sheetParameters: {
+        ...(form.sheetParameters as Record<string, Array<Record<string, unknown>>>),
+        CELL: [
+          { ...cellRows[0], DLAntNum: '3', 'Nrof DownlinkSlots1': '66' },
+          { ...cellRows[1], DLAntNum: '7', 'Nrof DownlinkSlots1': '166' },
+        ],
+        PLMN: [{ ...plmnRow, NguBindInterface: '192.0.2.101' }],
+      },
+    });
+
+    expect(merged.sheetParameters.CELL[0]['Num Of Tx Antenna']).toBe('3');
+    expect(merged.sheetParameters.CELL[0]['Pattern1 DL Slots']).toBe('66');
+    expect(merged.sheetParameters.CELL[1]['Num Of Tx Antenna']).toBe('7');
+    expect(merged.sheetParameters.CELL[1]['Pattern1 DL Slots']).toBe('166');
+    expect(merged.sheetParameters.CELL[0]['RF Enable']).toBe('0');
+    expect(merged.sheetParameters.PLMN[0]['AMF IP']).toBe('10.0.0.2');
+    expect(merged.sheetParameters.PLMN[0]['NGU Local Address']).toBe('192.0.2.101');
+    expect(merged.sheetParameters['1588_CONFIGURATION'][0]['Sync Source']).toBe('GPS,GLONASS');
+    expect(merged.sheetParameters['1588_CONFIGURATION'][0].Domain).toBe('25');
+  });
+
   it('maps 4G CELL and NETWORK_ENABLE values into the detail form', () => {
     expect(toParamConfigFormValues({
       deviceType: 'eNB',

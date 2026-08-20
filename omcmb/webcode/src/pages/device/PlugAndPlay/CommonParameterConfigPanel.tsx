@@ -14,9 +14,10 @@ interface AllocationRuleFieldsProps {
   name: 'gnbIdAllocation' | 'pciAllocation';
   title: string;
   maximum: number;
+  readOnly?: boolean;
 }
 
-function AllocationRuleFields({ name, title, maximum }: AllocationRuleFieldsProps) {
+function AllocationRuleFields({ name, title, maximum, readOnly = false }: AllocationRuleFieldsProps) {
   const t = useT();
   return (
     <Card size="small" title={title} style={{ marginBottom: 16 }}>
@@ -26,21 +27,21 @@ function AllocationRuleFields({ name, title, maximum }: AllocationRuleFieldsProp
           label={t('provision.rangeStart')}
           rules={[{ required: true }]}
         >
-          <InputNumber min={0} max={maximum} style={{ width: '100%' }} />
+          <InputNumber min={0} max={maximum} readOnly={readOnly} style={{ width: '100%' }} />
         </Form.Item>
         <Form.Item
           name={[name, 'end']}
           label={t('provision.rangeEnd')}
           rules={[{ required: true }]}
         >
-          <InputNumber min={0} max={maximum} style={{ width: '100%' }} />
+          <InputNumber min={0} max={maximum} readOnly={readOnly} style={{ width: '100%' }} />
         </Form.Item>
         <Form.Item
           name={[name, 'step']}
           label={t('provision.rangeStep')}
           rules={[{ required: true }]}
         >
-          <InputNumber min={1} style={{ width: '100%' }} />
+          <InputNumber min={1} readOnly={readOnly} style={{ width: '100%' }} />
         </Form.Item>
       </div>
       <Form.List name={[name, 'reserved']}>
@@ -48,21 +49,23 @@ function AllocationRuleFields({ name, title, maximum }: AllocationRuleFieldsProp
           <>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: fields.length ? 8 : 0 }}>
               <Text type="secondary">{t('provision.reservedRanges', { field: title })}</Text>
-              <Button type="link" icon={<PlusOutlined />} onClick={() => add({ start: 0, end: 0 })}>
-                {t('common.add')}
-              </Button>
+              {!readOnly && (
+                <Button type="link" icon={<PlusOutlined />} onClick={() => add({ start: 0, end: 0 })}>
+                  {t('common.add')}
+                </Button>
+              )}
             </div>
             {fields.length === 0 && <Text type="secondary">{t('provision.noReservedRanges')}</Text>}
             {fields.map((field) => (
               <Space key={field.key} align="baseline" style={{ marginRight: 16 }}>
                 <Form.Item {...field} name={[field.name, 'start']} rules={[{ required: true }]}>
-                  <InputNumber min={0} max={maximum} placeholder={t('provision.rangeStart')} />
+                  <InputNumber min={0} max={maximum} placeholder={t('provision.rangeStart')} readOnly={readOnly} />
                 </Form.Item>
                 <span>—</span>
                 <Form.Item {...field} name={[field.name, 'end']} rules={[{ required: true }]}>
-                  <InputNumber min={0} max={maximum} placeholder={t('provision.rangeEnd')} />
+                  <InputNumber min={0} max={maximum} placeholder={t('provision.rangeEnd')} readOnly={readOnly} />
                 </Form.Item>
-                <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                {!readOnly && <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />}
               </Space>
             ))}
           </>
@@ -72,7 +75,7 @@ function AllocationRuleFields({ name, title, maximum }: AllocationRuleFieldsProp
   );
 }
 
-function CustomParameters() {
+function CustomParameters({ readOnly = false }: { readOnly?: boolean }) {
   const t = useT();
   return (
     <Card size="small" title={t('provision.customParams')} style={{ marginBottom: 16 }}>
@@ -84,19 +87,21 @@ function CustomParameters() {
                 key={key}
                 size="small"
                 title={`${t('provision.customParam')} ${name + 1}`}
-                extra={<Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />}
+                extra={readOnly ? undefined : <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />}
                 style={{ marginBottom: 12 }}
               >
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
-                  <Form.Item {...restField} name={[name, 'name']} label={t('provision.nrQuick.name')}><Input /></Form.Item>
-                  <Form.Item {...restField} name={[name, 'value']} label={t('provision.nrQuick.value')}><Input /></Form.Item>
-                  <Form.Item {...restField} name={[name, 'trPath']} label={t('provision.nrQuick.trPath')}><Input /></Form.Item>
+                  <Form.Item {...restField} name={[name, 'name']} label={t('provision.nrQuick.name')}><Input readOnly={readOnly} /></Form.Item>
+                  <Form.Item {...restField} name={[name, 'value']} label={t('provision.nrQuick.value')}><Input readOnly={readOnly} /></Form.Item>
+                  <Form.Item {...restField} name={[name, 'trPath']} label={t('provision.nrQuick.trPath')}><Input readOnly={readOnly} /></Form.Item>
                 </div>
               </Card>
             ))}
-            <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-              {t('provision.addCustomParam')}
-            </Button>
+            {!readOnly && (
+              <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+                {t('provision.addCustomParam')}
+              </Button>
+            )}
           </>
         )}
       </Form.List>
@@ -110,6 +115,7 @@ export interface CommonParameterConfigPanelProps {
   paramModelName?: string;
   productClass?: string;
   disabled?: boolean;
+  readOnly?: boolean;
 }
 
 export interface ParameterConfigFieldsProps {
@@ -118,6 +124,7 @@ export interface ParameterConfigFieldsProps {
   productClass?: string;
   scope?: 'common' | 'device';
   onRequestEdit?: () => void;
+  readOnly?: boolean;
 }
 
 export function ParameterConfigFields({
@@ -126,13 +133,14 @@ export function ParameterConfigFields({
   productClass,
   scope = 'common',
   onRequestEdit,
+  readOnly = false,
 }: ParameterConfigFieldsProps) {
   const t = useT();
   const commonScope = scope === 'common';
   return (
     <>
       {deviceType && (
-        <PrimaryRadioInstanceEditor deviceType={deviceType} productClass={productClass} />
+        <PrimaryRadioInstanceEditor deviceType={deviceType} productClass={productClass} readOnly={readOnly} />
       )}
       {deviceType === 'gNB' && (
         <>
@@ -141,23 +149,25 @@ export function ParameterConfigFields({
               <Card size="small" title={t('provision.batchAllocationRules')} style={{ marginBottom: 16 }}>
                 <Text type="secondary">{t('provision.batchAllocationRulesHint')}</Text>
               </Card>
-              <AllocationRuleFields name="gnbIdAllocation" title="gNB ID" maximum={4_294_967_295} />
-              <AllocationRuleFields name="pciAllocation" title="PCI" maximum={1007} />
+              <AllocationRuleFields name="gnbIdAllocation" title="gNB ID" maximum={4_294_967_295} readOnly={readOnly} />
+              <AllocationRuleFields name="pciAllocation" title="PCI" maximum={1007} readOnly={readOnly} />
             </>
           )}
           <GnbQuickSettingsCards
             excludedFieldIds={commonScope ? ['gNBId', 'PCI'] : []}
             excludedGroupIds={['gnb-cell', 'gnb-tdd']}
-            beforeIpsec={<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} />}
+            beforeIpsec={<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} readOnly={readOnly} />}
+            readOnly={readOnly}
           />
           <Card size="small" title={t('provision.otherTemplateParams')} style={{ marginBottom: 16 }}>
             <GnbTemplateExtraFieldGrid
+              readOnly={readOnly}
               excludedFieldIds={commonScope
                 ? [...GNB_COMMON_EXCLUDED_EXTRA_FIELD_IDS, 'PrachRootSequenceIndex', 'PrachRootSequenceValue']
                 : ['PrachRootSequenceIndex', 'PrachRootSequenceValue']}
             />
           </Card>
-          <CustomParameters />
+          <CustomParameters readOnly={readOnly} />
         </>
       )}
       {deviceType === 'eNB' && (
@@ -165,18 +175,19 @@ export function ParameterConfigFields({
           <EnbQuickSettingsCards
             paramModelName={paramModelName}
             excludedGroupIds={['enb-cell']}
-            beforeIpsec={<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} />}
+            beforeIpsec={<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} readOnly={readOnly} />}
+            readOnly={readOnly}
           />
           <Card size="small" title={t('provision.otherTemplateParams')} style={{ marginBottom: 16 }}>
-            <EnbTemplateExtraFieldGrid excludedFieldIds={['CELL_NUMBER']} />
+            <EnbTemplateExtraFieldGrid excludedFieldIds={['CELL_NUMBER']} readOnly={readOnly} />
           </Card>
-          <CustomParameters />
+          <CustomParameters readOnly={readOnly} />
         </>
       )}
       {deviceType === 'GSM' && (
         <>
-          <CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} />
-          <CustomParameters />
+          <CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} readOnly={readOnly} />
+          <CustomParameters readOnly={readOnly} />
         </>
       )}
       {!deviceType && <Alert type="warning" showIcon title={t('provision.paramConfigDeviceTypeUnavailable')} />}
@@ -190,10 +201,11 @@ export default function CommonParameterConfigPanel({
   paramModelName,
   productClass,
   disabled = false,
+  readOnly = false,
 }: CommonParameterConfigPanelProps) {
   const t = useT();
   return (
-    <Form form={form} component={false} disabled={disabled}>
+    <Form form={form} component={false} disabled={disabled && !readOnly}>
       <Alert
         type="info"
         showIcon
@@ -205,6 +217,7 @@ export default function CommonParameterConfigPanel({
         paramModelName={paramModelName}
         productClass={productClass}
         scope="common"
+        readOnly={readOnly}
       />
     </Form>
   );

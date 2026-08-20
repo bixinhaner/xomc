@@ -52,7 +52,7 @@ export function withProductEnumOptions(groups: typeof ENB_QUICK_SETTING_GROUPS, 
   });
 }
 
-function MmeListCard() {
+function MmeListCard({ readOnly = false }: { readOnly?: boolean }) {
   const t = useT();
   return (
     <Form.List name="mmeList">
@@ -60,23 +60,25 @@ function MmeListCard() {
         <>
           {fields.map(({ key, name, ...restField }) => (
             <Card key={key} size="small" style={{ marginBottom: 12 }} title={`${t('provision.mmeItem')} ${name + 1}`} extra={
-              <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
+              readOnly ? undefined : <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
             }>
               <Form.Item {...restField} name={[name, 'mmeIp']} label={t('provision.lteQuick.mmeIp')}>
-                <Input placeholder={t('provision.mmePlaceholder')} />
+                <Input placeholder={t('provision.mmePlaceholder')} readOnly={readOnly} />
               </Form.Item>
             </Card>
           ))}
-          <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-            {t('provision.addMme')}
-          </Button>
+          {!readOnly && (
+            <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+              {t('provision.addMme')}
+            </Button>
+          )}
         </>
       )}
     </Form.List>
   );
 }
 
-function ServingPlmnListCard() {
+function ServingPlmnListCard({ readOnly = false }: { readOnly?: boolean }) {
   const t = useT();
   const group = ENB_QUICK_SETTING_GROUPS.find(({ id }) => id === 'enb-plmn');
   return (
@@ -89,21 +91,23 @@ function ServingPlmnListCard() {
               size="small"
               style={{ marginBottom: 12 }}
               title={`${t('provision.lteQuick.plmn')} ${name + 1}`}
-              extra={<Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />}
+              extra={readOnly ? undefined : <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />}
             >
-              <GnbQuickSettingFieldGrid fields={group?.fields ?? []} namePrefix={[name]} />
+              <GnbQuickSettingFieldGrid fields={group?.fields ?? []} namePrefix={[name]} readOnly={readOnly} />
             </Card>
           ))}
-          <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-            {t('provision.addPlmnConfig')}
-          </Button>
+          {!readOnly && (
+            <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+              {t('provision.addPlmnConfig')}
+            </Button>
+          )}
         </>
       )}
     </Form.List>
   );
 }
 
-function IpsecListCard() {
+function IpsecListCard({ readOnly = false }: { readOnly?: boolean }) {
   const t = useT();
   const group = ENB_QUICK_SETTING_GROUPS.find(({ id }) => id === 'device-ipsec');
   return (
@@ -112,16 +116,18 @@ function IpsecListCard() {
         <>
           {fields.map(({ key, name }) => (
             <Card key={key} size="small" style={{ marginBottom: 12 }} title={`${t('provision.ipsecTunnel')} ${name + 1}`} extra={
-              <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
+              readOnly ? undefined : <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
             }>
-              <GnbQuickSettingFieldGrid fields={group?.fields ?? []} namePrefix={[name]} />
+              <GnbQuickSettingFieldGrid fields={group?.fields ?? []} namePrefix={[name]} readOnly={readOnly} />
               <Divider titlePlacement="left">{t('provision.lteQuick.tunnelTemplateExtras')}</Divider>
-              <GnbQuickSettingFieldGrid fields={ENB_IPSEC_TEMPLATE_EXTRA_FIELDS} namePrefix={[name]} />
+              <GnbQuickSettingFieldGrid fields={ENB_IPSEC_TEMPLATE_EXTRA_FIELDS} namePrefix={[name]} readOnly={readOnly} />
             </Card>
           ))}
-          <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-            {t('provision.addTunnel')}
-          </Button>
+          {!readOnly && (
+            <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+              {t('provision.addTunnel')}
+            </Button>
+          )}
         </>
       )}
     </Form.List>
@@ -132,10 +138,12 @@ export default function EnbQuickSettingsCards({
   paramModelName,
   excludedGroupIds = [],
   beforeIpsec,
+  readOnly = false,
 }: {
   paramModelName?: string;
   excludedGroupIds?: string[];
   beforeIpsec?: ReactNode;
+  readOnly?: boolean;
 }) {
   const t = useT();
   const form = Form.useFormInstance();
@@ -173,12 +181,12 @@ export default function EnbQuickSettingsCards({
           {group.id === 'device-ipsec-control' && beforeIpsec}
           <Card size="small" title={t(group.titleKey)} style={{ marginBottom: 16 }}>
             {group.id === 'enb-plmn'
-              ? <ServingPlmnListCard />
+              ? <ServingPlmnListCard readOnly={readOnly} />
               : group.id === 'enb-mme'
-              ? <MmeListCard />
+              ? <MmeListCard readOnly={readOnly} />
               : group.id === 'device-ipsec'
-                ? <IpsecListCard />
-                : <GnbQuickSettingFieldGrid fields={group.fields} />}
+                ? <IpsecListCard readOnly={readOnly} />
+                : <GnbQuickSettingFieldGrid fields={group.fields} readOnly={readOnly} />}
           </Card>
           {group.id === 'device-time' && visibleSyncFields.length > 0 && (
             <Card
@@ -186,7 +194,7 @@ export default function EnbQuickSettingsCards({
               title={t('provision.syncSourceConfig')}
               style={{ marginBottom: 16 }}
             >
-              <GnbQuickSettingFieldGrid fields={visibleSyncFields} />
+              <GnbQuickSettingFieldGrid fields={visibleSyncFields} readOnly={readOnly} />
             </Card>
           )}
         </Fragment>
@@ -197,8 +205,10 @@ export default function EnbQuickSettingsCards({
 
 export function EnbTemplateExtraFieldGrid({
   excludedFieldIds = [],
+  readOnly = false,
 }: {
   excludedFieldIds?: readonly string[];
+  readOnly?: boolean;
 }) {
-  return <GnbQuickSettingFieldGrid fields={ENB_TEMPLATE_EXTRA_FIELDS.filter((field) => !excludedFieldIds.includes(field.id))} />;
+  return <GnbQuickSettingFieldGrid fields={ENB_TEMPLATE_EXTRA_FIELDS.filter((field) => !excludedFieldIds.includes(field.id))} readOnly={readOnly} />;
 }

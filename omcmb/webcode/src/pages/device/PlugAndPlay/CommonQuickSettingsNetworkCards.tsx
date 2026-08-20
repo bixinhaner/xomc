@@ -19,23 +19,208 @@ function concretePath(template: string, instances: number[]): string {
   return template.replace(/\{[ij]\}/g, () => String(instances[index++] ?? 1));
 }
 
+function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function templatePrefixMatcher(template: string): RegExp {
+  const parts = template.split(/\{[ij]\}/g);
+  const expression = parts.map(escapeRegExp).join('(\\d+)');
+  return new RegExp(`^${expression}`);
+}
+
 function fieldPath(group: QuickSettingsGroup, param: QuickSettingsParam, instances: number[]): string {
   if (param.standardPath) return concretePath(param.standardPath, instances);
   return `${concretePath(group.objectPath ?? '', instances)}${param.leaf ?? param.name}`;
 }
 
-function ParamControl({ param }: { param: QuickSettingsParam }) {
-  const options = param.enumOptions?.map((option) => ({ value: option.value, label: option.label }));
-  return options?.length ? <Select options={options} /> : <Input />;
+function canonicalHeader(input: unknown): string {
+  return String(input ?? '').trim().replace(/^\*/, '').replace(/[\s_]+/g, '').toUpperCase();
 }
 
-function ParamGrid({ group, instances, includeInterfaceName = false }: {
+function leafFromPath(path: string): string {
+  return path.split('.').filter(Boolean).at(-1) ?? '';
+}
+
+function firstSheetValueByHeader(
+  sheets: Record<string, Array<Record<string, unknown>>> | undefined,
+  headers: readonly string[],
+): unknown {
+  const expected = new Set(headers.map(canonicalHeader).filter(Boolean));
+  if (expected.size === 0) return undefined;
+  for (const rows of Object.values(sheets ?? {})) {
+    for (const row of rows) {
+      for (const [header, value] of Object.entries(row)) {
+        if (!expected.has(canonicalHeader(header))) continue;
+        if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+      }
+    }
+  }
+  return undefined;
+}
+
+function sheetFieldNameByHeader(
+  sheets: Record<string, Array<Record<string, unknown>>> | undefined,
+  headers: readonly string[],
+): Array<string | number> | undefined {
+  const expected = new Set(headers.map(canonicalHeader).filter(Boolean));
+  if (expected.size === 0) return undefined;
+  for (const [sheetName, rows] of Object.entries(sheets ?? {})) {
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+      const header = Object.keys(rows[rowIndex]).find((candidate) => expected.has(canonicalHeader(candidate)));
+      if (header) return ['sheetParameters', sheetName, rowIndex, header];
+    }
+  }
+  return undefined;
+}
+
+function candidateHeaders(group: QuickSettingsGroup, param: QuickSettingsParam, path: string): string[] {
+  return [
+    param.name,
+    param.leaf ?? '',
+    param.titleZh,
+    param.titleEn,
+    leafFromPath(path),
+    group.titleZh && param.titleZh ? `${group.titleZh} ${param.titleZh}` : '',
+    group.titleEn && param.titleEn ? `${group.titleEn} ${param.titleEn}` : '',
+  ].filter(Boolean);
+}
+
+function inferredNetworkParameterValues(
+  groups: readonly QuickSettingsGroup[],
+  sheets: Record<string, Array<Record<string, unknown>>> | undefined,
+): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  for (const group of groups) {
+    if (group.multiInstance) continue;
+    for (const param of group.params) {
+      if (param.readonly) continue;
+      const path = fieldPath(group, param, []);
+      const imported = firstSheetValueByHeader(sheets, candidateHeaders(group, param, path));
+      if (imported !== undefined) values[path] = imported;
+    }
+  }
+  return values;
+}
+
+function inferredNetworkObjectInstances(
+  groups: readonly QuickSettingsGroup[],
+  parameterValues: Record<string, unknown> | undefined,
+  current: Record<string, unknown[]> | undefined,
+): Record<string, unknown[]> {
+  const next = { ...(current ?? {}) };
+  let changed = false;
+  const paths = Object.entries(parameterValues ?? {})
+    .filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '')
+    .map(([path]) => path);
+
+  for (const group of groups) {
+    if (!group.multiInstance || !group.objectPath) continue;
+    const placeholderCount = (group.objectPath.match(/\{[ij]\}/g) ?? []).length;
+    if (placeholderCount === 0) continue;
+    const matcher = templatePrefixMatcher(group.objectPath);
+    const countsByKey = new Map<string, number>();
+    for (const path of paths) {
+      const match = matcher.exec(path);
+      if (!match) continue;
+      const instances = match.slice(1).map((item) => Number(item)).filter((item) => Number.isFinite(item) && item > 0);
+      if (instances.length !== placeholderCount) continue;
+      const ancestors = instances.slice(0, -1);
+      const ownIndex = instances.at(-1) ?? 0;
+      const instanceKey = `${group.id}@${ancestors.join('.') || 'root'}`;
+      countsByKey.set(instanceKey, Math.max(countsByKey.get(instanceKey) ?? 0, ownIndex));
+    }
+    for (const [instanceKey, count] of countsByKey) {
+      const existing = Array.isArray(next[instanceKey]) ? next[instanceKey] : [];
+      if (existing.length >= count) continue;
+      next[instanceKey] = [
+        ...existing,
+        ...Array.from({ length: count - existing.length }, () => ({})),
+      ];
+      changed = true;
+    }
+  }
+
+  return changed ? next : (current ?? {});
+}
+
+function ParamControl({
+  param,
+  readOnly = false,
+  value,
+  onChange,
+  onRequestEdit,
+}: {
+  param: QuickSettingsParam;
+  readOnly?: boolean;
+  value?: unknown;
+  onChange?: (value: unknown) => void;
+  onRequestEdit?: () => void;
+}) {
+  const options = param.enumOptions?.map((option) => ({ value: option.value, label: option.label }));
+  if (readOnly && options?.length) {
+    return <Input value={options.find((option) => option.value === value)?.label ?? String(value ?? '')} readOnly onFocus={onRequestEdit} />;
+  }
+  return options?.length
+    ? <Select options={options} value={value as string | undefined} onChange={onChange} />
+    : <Input readOnly={readOnly} value={value == null ? '' : String(value)} onFocus={readOnly ? onRequestEdit : undefined} onChange={onChange} />;
+}
+
+function valueFromControlChange(value: unknown): unknown {
+  if (value && typeof value === 'object' && 'target' in value) {
+    const target = (value as { target?: { value?: unknown } }).target;
+    return target?.value;
+  }
+  return value;
+}
+
+function AbsoluteNetworkParameterItem({
+  path,
+  label,
+  param,
+  readOnly,
+  required,
+  onRequestEdit,
+}: {
+  path: string;
+  label: string;
+  param: QuickSettingsParam;
+  readOnly: boolean;
+  required?: boolean;
+  onRequestEdit?: () => void;
+}) {
+  const form = Form.useFormInstance();
+  const watchedValue = Form.useWatch(['networkParameterValues', path], { form, preserve: true });
+  const value = watchedValue ?? form.getFieldValue(['networkParameterValues', path]);
+  return (
+    <Form.Item label={label} required={required}>
+      <ParamControl
+        param={param}
+        readOnly={readOnly}
+        value={value}
+        onRequestEdit={onRequestEdit}
+        onChange={(nextValue) => {
+          onRequestEdit?.();
+          form.setFieldValue(['networkParameterValues', path], valueFromControlChange(nextValue));
+        }}
+      />
+    </Form.Item>
+  );
+}
+
+function ParamGrid({ group, instances, includeInterfaceName = false, readOnly = false, onRequestEdit }: {
   group: QuickSettingsGroup;
   instances: number[];
   includeInterfaceName?: boolean;
+  readOnly?: boolean;
+  onRequestEdit?: () => void;
 }) {
   const t = useT();
   const intl = useIntl();
+  const form = Form.useFormInstance();
+  const sheetParameters = Form.useWatch('sheetParameters', form) as
+    | Record<string, Array<Record<string, unknown>>>
+    | undefined;
   const writable = group.params.filter((param) => !param.readonly);
   const params = includeInterfaceName && !writable.some((param) => param.name === 'Name')
     ? [{ name: 'Name', titleZh: t('provision.network.interfaceName'), titleEn: t('provision.network.interfaceName'), leaf: 'Name' } as QuickSettingsParam, ...writable]
@@ -44,15 +229,32 @@ function ParamGrid({ group, instances, includeInterfaceName = false }: {
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
       {params.map((param) => {
         const path = fieldPath(group, param, instances);
+        const importedName = group.multiInstance
+          ? undefined
+          : sheetFieldNameByHeader(sheetParameters, candidateHeaders(group, param, path));
+        const label = intl.locale === 'en-US' ? (param.titleEn || param.name) : (param.titleZh || param.name);
+        if (group.multiInstance) {
+          return (
+            <AbsoluteNetworkParameterItem
+              key={path}
+              path={path}
+              label={label}
+              param={param}
+              readOnly={readOnly}
+              required={param.name === 'Name' && includeInterfaceName}
+              onRequestEdit={onRequestEdit}
+            />
+          );
+        }
         return (
           <Form.Item
             key={path}
-            name={['networkParameterValues', path]}
-            label={intl.locale === 'en-US' ? (param.titleEn || param.name) : (param.titleZh || param.name)}
+            name={importedName ?? ['networkParameterValues', path]}
+            label={label}
             preserve={false}
             rules={param.name === 'Name' && includeInterfaceName ? [{ required: true }] : undefined}
           >
-            <ParamControl param={param} />
+            <ParamControl param={param} readOnly={readOnly} onRequestEdit={onRequestEdit} />
           </Form.Item>
         );
       })}
@@ -60,10 +262,11 @@ function ParamGrid({ group, instances, includeInterfaceName = false }: {
   );
 }
 
-function FixedNetworkTable({ groups, kind, locale }: {
+function FixedNetworkTable({ groups, kind, locale, readOnly = false }: {
   groups: QuickSettingsGroup[];
   kind: 'wan' | 'static-route';
   locale: string;
+  readOnly?: boolean;
 }) {
   const t = useT();
   const [editing, setEditing] = useState<QuickSettingsGroup>();
@@ -104,7 +307,7 @@ function FixedNetworkTable({ groups, kind, locale }: {
             fixed: 'right' as const,
             width: 100,
             render: (_value: unknown, row: QuickSettingsGroup) => (
-              <Button type="link" icon={<EditOutlined />} onClick={() => setEditing(row)}>
+              <Button type="link" icon={<EditOutlined />} disabled={readOnly} onClick={() => setEditing(row)}>
                 {t('common.edit')}
               </Button>
             ),
@@ -119,7 +322,7 @@ function FixedNetworkTable({ groups, kind, locale }: {
         width={900}
         destroyOnHidden
       >
-        {editing && <ParamGrid group={editing} instances={[]} />}
+        {editing && <ParamGrid group={editing} instances={[]} readOnly={readOnly} />}
       </Modal>
     </Card>
   );
@@ -131,81 +334,110 @@ function ObjectGroup({
   ancestors,
   locale,
   onRequestEdit,
+  readOnly = false,
 }: {
   group: QuickSettingsGroup;
   groups: QuickSettingsGroup[];
   ancestors: number[];
   locale: string;
   onRequestEdit?: () => void;
+  readOnly?: boolean;
 }) {
   const t = useT();
+  const form = Form.useFormInstance();
   const instanceKey = `${group.id}@${ancestors.join('.') || 'root'}`;
   const maximum = group.maxInstances && group.maxInstances > 0 ? group.maxInstances : 1;
   const children = groups.filter((candidate) => candidate.parentSelector === group.id);
   const title = locale.startsWith('zh') ? group.titleZh : group.titleEn;
+  const instancesValue = Form.useWatch(['networkObjectInstances', instanceKey], { form, preserve: true }) as unknown[] | undefined;
+  const fields = Array.from({ length: Array.isArray(instancesValue) ? instancesValue.length : 0 }, (_, index) => ({
+    key: `${instanceKey}-${index}`,
+    name: index,
+  }));
+  const add = () => {
+    onRequestEdit?.();
+    form.setFieldValue(['networkObjectInstances', instanceKey], [...(instancesValue ?? []), {}]);
+  };
+  const remove = (index: number) => {
+    onRequestEdit?.();
+    form.setFieldValue(
+      ['networkObjectInstances', instanceKey],
+      (instancesValue ?? []).filter((_item, itemIndex) => itemIndex !== index),
+    );
+  };
   return (
-    <Form.List name={['networkObjectInstances', instanceKey]}>
-      {(fields, { add, remove }) => (
-        <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Text type="secondary">{fields.length}/{maximum}</Text>
-            <Button icon={<PlusOutlined />} disabled={fields.length >= maximum} onClick={() => add({})}>
-              {t('common.add')}
-            </Button>
-          </div>
-          {fields.map(({ key, name }) => {
-            const instances = [...ancestors, name + 1];
-            return (
-              <Card
-                key={key}
-                size="small"
-                title={`${title} ${name + 1}`}
-                extra={(
-                  <ConfigProvider componentDisabled={onRequestEdit ? false : undefined}>
-                    <Button
-                      type="text"
-                      danger
-                      icon={<DeleteOutlined />}
-                      onClick={() => {
-                        onRequestEdit?.();
-                        remove(name);
-                      }}
-                    />
-                  </ConfigProvider>
-                )}
-                style={{ marginBottom: 12 }}
-              >
-                <ParamGrid group={group} instances={instances} includeInterfaceName={group.id === 'gnb-network-interface'} />
-                {children.length > 0 && (
-                  <Collapse items={children.map((child) => ({
-                    key: child.id,
-                    label: locale.startsWith('zh') ? child.titleZh : child.titleEn,
-                    children: child.multiInstance
-                      ? <ObjectGroup group={child} groups={groups} ancestors={instances} locale={locale} onRequestEdit={onRequestEdit} />
-                      : <ParamGrid group={child} instances={instances} />,
-                  }))} />
-                )}
-              </Card>
-            );
-          })}
-        </>
-      )}
-    </Form.List>
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <Text type="secondary">{fields.length}/{maximum}</Text>
+        {!readOnly && (
+          <Button icon={<PlusOutlined />} disabled={fields.length >= maximum} onClick={add}>
+            {t('common.add')}
+          </Button>
+        )}
+      </div>
+      {fields.map(({ key, name }) => {
+        const instances = [...ancestors, name + 1];
+        return (
+          <Card
+            key={key}
+            size="small"
+            title={`${title} ${name + 1}`}
+            extra={readOnly ? undefined : (
+              <ConfigProvider componentDisabled={onRequestEdit ? false : undefined}>
+                <Button
+                  type="text"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => remove(name)}
+                />
+              </ConfigProvider>
+            )}
+            style={{ marginBottom: 12 }}
+          >
+            <ParamGrid
+              group={group}
+              instances={instances}
+              includeInterfaceName={group.id === 'gnb-network-interface'}
+              readOnly={readOnly}
+              onRequestEdit={onRequestEdit}
+            />
+            {children.length > 0 && (
+              <Collapse items={children.map((child) => ({
+                key: child.id,
+                label: locale.startsWith('zh') ? child.titleZh : child.titleEn,
+                children: child.multiInstance
+                  ? <ObjectGroup group={child} groups={groups} ancestors={instances} locale={locale} onRequestEdit={onRequestEdit} readOnly={readOnly} />
+                  : <ParamGrid group={child} instances={instances} readOnly={readOnly} onRequestEdit={onRequestEdit} />,
+              }))} />
+            )}
+          </Card>
+        );
+      })}
+    </>
   );
 }
 
 export default function CommonQuickSettingsNetworkCards({
   paramModelName,
   onRequestEdit,
+  readOnly = false,
 }: {
   paramModelName?: string;
   onRequestEdit?: () => void;
+  readOnly?: boolean;
 }) {
   const t = useT();
   const intl = useIntl();
   const [groups, setGroups] = useState<QuickSettingsGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
+  const form = Form.useFormInstance();
+  const sheetParameters = Form.useWatch('sheetParameters', form) as
+    | Record<string, Array<Record<string, unknown>>>
+    | undefined;
+  const networkParameterValues = Form.useWatch('networkParameterValues', { form, preserve: true }) as
+    | Record<string, unknown>
+    | undefined;
   const locale = intl.locale === 'en-US' ? 'en-US' : 'zh-CN';
   useEffect(() => {
     let active = true;
@@ -221,6 +453,35 @@ export default function CommonQuickSettingsNetworkCards({
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [paramModelName]);
+  useEffect(() => {
+    if (groups.length === 0) return;
+    const inferred = inferredNetworkParameterValues(groups, sheetParameters);
+    if (Object.keys(inferred).length === 0) return;
+    const current = form.getFieldValue('networkParameterValues') as Record<string, unknown> | undefined;
+    const next = { ...(current ?? {}) };
+    let changed = false;
+    for (const [path, value] of Object.entries(inferred)) {
+      if (next[path] !== undefined && next[path] !== null && String(next[path]).trim() !== '') continue;
+      next[path] = value;
+      changed = true;
+    }
+    if (changed) form.setFieldsValue({ networkParameterValues: next });
+  }, [form, groups, sheetParameters]);
+  useEffect(() => {
+    if (groups.length === 0) return;
+    const values = networkParameterValues
+      ?? (form.getFieldsValue(true) as { networkParameterValues?: Record<string, unknown> }).networkParameterValues;
+    if (!values) return;
+    const current = form.getFieldValue('networkObjectInstances') as Record<string, unknown[]> | undefined;
+    const base = current ?? {};
+    const next = inferredNetworkObjectInstances(groups, values, base);
+    if (next !== base) {
+      for (const [instanceKey, instances] of Object.entries(next)) {
+        if (base[instanceKey]?.length === instances.length) continue;
+        form.setFieldValue(['networkObjectInstances', instanceKey], instances);
+      }
+    }
+  }, [form, groups, networkParameterValues]);
   const roots = useMemo(() => groups.filter((group) => !group.parentSelector), [groups]);
   const fixedTableMode = FIXED_NETWORK_TABLE_MODELS.has((paramModelName ?? '').toUpperCase());
   const displayedRoots = fixedTableMode
@@ -239,12 +500,12 @@ export default function CommonQuickSettingsNetworkCards({
           style={{ marginBottom: 16 }}
         >
           {group.multiInstance
-            ? <ObjectGroup group={group} groups={groups} ancestors={[]} locale={locale} onRequestEdit={onRequestEdit} />
-            : <ParamGrid group={group} instances={[]} />}
+            ? <ObjectGroup group={group} groups={groups} ancestors={[]} locale={locale} onRequestEdit={onRequestEdit} readOnly={readOnly} />
+            : <ParamGrid group={group} instances={[]} readOnly={readOnly} onRequestEdit={onRequestEdit} />}
         </Card>
       ))}
-      {fixedTableMode && <FixedNetworkTable groups={groups} kind="wan" locale={locale} />}
-      {fixedTableMode && <FixedNetworkTable groups={groups} kind="static-route" locale={locale} />}
+      {fixedTableMode && <FixedNetworkTable groups={groups} kind="wan" locale={locale} readOnly={readOnly} />}
+      {fixedTableMode && <FixedNetworkTable groups={groups} kind="static-route" locale={locale} readOnly={readOnly} />}
     </>
   );
 }

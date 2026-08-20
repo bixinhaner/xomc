@@ -1560,7 +1560,8 @@ export default function AddPolicyPage() {
           deviceType={activeParamDeviceType}
           paramModelName={selectedProduct?.paramModelName}
           productClass={radioInstanceProductIdentity}
-          disabled={isView || !paramConfigToolbarEnabled}
+          disabled={!paramConfigToolbarEnabled}
+          readOnly={isView}
         />
       )}
       {paramConfigMode === 'specified' && (
@@ -1802,7 +1803,7 @@ export default function AddPolicyPage() {
         size={720}
         destroyOnHidden
       >
-        <Form form={configForm} layout="vertical" disabled={configDetailMode === 'view'} style={{ paddingBottom: 60 }}>
+        <Form form={configForm} layout="vertical" style={{ paddingBottom: 60 }}>
           <Alert
             type="info"
             showIcon
@@ -1815,6 +1816,7 @@ export default function AddPolicyPage() {
             productClass={radioInstanceProductIdentity}
             scope="device"
             onRequestEdit={() => setConfigDetailMode('edit')}
+            readOnly={configDetailMode === 'view'}
           />
         </Form>
 
@@ -1829,6 +1831,11 @@ export default function AddPolicyPage() {
             }}>
               {t('common.cancel')}
             </Button>
+            {configDetailMode === 'view' && moduleActions.edit && (
+              <Button type="primary" icon={<EditOutlined />} onClick={() => setConfigDetailMode('edit')}>
+                {t('common.edit')}
+              </Button>
+            )}
             {configDetailMode === 'edit' && (
               <Button type="primary" onClick={handleConfigFormSubmit}>
                 {t('common.save')}

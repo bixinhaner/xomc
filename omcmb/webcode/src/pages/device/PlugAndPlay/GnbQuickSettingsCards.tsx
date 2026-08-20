@@ -75,6 +75,7 @@ function QuickSettingControl({
   onChange,
   dlScs,
   ulScs,
+  readOnly,
 }: {
   field: GnbQuickSettingField;
   value: unknown;
@@ -82,12 +83,17 @@ function QuickSettingControl({
   onChange?: (value: unknown) => void;
   dlScs: unknown;
   ulScs: unknown;
+  readOnly?: boolean;
 }) {
   const t = useT();
+  const renderReadOnly = (displayValue: unknown) => (
+    <Input value={displayValue == null ? '' : String(displayValue)} readOnly />
+  );
   if (field.control === 'readonly') {
-    return <Input value={String(value ?? '')} disabled />;
+    return renderReadOnly(value);
   }
   if (field.control === 'switch') {
+    if (readOnly) return renderReadOnly(checked ? t('common.on') : t('common.off'));
     return <Switch checked={checked} onChange={onChange} checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />;
   }
   if (field.control === 'timezone') {
@@ -95,6 +101,9 @@ function QuickSettingControl({
       value: option.value,
       label: option.label,
     }));
+    if (readOnly) {
+      return renderReadOnly(appendCurrentOption(options, value).find((option) => option.value === value)?.label ?? value);
+    }
     return (
       <Select
         showSearch
@@ -115,6 +124,15 @@ function QuickSettingControl({
         options.push({ value: normalized, label: normalized });
       }
     });
+    if (readOnly) {
+      const labels = currentValues
+        .map((current) => {
+          const normalized = current == null ? '' : String(current);
+          return options.find((option) => option.value === normalized)?.label ?? normalized;
+        })
+        .filter(Boolean);
+      return renderReadOnly(labels.join(', '));
+    }
     return (
       <Select
         mode={field.control === 'multi-select' ? 'multiple' : undefined}
@@ -129,9 +147,12 @@ function QuickSettingControl({
   if (field.control === 'dl-bandwidth' || field.control === 'ul-bandwidth') {
     const scs = field.control === 'dl-bandwidth' ? dlScs : ulScs;
     const options = localizedOptions(NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS[String(scs ?? '')], t);
+    if (readOnly) {
+      return renderReadOnly(appendCurrentOption(options, value).find((option) => option.value === value)?.label ?? value);
+    }
     return <Select options={appendCurrentOption(options, value)} value={value as string | undefined} onChange={onChange} />;
   }
-  return <Input value={String(value ?? '')} onChange={onChange} />;
+  return <Input value={String(value ?? '')} onChange={onChange} readOnly={readOnly} />;
 }
 
 function QuickSettingFieldItem({
@@ -139,11 +160,13 @@ function QuickSettingFieldItem({
   name = field.name,
   dlScs,
   ulScs,
+  readOnly,
 }: {
   field: GnbQuickSettingField;
   name?: string | number | Array<string | number>;
   dlScs: unknown;
   ulScs: unknown;
+  readOnly?: boolean;
 }) {
   const control = field.control ?? 'input';
   return (
@@ -170,7 +193,7 @@ function QuickSettingFieldItem({
         return nextValue;
       }}
     >
-      <QuickSettingControl field={field} value={undefined} dlScs={dlScs} ulScs={ulScs} />
+      <QuickSettingControl field={field} value={undefined} dlScs={dlScs} ulScs={ulScs} readOnly={readOnly} />
     </Form.Item>
   );
 }
@@ -178,9 +201,11 @@ function QuickSettingFieldItem({
 export function GnbQuickSettingFieldGrid({
   fields,
   namePrefix,
+  readOnly,
 }: {
   fields: GnbQuickSettingField[];
   namePrefix?: Array<string | number>;
+  readOnly?: boolean;
 }) {
   const form = Form.useFormInstance();
   const dlScs = Form.useWatch(DL_SCS_PATH, form);
@@ -194,13 +219,14 @@ export function GnbQuickSettingFieldGrid({
           name={namePrefix ? [...namePrefix, field.name as string] : field.name}
           dlScs={dlScs}
           ulScs={ulScs}
+          readOnly={readOnly}
         />
       ))}
     </div>
   );
 }
 
-function IpsecListCard({ fields }: { fields: GnbQuickSettingField[] }) {
+function IpsecListCard({ fields, readOnly }: { fields: GnbQuickSettingField[]; readOnly?: boolean }) {
   const t = useT();
   return (
     <Form.List name="ipsecList">
@@ -211,15 +237,17 @@ function IpsecListCard({ fields }: { fields: GnbQuickSettingField[] }) {
               key={key}
               size="small"
               title={`${t('provision.ipsecTunnel')} ${name + 1}`}
-              extra={<Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />}
+              extra={readOnly ? undefined : <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />}
               style={{ marginBottom: 12 }}
             >
-              <GnbQuickSettingFieldGrid fields={fields} namePrefix={[name]} />
+              <GnbQuickSettingFieldGrid fields={fields} namePrefix={[name]} readOnly={readOnly} />
             </Card>
           ))}
-          <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-            {t('provision.addTunnel')}
-          </Button>
+          {!readOnly && (
+            <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+              {t('provision.addTunnel')}
+            </Button>
+          )}
         </>
       )}
     </Form.List>
@@ -230,10 +258,12 @@ export default function GnbQuickSettingsCards({
   excludedFieldIds = [],
   excludedGroupIds = [],
   beforeIpsec,
+  readOnly = false,
 }: {
   excludedFieldIds?: string[];
   excludedGroupIds?: string[];
   beforeIpsec?: ReactNode;
+  readOnly?: boolean;
 }) {
   const t = useT();
   const form = Form.useFormInstance();
@@ -253,12 +283,12 @@ export default function GnbQuickSettingsCards({
               style={{ marginBottom: 16 }}
             >
               {group.multiInstance
-                ? <IpsecListCard fields={group.fields} />
+                ? <IpsecListCard fields={group.fields} readOnly={readOnly} />
                 : <GnbQuickSettingFieldGrid fields={
                   (group.id === 'gnb-sync-source' && !isPtpDetailsVisible(syncMode)
                     ? group.fields.slice(0, 3)
                     : group.fields).filter((field) => !excludedFieldIds.includes(field.id))
-                } />}
+                } readOnly={readOnly} />}
             </Card>
           </Fragment>
         ))}
@@ -268,12 +298,15 @@ export default function GnbQuickSettingsCards({
 
 export function GnbTemplateExtraFieldGrid({
   excludedFieldIds = [],
+  readOnly = false,
 }: {
   excludedFieldIds?: readonly string[];
+  readOnly?: boolean;
 }) {
   return (
     <GnbQuickSettingFieldGrid
       fields={GNB_TEMPLATE_EXTRA_FIELDS.filter((field) => !excludedFieldIds.includes(field.id))}
+      readOnly={readOnly}
     />
   );
 }

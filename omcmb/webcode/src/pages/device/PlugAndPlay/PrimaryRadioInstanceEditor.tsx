@@ -34,6 +34,7 @@ function blankRow(headers: readonly string[], instanceHeader: string, instanceIn
 export interface PrimaryRadioInstanceEditorProps {
   deviceType: ParamConfigDeviceType;
   productClass?: string;
+  readOnly?: boolean;
 }
 
 interface RadioInstanceLabelProps {
@@ -70,7 +71,19 @@ function RadioInstanceLabel({
   );
 }
 
-export default function PrimaryRadioInstanceEditor({ deviceType, productClass }: PrimaryRadioInstanceEditorProps) {
+function displayHeaderLabel(header: string): string {
+  const clean = header.replace(/^\*/, '').replace(/\s+/g, ' ').trim();
+  return clean
+    .replace(/^DL ULTransmissionPeriodicity([12])$/, 'DL/UL Transmission Periodicity $1')
+    .replace(/^Nrof DownlinkSlots([12])$/, 'Nrof Downlink Slots $1')
+    .replace(/^Nrof DownlinkSymbols([12])$/, 'Nrof Downlink Symbols $1')
+    .replace(/^Nrof UplinkSlots([12])$/, 'Nrof Uplink Slots $1')
+    .replace(/^Nrof UplinkSymbols([12])$/, 'Nrof Uplink Symbols $1')
+    .replace(/^Prach RootSequenceIndex$/, 'Prach Root Sequence Index')
+    .replace(/^Prach RootSequenceValue$/, 'Prach Root Sequence Value');
+}
+
+export default function PrimaryRadioInstanceEditor({ deviceType, productClass, readOnly = false }: PrimaryRadioInstanceEditorProps) {
   const t = useT();
   const form = Form.useFormInstance();
   const [activeKeys, setActiveKeys] = useState<string[]>([]);
@@ -117,7 +130,7 @@ export default function PrimaryRadioInstanceEditor({ deviceType, productClass }:
                       itemName={itemName}
                     />
                   ),
-                  extra: (
+                  extra: readOnly ? undefined : (
                     <Space onClick={(event) => event.stopPropagation()}>
                       <Button type="link" onClick={toggleEditor}>{t('common.edit')}</Button>
                       <Button
@@ -145,10 +158,10 @@ export default function PrimaryRadioInstanceEditor({ deviceType, productClass }:
                     </Space>
                   ),
                   children: (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', columnGap: 16, rowGap: 6 }}>
                     <Form.Item
                       name={[field.name, instanceHeader]}
-                      label={instanceHeader}
+                      label={displayHeaderLabel(instanceHeader)}
                       rules={[
                         { required: true, message: t('provision.instanceIndexRequired') },
                         {
@@ -164,11 +177,11 @@ export default function PrimaryRadioInstanceEditor({ deviceType, productClass }:
                         },
                       ]}
                     >
-                      <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+                      <InputNumber min={1} precision={0} readOnly={readOnly} style={{ width: '100%' }} />
                     </Form.Item>
                     {headers.map((header) => (
-                      <Form.Item key={header} name={[field.name, header]} label={header.replace(/^\*/, '')}>
-                        <Input />
+                      <Form.Item key={header} name={[field.name, header]} label={displayHeaderLabel(header)}>
+                        <Input readOnly={readOnly} />
                       </Form.Item>
                     ))}
                   </div>
@@ -176,17 +189,19 @@ export default function PrimaryRadioInstanceEditor({ deviceType, productClass }:
                 };
               })}
             />
-            <Button
-              type="dashed"
-              block
-              icon={<PlusOutlined />}
-              onClick={() => {
-                const rows = (form.getFieldValue(['sheetParameters', sheetName]) ?? []) as Array<Record<string, unknown>>;
-                add(blankRow(templateHeaders, instanceHeader, nextInstanceIndex(rows, instanceHeader)));
-              }}
-            >
-              {t('provision.addRadioInstance', { item: itemName })}
-            </Button>
+            {!readOnly && (
+              <Button
+                type="dashed"
+                block
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  const rows = (form.getFieldValue(['sheetParameters', sheetName]) ?? []) as Array<Record<string, unknown>>;
+                  add(blankRow(templateHeaders, instanceHeader, nextInstanceIndex(rows, instanceHeader)));
+                }}
+              >
+                {t('provision.addRadioInstance', { item: itemName })}
+              </Button>
+            )}
           </>
         )}
       </Form.List>
