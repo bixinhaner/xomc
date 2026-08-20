@@ -20819,6 +20819,7 @@ CREATE TABLE public.pm_aggregation_tasks (
     visibility varchar(16) NOT NULL DEFAULT 'private',
     creator varchar(100) NOT NULL,
     current_version_id uuid,
+    source_updated_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     deleted_at timestamptz,

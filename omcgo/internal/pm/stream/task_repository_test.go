@@ -38,20 +38,36 @@ func TestShouldAdjustEffectiveFromBackdatesInitialUnchangedVersion(t *testing.T)
 	require.False(t, shouldAdjustEffectiveFrom(req, 1, target.Add(-slotDuration), target))
 }
 
-func TestBuildPurgeObsoleteBuiltinDeviceTasksSQLTargetsOnlyLegacyIDs(t *testing.T) {
-	query, args, err := buildPurgeObsoleteBuiltinDeviceTasksSQL()
+func TestBuildPurgeObsoleteBuiltinDeviceTasksSQLRetiresOnlyLegacyIDs(t *testing.T) {
+	query, args, err := buildRetireTasksSQL(obsoleteBuiltinDeviceTaskIDs)
 
 	require.NoError(t, err)
-	require.Equal(
-		t,
-		"DELETE FROM pm_aggregation_tasks WHERE id IN ($1,$2,$3)",
-		query,
-	)
+	require.Contains(t, query, "UPDATE pm_aggregation_tasks")
+	require.Contains(t, query, "enabled = $1")
+	require.Contains(t, query, "deleted_at")
+	require.NotContains(t, query, "DELETE FROM")
 	require.Equal(t, []interface{}{
+		false,
 		uuid.MustParse("0184dddd-0005-4000-8000-000000000001"),
 		uuid.MustParse("0184dddd-0005-4000-8000-000000000002"),
 		uuid.MustParse("0184dddd-0005-4000-8000-000000000003"),
 	}, args)
+}
+
+func TestBuildUpsertTaskReactivationForcesNewCurrentVersion(t *testing.T) {
+	taskID := uuid.MustParse("10000000-0000-4000-8000-000000000001")
+	req := SaveTaskRequest{
+		Name: "ISSUE354", Enabled: true, Visibility: "private", Creator: "test",
+		SourceUpdatedAt: time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC),
+	}
+
+	query, _, err := buildUpsertTaskSQL(taskID, req, nil)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "ON CONFLICT (id) DO UPDATE SET")
+	require.Contains(t, query, "deleted_at = NULL")
+	require.Contains(t, query, "current_version_id = NULL")
+	require.Contains(t, query, "pm_aggregation_tasks.deleted_at IS NOT NULL")
 }
 
 func TestBuildUpdateTaskMetadataSQLSkipsIdenticalValues(t *testing.T) {
@@ -65,13 +81,14 @@ func TestBuildUpdateTaskMetadataSQLSkipsIdenticalValues(t *testing.T) {
 	query, args, err := buildUpdateTaskMetadataSQL(taskID, req, &plannedEnd)
 
 	require.NoError(t, err)
-	require.Contains(t, query, "name IS DISTINCT FROM $6")
-	require.Contains(t, query, "enabled IS DISTINCT FROM $7")
-	require.Contains(t, query, "visibility IS DISTINCT FROM $8")
-	require.Contains(t, query, "planned_end_at IS DISTINCT FROM $9")
+	require.Contains(t, query, "name IS DISTINCT FROM $7")
+	require.Contains(t, query, "enabled IS DISTINCT FROM $8")
+	require.Contains(t, query, "visibility IS DISTINCT FROM $9")
+	require.Contains(t, query, "planned_end_at IS DISTINCT FROM $10")
+	require.Contains(t, query, "source_updated_at IS DISTINCT FROM $11")
 	require.Equal(t, []interface{}{
-		req.Name, req.Enabled, req.Visibility, &plannedEnd, taskID.String(),
-		req.Name, req.Enabled, req.Visibility, &plannedEnd,
+		req.Name, req.Enabled, req.Visibility, &plannedEnd, nil, taskID.String(),
+		req.Name, req.Enabled, req.Visibility, &plannedEnd, nil,
 	}, args)
 }
 
@@ -118,6 +135,31 @@ func TestNormalizeTaskVersionIDsRemovesNilAndDuplicates(t *testing.T) {
 	got := normalizeTaskVersionIDs([]uuid.UUID{second, uuid.Nil, first, second})
 
 	require.Equal(t, []uuid.UUID{first, second}, got)
+}
+
+func TestBuildMissingSourceTaskCandidatesIsBoundedAndLocked(t *testing.T) {
+	query, args, err := buildMissingSourceTaskCandidatesSQL(
+		"adhoc_aggregation", "continuous", 200,
+	)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "NOT EXISTS")
+	require.Contains(t, query, "source.id = pm_aggregation_tasks.id")
+	require.Contains(t, query, "deleted_at IS NULL")
+	require.Contains(t, query, "LIMIT 200")
+	require.Contains(t, query, "FOR UPDATE SKIP LOCKED")
+	require.Equal(t, []interface{}{"adhoc_aggregation", "continuous"}, args)
+}
+
+func TestCloseRetiredTaskVersionsNeverEndsBeforeEffectiveFrom(t *testing.T) {
+	taskID := uuid.MustParse("10000000-0000-4000-8000-000000000001")
+	effectiveTo := time.Date(2026, 8, 20, 9, 45, 0, 0, time.UTC)
+
+	query, args, err := buildCloseRetiredTaskVersionsSQL([]uuid.UUID{taskID}, effectiveTo)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "effective_to = GREATEST(effective_from, $1)")
+	require.Equal(t, []interface{}{effectiveTo, taskID}, args)
 }
 
 func TestTaskMemberBatchesStayBelowPostgresParameterLimit(t *testing.T) {

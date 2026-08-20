@@ -173,6 +173,7 @@ func (r *BuiltinReconciler) saveStreamingDefinition(
 		Technology: task.Technology, Dimension: pmstream.Dimension(task.Dimension),
 		Granularities: streamingRollupGranularities(), ObjectLDNs: task.ObjectLDNs,
 		Metrics: rules, Counters: counters, Members: members, EffectiveFrom: effectiveFrom,
+		SourceUpdatedAt: task.UpdatedAt,
 	})
 	if saveErr != nil {
 		return false, false, saveErr

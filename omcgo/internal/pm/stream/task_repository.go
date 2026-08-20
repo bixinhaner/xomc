@@ -43,25 +43,15 @@ func NewPgProgressTaskLoader(pool *pgxpool.Pool) *PgProgressTaskLoader {
 	}
 }
 
-func buildPurgeObsoleteBuiltinDeviceTasksSQL() (string, []interface{}, error) {
-	return storage.Psql.Delete("pm_aggregation_tasks").
-		Where(sq.Eq{"id": obsoleteBuiltinDeviceTaskIDs}).
-		ToSql()
-}
-
-// PurgeObsoleteBuiltinDeviceTasks removes the three task rows used by the
-// retired hidden-device implementation. Device rollups are now synthesized
-// from the built-in network catalog and must not coexist with these records.
+// PurgeObsoleteBuiltinDeviceTasks retires the three task rows used by the
+// retired hidden-device implementation while preserving immutable history.
 func (r *PgTaskRepository) PurgeObsoleteBuiltinDeviceTasks(ctx context.Context) (int, error) {
-	query, args, err := buildPurgeObsoleteBuiltinDeviceTasksSQL()
+	effectiveTo := time.Now().UTC().Truncate(slotDuration).Add(slotDuration)
+	count, err := r.retireTaskIDs(ctx, obsoleteBuiltinDeviceTaskIDs, effectiveTo)
 	if err != nil {
-		return 0, fmt.Errorf("build purge obsolete PM device tasks SQL: %w", err)
+		return 0, fmt.Errorf("retire obsolete PM device tasks: %w", err)
 	}
-	tag, err := r.pool.Exec(ctx, query, args...)
-	if err != nil {
-		return 0, fmt.Errorf("purge obsolete PM device tasks: %w", err)
-	}
-	return int(tag.RowsAffected()), nil
+	return count, nil
 }
 
 func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*TaskVersionSnapshot, error) {
@@ -86,11 +76,7 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 	if taskID == uuid.Nil {
 		taskID = uuid.New()
 	}
-	insertSQL, insertArgs, buildErr := storage.Psql.Insert("pm_aggregation_tasks").
-		Columns("id", "name", "enabled", "visibility", "creator", "planned_end_at").
-		Values(taskID, req.Name, req.Enabled, req.Visibility, req.Creator, plannedEndAt).
-		Suffix("ON CONFLICT (id) DO NOTHING").
-		ToSql()
+	insertSQL, insertArgs, buildErr := buildUpsertTaskSQL(taskID, req, plannedEndAt)
 	if buildErr != nil {
 		return nil, fmt.Errorf("build create PM aggregation task SQL: %w", buildErr)
 	}
@@ -246,21 +232,45 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 	return snapshot, nil
 }
 
+func buildUpsertTaskSQL(
+	taskID uuid.UUID,
+	req SaveTaskRequest,
+	plannedEndAt any,
+) (string, []interface{}, error) {
+	return storage.Psql.Insert("pm_aggregation_tasks").
+		Columns(
+			"id", "name", "enabled", "visibility", "creator", "planned_end_at", "source_updated_at",
+		).
+		Values(
+			taskID, req.Name, req.Enabled, req.Visibility, req.Creator,
+			plannedEndAt, nullablePtrTime(&req.SourceUpdatedAt),
+		).
+		Suffix(`ON CONFLICT (id) DO UPDATE SET
+deleted_at = NULL,
+current_version_id = NULL
+WHERE pm_aggregation_tasks.deleted_at IS NOT NULL`).
+		ToSql()
+}
+
 func buildUpdateTaskMetadataSQL(
 	taskID uuid.UUID,
 	req SaveTaskRequest,
 	plannedEndAt any,
 ) (string, []interface{}, error) {
+	sourceUpdatedAt := nullablePtrTime(&req.SourceUpdatedAt)
 	return storage.Psql.Update("pm_aggregation_tasks").
 		Set("name", req.Name).
 		Set("enabled", req.Enabled).
 		Set("visibility", req.Visibility).
 		Set("planned_end_at", plannedEndAt).
+		Set("source_updated_at", sourceUpdatedAt).
+		Set("updated_at", sq.Expr("CURRENT_TIMESTAMP")).
 		Where(sq.Eq{"id": taskID}).
 		Where(
 			"(name IS DISTINCT FROM ? OR enabled IS DISTINCT FROM ? OR "+
-				"visibility IS DISTINCT FROM ? OR planned_end_at IS DISTINCT FROM ?)",
-			req.Name, req.Enabled, req.Visibility, plannedEndAt,
+				"visibility IS DISTINCT FROM ? OR planned_end_at IS DISTINCT FROM ? OR "+
+				"source_updated_at IS DISTINCT FROM ?)",
+			req.Name, req.Enabled, req.Visibility, plannedEndAt, sourceUpdatedAt,
 		).
 		ToSql()
 }
@@ -314,48 +324,163 @@ func shouldAdjustEffectiveFrom(
 
 func (r *PgTaskRepository) Delete(ctx context.Context, taskID uuid.UUID) error {
 	effectiveTo := time.Now().UTC().Truncate(slotDuration).Add(slotDuration)
+	count, err := r.retireTaskIDs(ctx, []uuid.UUID{taskID}, effectiveTo)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+func (r *PgTaskRepository) RetireMissingSourceTasks(
+	ctx context.Context,
+	taskSubtype string,
+	mode string,
+	limit uint64,
+) (int, error) {
+	if limit == 0 {
+		limit = 200
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin delete PM aggregation task: %w", err)
+		return 0, fmt.Errorf("begin retire missing-source PM aggregation tasks: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	query, args, err := storage.Psql.Update("pm_aggregation_tasks").
-		Set("enabled", false).
-		Set("deleted_at", time.Now().UTC()).
-		Where(sq.Eq{"id": taskID}).
-		ToSql()
+	query, args, err := buildMissingSourceTaskCandidatesSQL(taskSubtype, mode, limit)
 	if err != nil {
-		return fmt.Errorf("build delete PM aggregation task SQL: %w", err)
+		return 0, fmt.Errorf("build missing-source PM aggregation task candidates SQL: %w", err)
+	}
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("query missing-source PM aggregation task candidates: %w", err)
+	}
+	missing := make([]uuid.UUID, 0, limit)
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scan missing-source PM aggregation task: %w", err)
+		}
+		missing = append(missing, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("iterate missing-source PM aggregation tasks: %w", err)
+	}
+	rows.Close()
+	effectiveTo := time.Now().UTC().Truncate(slotDuration).Add(slotDuration)
+	count, err := retireTaskIDsTx(ctx, tx, missing, effectiveTo)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit retire missing-source PM aggregation tasks: %w", err)
+	}
+	for _, id := range missing {
+		r.publishTaskVersionChanged(ctx, id, uuid.Nil, effectiveTo)
+	}
+	return count, nil
+}
+
+func buildMissingSourceTaskCandidatesSQL(
+	taskSubtype string,
+	mode string,
+	limit uint64,
+) (string, []interface{}, error) {
+	candidates := storage.Psql.Select("id").
+		From("pm_aggregation_tasks").
+		Where("deleted_at IS NULL").
+		Where(`NOT EXISTS (
+SELECT 1 FROM pm_tasks source
+WHERE source.id = pm_aggregation_tasks.id
+  AND source.task_subtype = ?
+  AND source.mode = ?
+)`, taskSubtype, mode).
+		OrderBy("id").
+		Limit(limit).
+		Suffix("FOR UPDATE SKIP LOCKED")
+	return candidates.ToSql()
+}
+
+func (r *PgTaskRepository) retireTaskIDs(
+	ctx context.Context,
+	taskIDs []uuid.UUID,
+	effectiveTo time.Time,
+) (int, error) {
+	ids := normalizeTaskIDs(taskIDs)
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin retire PM aggregation tasks: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	count, err := retireTaskIDsTx(ctx, tx, ids, effectiveTo)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit retire PM aggregation tasks: %w", err)
+	}
+	if count > 0 {
+		for _, id := range ids {
+			r.publishTaskVersionChanged(ctx, id, uuid.Nil, effectiveTo)
+		}
+	}
+	return count, nil
+}
+
+func retireTaskIDsTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	taskIDs []uuid.UUID,
+	effectiveTo time.Time,
+) (int, error) {
+	if len(taskIDs) == 0 {
+		return 0, nil
+	}
+	query, args, err := buildRetireTasksSQL(taskIDs)
+	if err != nil {
+		return 0, fmt.Errorf("build retire PM aggregation tasks SQL: %w", err)
 	}
 	tag, err := tx.Exec(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("delete PM aggregation task: %w", err)
+		return 0, fmt.Errorf("retire PM aggregation tasks: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return pgx.ErrNoRows
+		return 0, nil
 	}
-	closeSQL, closeArgs, err := storage.Psql.Update("pm_aggregation_task_versions").
-		Set("effective_to", effectiveTo).
-		Where(sq.Eq{"task_id": taskID, "effective_to": nil}).
-		ToSql()
+	closeSQL, closeArgs, err := buildCloseRetiredTaskVersionsSQL(taskIDs, effectiveTo)
 	if err != nil {
-		return fmt.Errorf("build close deleted PM aggregation task version SQL: %w", err)
+		return 0, fmt.Errorf("build close retired PM aggregation task versions SQL: %w", err)
 	}
 	if _, err := tx.Exec(ctx, closeSQL, closeArgs...); err != nil {
-		return fmt.Errorf("close deleted PM aggregation task version: %w", err)
+		return 0, fmt.Errorf("close retired PM aggregation task versions: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit delete PM aggregation task: %w", err)
-	}
-	if r.bus != nil {
-		payload := event.PMAggregationTaskVersionChangedPayload{
-			TaskID: taskID, EffectiveFrom: effectiveTo,
-		}
-		if evt, eventErr := event.NewEvent(event.SubjectPMAggregationTaskVersionChanged, payload); eventErr == nil {
-			_ = r.bus.Publish(ctx, event.SubjectPMAggregationTaskVersionChanged, evt)
-		}
-	}
-	return nil
+	return int(tag.RowsAffected()), nil
+}
+
+func buildRetireTasksSQL(taskIDs []uuid.UUID) (string, []interface{}, error) {
+	return storage.Psql.Update("pm_aggregation_tasks").
+		Set("enabled", false).
+		Set("deleted_at", sq.Expr("CURRENT_TIMESTAMP")).
+		Set("updated_at", sq.Expr("CURRENT_TIMESTAMP")).
+		Where(sq.Eq{"id": taskIDs}).
+		Where("deleted_at IS NULL").
+		ToSql()
+}
+
+func buildCloseRetiredTaskVersionsSQL(
+	taskIDs []uuid.UUID,
+	effectiveTo time.Time,
+) (string, []interface{}, error) {
+	return storage.Psql.Update("pm_aggregation_task_versions").
+		Set("effective_to", sq.Expr("GREATEST(effective_from, ?)", effectiveTo)).
+		Where(sq.Eq{"task_id": taskIDs, "effective_to": nil}).
+		ToSql()
 }
 
 func insertMetricRules(ctx context.Context, tx pgx.Tx, versionID uuid.UUID, rules []MetricRule) error {
@@ -660,6 +785,10 @@ func normalizeTaskVersionIDs(versionIDs []uuid.UUID) []uuid.UUID {
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
 	return ids
+}
+
+func normalizeTaskIDs(taskIDs []uuid.UUID) []uuid.UUID {
+	return normalizeTaskVersionIDs(taskIDs)
 }
 
 func (r *PgTaskRepository) loadDetails(

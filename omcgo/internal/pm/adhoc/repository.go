@@ -121,6 +121,7 @@ type streamingTaskRepository interface {
 	Save(context.Context, pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error)
 	Delete(context.Context, uuid.UUID) error
 	PurgeObsoleteBuiltinDeviceTasks(context.Context) (int, error)
+	RetireMissingSourceTasks(context.Context, string, string, uint64) (int, error)
 }
 
 // NewPgRepository 创建 PgRepository。
@@ -786,6 +787,21 @@ RETURNING status`
 //
 // 删 0 行时回查行状态区分原因：不存在→ErrNotFound、内置→ErrBuiltinNotDeletable、非终态→ErrNotTerminal。
 func (r *PgRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	check, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if check.IsBuiltin {
+		return ErrBuiltinNotDeletable
+	}
+	if check.Status != StatusSucceeded && check.Status != StatusFailed && check.Status != StatusCanceled {
+		return ErrNotTerminal
+	}
+	if r.streamRepo != nil {
+		if err := r.streamRepo.Delete(ctx, id); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+	}
 	const q = `
 DELETE FROM pm_tasks
 WHERE id = $1
@@ -797,20 +813,7 @@ WHERE id = $1
 		return fmt.Errorf("adhoc.Delete: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		// 没删到：回查区分原因（不存在 / 内置 / 非终态）。
-		check, getErr := r.Get(ctx, id)
-		if getErr != nil {
-			return getErr // ErrNotFound 或底层错误
-		}
-		if check.IsBuiltin {
-			return ErrBuiltinNotDeletable
-		}
-		return ErrNotTerminal
-	}
-	if r.streamRepo != nil {
-		if err := r.streamRepo.Delete(ctx, id); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
+		return ErrNotFound
 	}
 	return nil
 }
