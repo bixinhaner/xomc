@@ -20,7 +20,6 @@ import {
   Descriptions,
   Alert,
   Tag,
-  Tabs,
   Dropdown,
   type UploadFile,
   type MenuProps,
@@ -65,6 +64,7 @@ import {
   toActualSoftwareVersionOptions,
   toFirmwareVersionOptions,
 } from './softwareVersionOptions';
+import { normalizeOriginalVersionsForSubmit } from './softwareUpgradeOriginalVersion';
 import {
   createParamConfigWorkbook,
   createParamConfigTemplateWorkbook,
@@ -103,6 +103,7 @@ const { Text, Title } = Typography;
 // Types
 type ExecuteType = '0' | '1';
 type EnableType = '0' | '1';
+type ParamConfigMode = 'common' | 'specified';
 
 // T-0136: 保留为 export 占位，避免 TS6196 同时不破坏未来可能复用
 export interface _PolicyForm {
@@ -122,6 +123,7 @@ export interface _PolicyForm {
   // Self Config
   selfConfigEnable: EnableType;
   switchEnable: EnableType;
+  paramConfigMode: ParamConfigMode;
 }
 
 // Device type for param config
@@ -716,6 +718,7 @@ export default function AddPolicyPage() {
         .filter(Boolean);
     form.setFieldsValue({
       ...config,
+      paramConfigMode: config.paramConfigMode === 'specified' ? 'specified' : 'common',
       originalVersion: originalVersions,
       policyName: persistedPolicy.name,
       productTechnology: normalizeProductTechnology(String(config.productTechnology ?? ''))
@@ -852,6 +855,7 @@ export default function AddPolicyPage() {
 
   // Parameter configuration summary, validation and latest execution context.
   const selfConfigEnabled = Form.useWatch('selfConfigEnable', form);
+  const paramConfigMode = (Form.useWatch('paramConfigMode', form) as ParamConfigMode | undefined) ?? 'common';
   const paramConfigToolbarEnabled = isParamConfigToolbarEnabled(selfConfigEnabled);
   const configInsights = useMemo(
     () => buildParamConfigInsights(paramConfigList),
@@ -1274,17 +1278,32 @@ export default function AddPolicyPage() {
       // also includes the preserved values of the other selected modules.
       const values = form.getFieldsValue(true);
       let commonParamConfig = persistedPolicy?.config?.commonParamConfig ?? {};
-      if (values.selfConfigEnable && functionModule === '2') {
-        await commonConfigForm.validateFields();
-        commonParamConfig = sanitizeCommonParamConfig({
-          ...commonConfigForm.getFieldsValue(true),
-          deviceType: activeParamDeviceType,
-        });
+      let submittedParamConfigList = paramConfigList;
+      const submittedParamConfigMode: ParamConfigMode = values.paramConfigMode === 'specified' ? 'specified' : 'common';
+      if (functionModule === '2') {
+        if (values.selfConfigEnable && submittedParamConfigMode === 'common') {
+          await commonConfigForm.validateFields();
+          commonParamConfig = sanitizeCommonParamConfig({
+            ...commonConfigForm.getFieldsValue(true),
+            deviceType: activeParamDeviceType,
+          });
+          submittedParamConfigList = [];
+        } else if (values.selfConfigEnable && submittedParamConfigMode === 'specified') {
+          commonParamConfig = {};
+          submittedParamConfigList = paramConfigList;
+        } else {
+          commonParamConfig = {};
+          submittedParamConfigList = [];
+        }
       }
       const selectedProductNames = (values.productClasses ?? []) as string[];
       const selectedProductClass = resolveProductClassForName(
         selectedProductNames[0] ?? '',
         productCatalog?.items,
+      );
+      const submittedOriginalVersion = normalizeOriginalVersionsForSubmit(
+        values.specifyVersionType,
+        values.originalVersion,
       );
       await savePolicyMutation.mutateAsync({
         name: values.policyName,
@@ -1301,12 +1320,14 @@ export default function AddPolicyPage() {
         selfConfigEnabled: Boolean(values.selfConfigEnable),
         config: {
           ...values,
+          originalVersion: submittedOriginalVersion,
           productName: selectedProductNames[0] ?? '',
           productNames: selectedProductNames,
           productClass: selectedProductClass,
           productClasses: selectedProductNames,
+          paramConfigMode: submittedParamConfigMode,
           commonParamConfig,
-          paramConfigList,
+          paramConfigList: submittedParamConfigList,
         },
       });
       message.success(t('common.success'));
@@ -1397,9 +1418,10 @@ export default function AddPolicyPage() {
                 }]}
               >
                 <Select
-                  mode="multiple"
+                  mode="tags"
                   allowClear
                   showSearch
+                  tokenSeparators={[',', '，', ';', '；', '\n']}
                   optionFilterProp="label"
                   placeholder={t('provision.selectFromList')}
                   options={actualVersionOptions}
@@ -1513,111 +1535,115 @@ export default function AddPolicyPage() {
         </Form.Item>
       </Space>
     } style={{ marginBottom: 16 }}>
-      <Tabs
-        defaultActiveKey="common"
-        items={[
-          {
-            key: 'common',
-            label: t('provision.commonParameters'),
-            children: (
-              <div style={{ paddingTop: 8 }}>
-                <CommonParameterConfigPanel
-                  form={commonConfigForm}
-                  deviceType={activeParamDeviceType}
-                  paramModelName={selectedProduct?.paramModelName}
-                  productClass={radioInstanceProductIdentity}
-                  disabled={isView || !paramConfigToolbarEnabled}
-                />
-              </div>
-            ),
-          },
-          {
-            key: 'overrides',
-            label: t('provision.deviceParameterOverrides'),
-            children: (
-              <div style={{ padding: '8px 0' }}>
-                <Alert
-                  type="info"
-                  showIcon
-                  title={t('provision.deviceParameterOverridesHint')}
-                  style={{ marginBottom: 16 }}
-                />
-                <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                  <Space wrap>
-                    <Input
-                      placeholder={t('provision.searchBySerialNumber')}
-                      prefix={<SearchOutlined />}
-                      value={configSearchText}
-                      onChange={(e) => setConfigSearchText(e.target.value)}
-                      style={{ width: 220 }}
-                      allowClear
-                    />
-                    <Select
-                      allowClear
-                      placeholder={t('provision.configSource')}
-                      value={configSourceFilter}
-                      onChange={setConfigSourceFilter}
-                      style={{ width: 130 }}
-                      options={(['import', 'batch_plan', 'manual'] as const).map((value) => ({
-                        value,
-                        label: t(`provision.configSource.${value}`),
-                      }))}
-                    />
-                    <Select
-                      allowClear
-                      placeholder={t('provision.validationStatus')}
-                      value={configValidationFilter}
-                      onChange={setConfigValidationFilter}
-                      style={{ width: 130 }}
-                      options={(['valid', 'conflict', 'incomplete'] as const).map((value) => ({
-                        value,
-                        label: t(`provision.validationStatus.${value}`),
-                      }))}
-                    />
-                  </Space>
-                  <Space>
-                    <Button
-                      icon={<DownloadOutlined />}
-                      disabled={!paramConfigToolbarEnabled}
-                      onClick={handleDownloadParamConfigTemplate}
-                    >
-                      {t('provision.downloadTemplate')}
-                    </Button>
-                    {moduleActions.import && (
-                      <Button
-                        icon={<UploadOutlined />}
-                        disabled={!paramConfigToolbarEnabled}
-                        onClick={handleOpenParamConfigImport}
-                      >
-                        {t('common.import')}
-                      </Button>
-                    )}
-                    <Button
-                      icon={<DownloadOutlined />}
-                      disabled={!paramConfigToolbarEnabled}
-                      onClick={handleExportConfig}
-                    >
-                      {t('common.export')}
-                    </Button>
-                  </Space>
-                </div>
-                <Table
-                  columns={paramConfigColumns}
-                  dataSource={filteredParamConfigList}
-                  rowKey="id"
-                  pagination={{
-                    showSizeChanger: true,
-                    showQuickJumper: true,
-                    showTotal: (total) => t('table.totalCount', { count: total }),
-                  }}
-                  size="small"
-                  scroll={{ x: 1200 }}
-                />
-              </div>
-            ),
-          },
-        ]}
-      />
+      <Form.Item name="paramConfigMode" noStyle>
+        <Input type="hidden" />
+      </Form.Item>
+      <Space style={{ marginBottom: 16 }}>
+        <Checkbox
+          checked={paramConfigMode === 'common'}
+          disabled={isView}
+          onChange={() => form.setFieldsValue({ paramConfigMode: 'common' })}
+        >
+          {t('provision.commonParameters')}
+        </Checkbox>
+        <Checkbox
+          checked={paramConfigMode === 'specified'}
+          disabled={isView}
+          onChange={() => form.setFieldsValue({ paramConfigMode: 'specified' })}
+        >
+          {t('provision.deviceParameterOverrides')}
+        </Checkbox>
+      </Space>
+      {paramConfigMode === 'common' && (
+        <CommonParameterConfigPanel
+          form={commonConfigForm}
+          deviceType={activeParamDeviceType}
+          paramModelName={selectedProduct?.paramModelName}
+          productClass={radioInstanceProductIdentity}
+          disabled={isView || !paramConfigToolbarEnabled}
+        />
+      )}
+      {paramConfigMode === 'specified' && (
+        <div style={{ paddingTop: 8 }}>
+          <Alert
+            type="info"
+            showIcon
+            title={t('provision.deviceParameterOverridesHint')}
+            style={{ marginBottom: 16 }}
+          />
+          <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <Space wrap>
+              <Input
+                placeholder={t('provision.searchBySerialNumber')}
+                prefix={<SearchOutlined />}
+                value={configSearchText}
+                onChange={(e) => setConfigSearchText(e.target.value)}
+                style={{ width: 220 }}
+                allowClear
+              />
+              <Select
+                allowClear
+                placeholder={t('provision.configSource')}
+                value={configSourceFilter}
+                onChange={setConfigSourceFilter}
+                style={{ width: 130 }}
+                options={(['import', 'batch_plan', 'manual'] as const).map((value) => ({
+                  value,
+                  label: t(`provision.configSource.${value}`),
+                }))}
+              />
+              <Select
+                allowClear
+                placeholder={t('provision.validationStatus')}
+                value={configValidationFilter}
+                onChange={setConfigValidationFilter}
+                style={{ width: 130 }}
+                options={(['valid', 'conflict', 'incomplete'] as const).map((value) => ({
+                  value,
+                  label: t(`provision.validationStatus.${value}`),
+                }))}
+              />
+            </Space>
+            <Space>
+              <Button
+                icon={<DownloadOutlined />}
+                disabled={!paramConfigToolbarEnabled}
+                onClick={handleDownloadParamConfigTemplate}
+              >
+                {t('provision.downloadTemplate')}
+              </Button>
+              {moduleActions.import && (
+                <Button
+                  icon={<UploadOutlined />}
+                  disabled={!paramConfigToolbarEnabled}
+                  onClick={handleOpenParamConfigImport}
+                >
+                  {t('common.import')}
+                </Button>
+              )}
+              <Button
+                icon={<DownloadOutlined />}
+                disabled={!paramConfigToolbarEnabled}
+                onClick={handleExportConfig}
+              >
+                {t('common.export')}
+              </Button>
+            </Space>
+          </div>
+          <Table
+            columns={paramConfigColumns}
+            dataSource={filteredParamConfigList}
+            rowKey="id"
+            pagination={{
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total) => t('table.totalCount', { count: total }),
+            }}
+            size="small"
+            scroll={{ x: 1200 }}
+          />
+        </div>
+      )}
     </Card>
   );
 
@@ -1663,6 +1689,7 @@ export default function AddPolicyPage() {
             licenseEnable: false,
             selfConfigEnable: false,
             switchEnable: false,
+            paramConfigMode: 'common',
             specifyVersionType: 'specify',
             preserveSetting: false,
           }}
