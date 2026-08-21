@@ -1,6 +1,7 @@
 import type { NamePath } from 'antd/es/form/interface';
+import { NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS } from '../nrCarrierBandwidthOptions';
 
-export { NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS } from '../nrCarrierBandwidthOptions';
+export { NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS };
 
 export type GnbQuickSettingControl =
   | 'input'
@@ -35,6 +36,22 @@ export interface GnbQuickSettingGroup {
   multiInstance?: boolean;
 }
 
+export const DEFAULT_NR_CARRIER_BANDWIDTH_SCS = '1';
+
+function normalizeNrScsValue(scs: unknown): string {
+  const normalized = String(scs ?? '').trim().toLowerCase();
+  if (normalized === '15khz' || normalized === '15') return '0';
+  if (normalized === '30khz' || normalized === '30') return '1';
+  if (normalized === '60khz' || normalized === '60') return '2';
+  return String(scs ?? '');
+}
+
+export function getNrCarrierBandwidthOptionsForScs(scs: unknown) {
+  return NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS[normalizeNrScsValue(scs)]
+    ?? NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS[DEFAULT_NR_CARRIER_BANDWIDTH_SCS]
+    ?? [];
+}
+
 const sheetField = (sheet: string, header: string): NamePath => (
   ['sheetParameters', sheet, 0, header]
 );
@@ -52,6 +69,13 @@ const scsOptions: GnbQuickSettingOption[] = [
   { value: '0', label: '15kHz' },
   { value: '1', label: '30kHz' },
   { value: '2', label: '60kHz' },
+];
+
+const antennaOptions = technicalOptions(['1', '2', '4']);
+const patternPeriodOptions = technicalOptions(['0', '1', '2', '3', '4', '5', '6', '7']);
+const pattern2PeriodOptions: GnbQuickSettingOption[] = [
+  { value: '4095', labelKey: 'common.off' },
+  ...patternPeriodOptions,
 ];
 
 const ipsecFields: GnbQuickSettingField[] = [
@@ -154,8 +178,8 @@ export const GNB_QUICK_SETTING_GROUPS: GnbQuickSettingGroup[] = [
       { id: 'ULCarrierBandWidth', name: 'ulbandwidth', labelKey: 'provision.nrQuick.ulCarrierBandwidth', control: 'ul-bandwidth' },
       { id: 'NRARFCNDL', name: 'nrarfcnndl', labelKey: 'provision.nrQuick.nrDlArfcn', range: '0 ~ 3279165' },
       { id: 'NRARFCNUL', name: 'nrarfcnul', labelKey: 'provision.nrQuick.nrUlArfcn', range: '0 ~ 3279165' },
-      { id: 'NumOfRxAntenna', name: sheetField('CELL', 'ULAntNum'), labelKey: 'provision.nrQuick.rxAntennaCount', range: '1 ~ 4' },
-      { id: 'NumOfTxAntenna', name: sheetField('CELL', 'DLAntNum'), labelKey: 'provision.nrQuick.txAntennaCount', range: '1 ~ 4' },
+      { id: 'NumOfRxAntenna', name: sheetField('CELL', 'ULAntNum'), labelKey: 'provision.nrQuick.rxAntennaCount', control: 'select', options: antennaOptions },
+      { id: 'NumOfTxAntenna', name: sheetField('CELL', 'DLAntNum'), labelKey: 'provision.nrQuick.txAntennaCount', control: 'select', options: antennaOptions },
       { id: 'OffsetToPointA', name: 'offsetToPointA', labelKey: 'provision.nrQuick.offsetToPointA', range: '0 ~ 2199' },
       { id: 'PCI', name: 'pci', labelKey: 'provision.nrQuick.pci', range: '0 ~ 1007' },
       { id: 'PowerModify', name: 'totalTxPower', labelKey: 'provision.nrQuick.powerLevel', range: '0 ~ 43' },
@@ -181,12 +205,12 @@ export const GNB_QUICK_SETTING_GROUPS: GnbQuickSettingGroup[] = [
     id: 'gnb-tdd',
     titleKey: 'provision.nrTddConfig',
     fields: [
-      { id: 'DlULTransmissionPeriodicity', name: sheetField('CELL', 'DL ULTransmissionPeriodicity1'), labelKey: 'provision.nrQuick.patternPeriod', labelValues: { pattern: 1 }, range: '0 ~ 7' },
+      { id: 'DlULTransmissionPeriodicity', name: sheetField('CELL', 'DL ULTransmissionPeriodicity1'), labelKey: 'provision.nrQuick.patternPeriod', labelValues: { pattern: 1 }, control: 'select', options: patternPeriodOptions },
       { id: 'NrofDownlinkSlots', name: sheetField('CELL', 'Nrof DownlinkSlots1'), labelKey: 'provision.nrQuick.patternDlSlots', labelValues: { pattern: 1 }, range: '0 ~ 320' },
       { id: 'NrofDownlinkSymbols', name: sheetField('CELL', 'Nrof DownlinkSymbols1'), labelKey: 'provision.nrQuick.patternDlSymbols', labelValues: { pattern: 1 }, range: '0 ~ 13' },
       { id: 'NrofUplinkSlots', name: sheetField('CELL', 'Nrof  UplinkSlots1'), labelKey: 'provision.nrQuick.patternUlSlots', labelValues: { pattern: 1 }, range: '0 ~ 320' },
       { id: 'NrofUplinkSymbols', name: sheetField('CELL', 'Nrof  UplinkSymbols1'), labelKey: 'provision.nrQuick.patternUlSymbols', labelValues: { pattern: 1 }, range: '0 ~ 13' },
-      { id: 'Pat2DlULTransmissionPeriodicity', name: sheetField('CELL', 'DL ULTransmissionPeriodicity2'), labelKey: 'provision.nrQuick.patternPeriod', labelValues: { pattern: 2 }, range: '0 ~ 7' },
+      { id: 'Pat2DlULTransmissionPeriodicity', name: sheetField('CELL', 'DL ULTransmissionPeriodicity2'), labelKey: 'provision.nrQuick.patternPeriod', labelValues: { pattern: 2 }, control: 'select', options: pattern2PeriodOptions },
       { id: 'Pat2NrofDownlinkSlots', name: sheetField('CELL', 'Nrof  DownlinkSlots2'), labelKey: 'provision.nrQuick.patternDlSlots', labelValues: { pattern: 2 }, range: '0 ~ 320' },
       { id: 'Pat2NrofDownlinkSymbols', name: sheetField('CELL', 'Nrof  DownlinkSymbols2'), labelKey: 'provision.nrQuick.patternDlSymbols', labelValues: { pattern: 2 }, range: '0 ~ 13' },
       { id: 'Pat2NrofUplinkSlots', name: sheetField('CELL', 'Nrof  UplinkSlots2'), labelKey: 'provision.nrQuick.patternUlSlots', labelValues: { pattern: 2 }, range: '0 ~ 320' },
@@ -197,7 +221,7 @@ export const GNB_QUICK_SETTING_GROUPS: GnbQuickSettingGroup[] = [
 
 export const GNB_TEMPLATE_EXTRA_FIELDS: GnbQuickSettingField[] = [
   { id: 'RANAC', name: 'ranac', labelKey: 'provision.nrQuick.ranac', range: '0 ~ 255' },
-  { id: 'PrachRootSequenceIndex', name: sheetField('CELL', 'Prach RootSequenceIndex'), labelKey: 'provision.nrQuick.prachRootSequenceIndex' },
+  { id: 'PrachRootSequenceIndex', name: sheetField('CELL', 'Prach RootSequenceIndex'), labelKey: 'provision.nrQuick.prachRootSequenceIndex', control: 'select', options: technicalOptions(['0', '1']) },
   { id: 'PrachRootSequenceValue', name: sheetField('CELL', 'Prach RootSequenceValue'), labelKey: 'provision.nrQuick.prachRootSequenceValue' },
   { id: 'FORCEENCAPS', name: sheetField('IPSEC', 'FORCEENCAPS'), labelKey: 'provision.nrQuick.forceEncapsulation' },
 ];

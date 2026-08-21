@@ -1,12 +1,13 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { Button, Card, Form, Input, Select, Switch, Typography } from 'antd';
 import { Fragment, type ReactNode } from 'react';
+import type { NamePath } from 'antd/es/form/interface';
 import { getTimezoneAliasOptions } from '@core/utils/timezoneAliasConfig';
 import { useT } from '@/hooks/useT';
 import {
   GNB_QUICK_SETTING_GROUPS,
   GNB_TEMPLATE_EXTRA_FIELDS,
-  NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS,
+  getNrCarrierBandwidthOptionsForScs,
   type GnbQuickSettingField,
   type GnbQuickSettingOption,
 } from './gnbQuickSettingsFields';
@@ -146,7 +147,7 @@ function QuickSettingControl({
   }
   if (field.control === 'dl-bandwidth' || field.control === 'ul-bandwidth') {
     const scs = field.control === 'dl-bandwidth' ? dlScs : ulScs;
-    const options = localizedOptions(NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS[String(scs ?? '')], t);
+    const options = localizedOptions(getNrCarrierBandwidthOptionsForScs(scs), t);
     if (readOnly) {
       return renderReadOnly(appendCurrentOption(options, value).find((option) => option.value === value)?.label ?? value);
     }
@@ -198,25 +199,35 @@ function QuickSettingFieldItem({
   );
 }
 
+function namePathParts(name: GnbQuickSettingField['name']): Array<string | number> {
+  return Array.isArray(name) ? name : [name as string | number];
+}
+
 export function GnbQuickSettingFieldGrid({
   fields,
   namePrefix,
+  nameResolver,
+  dlScsName = DL_SCS_PATH,
+  ulScsName = UL_SCS_PATH,
   readOnly,
 }: {
   fields: GnbQuickSettingField[];
   namePrefix?: Array<string | number>;
+  nameResolver?: (field: GnbQuickSettingField) => NamePath;
+  dlScsName?: NamePath;
+  ulScsName?: NamePath;
   readOnly?: boolean;
 }) {
   const form = Form.useFormInstance();
-  const dlScs = Form.useWatch(DL_SCS_PATH, form);
-  const ulScs = Form.useWatch(UL_SCS_PATH, form);
+  const dlScs = Form.useWatch(dlScsName, form);
+  const ulScs = Form.useWatch(ulScsName, form);
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', columnGap: 16 }}>
       {fields.map((field) => (
         <QuickSettingFieldItem
           key={field.id}
           field={field}
-          name={namePrefix ? [...namePrefix, field.name as string] : field.name}
+          name={nameResolver?.(field) ?? (namePrefix ? [...namePrefix, ...namePathParts(field.name)] : field.name)}
           dlScs={dlScs}
           ulScs={ulScs}
           readOnly={readOnly}

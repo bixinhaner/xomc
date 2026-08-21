@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import zhCN from '@core/i18n/zh-CN';
 import enUS from '@core/i18n/en-US';
 import {
+  DEFAULT_NR_CARRIER_BANDWIDTH_SCS,
   GNB_QUICK_SETTING_GROUPS,
   GNB_TEMPLATE_EXTRA_FIELDS,
   NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS,
+  getNrCarrierBandwidthOptionsForScs,
 } from './gnbQuickSettingsFields';
 
 describe('gNB plug-and-play quick-setting fields', () => {
@@ -50,6 +52,20 @@ describe('gNB plug-and-play quick-setting fields', () => {
       const labels = options.map((option) => option.label);
       expect(labels.some((label) => /^(5|15|25)MHz\(/.test(label ?? ''))).toBe(false);
     }
+  });
+
+  it('uses default 30kHz bandwidth options when SCS is blank', () => {
+    expect(DEFAULT_NR_CARRIER_BANDWIDTH_SCS).toBe('1');
+    expect(getNrCarrierBandwidthOptionsForScs('')).toEqual(
+      NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS[DEFAULT_NR_CARRIER_BANDWIDTH_SCS],
+    );
+    expect(getNrCarrierBandwidthOptionsForScs(undefined).length).toBeGreaterThan(0);
+  });
+
+  it('accepts display labels as SCS values for dependent bandwidth options', () => {
+    expect(getNrCarrierBandwidthOptionsForScs('15kHz')).toEqual(NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS['0']);
+    expect(getNrCarrierBandwidthOptionsForScs('30kHz')).toEqual(NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS['1']);
+    expect(getNrCarrierBandwidthOptionsForScs('60kHz')).toEqual(NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS['2']);
   });
 
   it('defines every group, field and option label in both supported locales', () => {

@@ -11,7 +11,7 @@ import { sanitizeRetiredParamConfigFields } from './retiredParamConfigFields';
 
 export type ImportedSheetParameters = Record<string, Record<string, unknown>[]>;
 
-interface ParamConfigDetailSource {
+export interface ParamConfigDetailSource {
   deviceType?: string;
   serialNumber?: unknown;
   sheetParameters?: ImportedSheetParameters;
@@ -137,6 +137,12 @@ const DIRECT_SHEET_MAPPING_TARGETS: readonly DirectSheetMappingTarget[] = [
   { leaves: ['PERIODICINFORMTIME'], headers: ['Periodic Inform Time', '周期上报时间'], header: 'Periodic Inform Time', sheetByDeviceType: { gNB: 'DEVICE' } },
   { leaves: ['PERIODICINFORMINTERVAL'], headers: ['Periodic Inform Interval', '周期上报间隔'], header: 'Periodic Inform Interval', sheetByDeviceType: { gNB: 'DEVICE' } },
   { leaves: ['PPSTIMEMODE'], headers: ['PpsTimeMode', 'PPS Time Mode'], header: 'PpsTimeMode', sheetByDeviceType: { gNB: 'DEVICE' } },
+  { leaves: ['BAND', 'BANDINDICATOR', 'FREQBANDINDICATOR', 'FREQBANDINDICATORNR'], headers: ['Freq BandIndicator', 'FreqBandIndicatorNR', 'Band'], header: 'Freq BandIndicator', sheetByDeviceType: { gNB: 'CELL' } },
+  { leaves: ['SSBFREQUENCY'], headers: ['SSB Frequency', 'SSBFrequency'], header: 'SSB Frequency', sheetByDeviceType: { gNB: 'CELL' } },
+  { leaves: ['NRARFCNDL'], headers: ['NRARFCNDL'], header: 'NRARFCNDL', sheetByDeviceType: { gNB: 'CELL' } },
+  { leaves: ['NRARFCNUL'], headers: ['NRARFCNUL'], header: 'NRARFCNUL', sheetByDeviceType: { gNB: 'CELL' } },
+  { leaves: ['DLBANDWIDTH', 'DLCARRIERBANDWIDTH'], headers: ['DLBandwidth', 'DL Carrier Bandwidth'], header: 'DLBandwidth', sheetByDeviceType: { gNB: 'CELL' } },
+  { leaves: ['ULBANDWIDTH', 'ULCARRIERBANDWIDTH'], headers: ['ULBandwidth', 'UL Carrier Bandwidth'], header: 'ULBandwidth', sheetByDeviceType: { gNB: 'CELL' } },
   { leaves: ['DLSUBCARRIERSPACING'], headers: ['SubcarrierSpacing(DL)', 'DL SubCarrier Spacing', 'DL Subcarrier Spacing', 'DLSubCarrierSpacing'], header: 'SubcarrierSpacing(DL)', sheetByDeviceType: { gNB: 'CELL' } },
   { leaves: ['ULSUBCARRIERSPACING'], headers: ['SubcarrierSpacing(UL)', 'UL SubCarrier Spacing', 'UL Subcarrier Spacing', 'ULSubCarrierSpacing'], header: 'SubcarrierSpacing(UL)', sheetByDeviceType: { gNB: 'CELL' } },
   { leaves: ['NUMOFTXANTENNA', 'DLANTNUM'], headers: ['DLAntNum', 'Num Of Tx Antenna', 'NumOfTxAntenna', 'Tx Antenna Count'], header: 'DLAntNum', sheetByDeviceType: { gNB: 'CELL' } },
@@ -153,6 +159,11 @@ const DIRECT_SHEET_MAPPING_TARGETS: readonly DirectSheetMappingTarget[] = [
   { leaves: [], headers: ['Nrof  UplinkSymbols2', 'Nrof UplinkSymbols2', 'Pattern2 UL Symbols', 'Pattern2 Uplink Symbols'], header: 'Nrof  UplinkSymbols2', sheetByDeviceType: { gNB: 'CELL' } },
   { leaves: ['PRACHROOTSEQUENCEINDEX'], headers: ['Prach RootSequenceIndex', 'Prach Root Sequence Index'], header: 'Prach RootSequenceIndex', sheetByDeviceType: { gNB: 'CELL' } },
   { leaves: ['PRACHROOTSEQUENCEVALUE'], headers: ['Prach RootSequenceValue', 'Prach Root Sequence Value'], header: 'Prach RootSequenceValue', sheetByDeviceType: { gNB: 'CELL' } },
+  { leaves: ['RFENABLE', 'ENABLE'], headers: ['RFEnable', 'RF Enable'], header: 'RFEnable', sheetByDeviceType: { gNB: 'CELL' } },
+  { leaves: ['POWERMODIFY', 'POWERLEVEL'], headers: ['PowerModify', 'Power Level'], header: 'PowerModify', sheetByDeviceType: { gNB: 'CELL' } },
+  { leaves: ['OFFSETTOPOINTA'], headers: ['OffsetToPointA', 'Offset To Point A'], header: 'OffsetToPointA', sheetByDeviceType: { gNB: 'CELL' } },
+  { leaves: ['PCI', 'PHYCELLID', 'PHYSICALCELLID'], headers: ['*PCI', 'PCI'], header: '*PCI', sheetByDeviceType: { gNB: 'CELL' } },
+  { leaves: ['SSBSUBCARRIEROFFSET'], headers: ['SsbSubcarrierOffset', 'SSB Subcarrier Offset'], header: 'SsbSubcarrierOffset', sheetByDeviceType: { gNB: 'CELL' } },
   { leaves: ['NGUBINDINTERFACE'], headers: ['NguBindInterface', 'NGU Local Address'], header: 'NguBindInterface', sheetByDeviceType: { gNB: 'PLMN' } },
   { leaves: ['TUNNELENABLE'], headers: ['TUNNEL_ENABLE', 'Tunnel Enable'], header: 'TUNNEL_ENABLE', sheetByDeviceType: { gNB: 'IPSEC' } },
   { leaves: ['TUNNELGATEWAY', 'GATEWAY'], headers: ['TUNNEL_GATEWAY', 'Gateway'], header: 'TUNNEL_GATEWAY', sheetByDeviceType: { gNB: 'IPSEC' } },
@@ -546,6 +557,7 @@ function setSheetRowValue(
   rowIndex: number,
   header: string,
   valueToSet: unknown,
+  options: { addMissing?: boolean } = {},
 ): boolean {
   const row = sheets[sheetName]?.[rowIndex];
   if (!row) return false;
@@ -563,7 +575,11 @@ function setSheetRowValue(
   const actualHeader = Object.keys(row).find((candidate) => (
     requestedAliases.some((alias) => canonicalHeader(candidate) === canonicalHeader(alias))
   ));
-  if (!actualHeader) return false;
+  if (!actualHeader) {
+    if (!options.addMissing || !header) return false;
+    row[header] = valueToSet ?? '';
+    return true;
+  }
   row[actualHeader] = valueToSet ?? '';
   return true;
 }
@@ -609,7 +625,7 @@ function setMappedWorkbookValue(
   if (!target) return false;
   const mapping = (current.workbookMappings ?? []).find((item) => mappingMatchesTarget(item, target));
   if (!mapping) return false;
-  return setFirstSheetValue(sheets, mapping.sheet, mapping.header, valueToSet);
+  return setSheetRowValue(sheets, mapping.sheet, 0, mapping.header, valueToSet, { addMissing: true });
 }
 
 function setMappedWorkbookValueForTargetAtRow(
@@ -621,7 +637,7 @@ function setMappedWorkbookValueForTargetAtRow(
 ): boolean {
   const mapping = (current.workbookMappings ?? []).find((item) => mappingMatchesTarget(item, target));
   if (!mapping) return false;
-  return setSheetRowValue(sheets, mapping.sheet, rowIndex, mapping.header, valueToSet);
+  return setSheetRowValue(sheets, mapping.sheet, rowIndex, mapping.header, valueToSet, { addMissing: true });
 }
 
 function replaceSheetRows(
@@ -1042,6 +1058,7 @@ export function toParamConfigFormValues(
         halobEnable: stringValue(mappedWorkbookValue(config, 'halobEnable')
           ?? value(network, 'HALOB_ENABLE')),
         totalTxPower: mappedWorkbookValue(config, 'totalTxPower')
+          ?? value(cell, 'X_COM_MaxTxPowerExpanded', 'ReferenceSignalPower', 'PowerClass', 'Transmit Power', 'Tx Power')
           ?? value(cell, 'MaxTxPower'),
         serviceIp: mappedWorkbookValue(config, 'serviceIp')
           ?? value(firstRow(sheets, 'NETWORK'), 'WAN IP'),
@@ -1069,4 +1086,20 @@ export function toParamConfigFormValues(
     sheetParameters: sheets,
     ...(Object.keys(networkParameterValues).length > 0 ? { networkParameterValues } : {}),
   };
+}
+
+export function materializeParamConfigDisplayValues<T extends ParamConfigDetailSource>(
+  config: T,
+): T & Record<string, unknown> {
+  const formValues = toParamConfigFormValues(config);
+  const cellName = stringValue(
+    stringValue(formValues.cellName)
+      ?? stringValue(formValues.gnbName)
+      ?? stringValue(config.cellName),
+  );
+  return {
+    ...config,
+    ...formValues,
+    ...(cellName !== undefined ? { cellName } : {}),
+  } as T & Record<string, unknown>;
 }

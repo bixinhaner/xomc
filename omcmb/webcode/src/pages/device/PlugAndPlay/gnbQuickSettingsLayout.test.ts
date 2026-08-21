@@ -15,11 +15,12 @@ describe('gNB parameter editor quick-settings layout', () => {
   it('uses the same card and three-column layout as quick settings', () => {
     expect(gnbSection).not.toContain('<Collapse.Panel');
     expect(gnbSection).toContain('<GnbQuickSettingsCards');
-    expect(gnbSection).toContain('<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} />');
+    expect(gnbSection).toContain('<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} readOnly={readOnly} />');
   });
 
   it('keeps batch allocation common-only and template extensions after quick settings', () => {
     expect(gnbSection).toContain('{commonScope && (');
+    expect(panelSource).toContain("excludedFieldIds={commonScope && deviceType === 'gNB' ? ['PCI'] : []}");
     expect(gnbSection).toContain("excludedFieldIds={commonScope ? ['gNBId', 'PCI'] : []}");
     expect(gnbSection.indexOf('<GnbTemplateExtraFieldGrid'))
       .toBeGreaterThan(gnbSection.indexOf('<GnbQuickSettingsCards'));
