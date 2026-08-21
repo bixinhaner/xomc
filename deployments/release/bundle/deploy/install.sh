@@ -510,6 +510,35 @@ install_nginx_https_cert() {
   log "已安装 nginx HTTPS 文件入口证书：$dst_cert / $dst_key" "Installed nginx HTTPS file-entry certificate: $dst_cert / $dst_key"
 }
 
+cleanup_empty_legacy_docker_networks() {
+  local network_id network_name subnet legacy_subnet container_count
+
+  while IFS= read -r network_id; do
+    [ -n "$network_id" ] || continue
+    network_name="$(docker network inspect "$network_id" --format '{{.Name}}' 2>/dev/null || echo "$network_id")"
+    case "$network_name" in
+      bridge|host|none) continue ;;
+    esac
+
+    legacy_subnet=""
+    while IFS= read -r subnet; do
+      case "$subnet" in
+        172.*) legacy_subnet="$subnet"; break ;;
+      esac
+    done < <(docker network inspect "$network_id" --format '{{range .IPAM.Config}}{{.Subnet}}{{"\n"}}{{end}}' 2>/dev/null || true)
+    [ -n "$legacy_subnet" ] || continue
+
+    container_count="$(docker network inspect "$network_id" --format '{{len .Containers}}' 2>/dev/null || echo 1)"
+    if [ "$container_count" = 0 ]; then
+      log "全新安装：删除无容器的历史 Docker 172.x 网络：${network_name} (${legacy_subnet})" "Fresh install: removing unused legacy Docker 172.x network: ${network_name} (${legacy_subnet})"
+      docker network rm "$network_id" >/dev/null 2>&1 ||
+        warn "删除历史 Docker 网络失败：${network_name}；后续网段门禁将阻止启动" "Failed to remove legacy Docker network: ${network_name}; the network policy gate will block startup"
+    else
+      warn "历史 Docker 172.x 网络仍有 ${container_count} 个容器挂载：${network_name} (${legacy_subnet})；停止相关容器后重试" "Legacy Docker 172.x network still has ${container_count} attached container(s): ${network_name} (${legacy_subnet}); stop those containers and retry"
+    fi
+  done < <(docker network ls -q 2>/dev/null || true)
+}
+
 fresh_install_reset() {
   local package_env="$PKG_ROOT/deploy/.env"
   local old_deploy="$OMC_ROOT/current/deploy"
@@ -533,6 +562,7 @@ fresh_install_reset() {
     ( cd "$old_deploy" && docker compose -p "$COMPOSE_PROJECT" "${old_env_args[@]}" \
         "${old_compose_files[@]}" down --remove-orphans ) || warn "旧 OMC 栈停止返回非零，继续执行数据清理" "Stopping the existing OMC stack returned a non-zero status; continuing data cleanup"
   fi
+  cleanup_empty_legacy_docker_networks
 
   [ -n "$PUBLIC_HOST_OVERRIDE" ] ||
     PUBLIC_HOST_OVERRIDE="$(deploy_env_file_value OMC_PUBLIC_HOST "$package_env" 2>/dev/null || true)"

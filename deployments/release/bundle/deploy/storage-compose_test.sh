@@ -100,6 +100,7 @@ contains "镜像源脚本降级配置保留 bip" '"bip": "173.17.0.1/16"' "$SETU
 contains "镜像源脚本降级配置保留自动地址池" '"default-address-pools": [{"base": "173.19.0.0/16", "size": 24}]' "$SETUP_MIRRORS"
 contains "DNS 修复脚本锁定 bip" 'data["bip"] = "173.17.0.1/16"' "$DNS_FIX"
 contains "DNS 修复脚本锁定自动地址池" 'data["default-address-pools"] = [{"base": "173.19.0.0/16", "size": 24}]' "$DNS_FIX"
+contains "fresh-install 清理空的历史 172.x 网络" 'cleanup_empty_legacy_docker_networks' "$INSTALL"
 
 echo "── 发布迁移基线语句边界 ──"
 contains "发布构建调用迁移基线门禁" 'validate_release_migration_baseline' "$BUILD"
@@ -422,7 +423,7 @@ contains "overview dashboard 展示 whitelist miss" 'omc_pm_whitelist_miss_value
 contains "overview dashboard 展示 disabled" 'omc_pm_known_disabled_values_total' "$GRAFANA_OVERVIEW"
 
 echo "── PM 聚合关闭、Redis 与资源漂移监控 ──"
-contains "终结领取索引覆盖稳定排序键" 'granularity, window_end, entity_key, task_version_id, window_start' "$TSDB_BASELINE"
+contains "终结领取索引覆盖稳定排序键" 'granularity, window_end, task_version_id, entity_key, window_start' "$TSDB_BASELINE"
 contains "小时层级水位索引覆盖上游窗口" 'granularity, window_start, task_version_id' "$TSDB_BASELINE"
 contains "资源计划漂移告警" 'alert: OMCResourcePlanDrift' "$HOST_ALERTS"
 contains "资源计划 cAdvisor 缺失 critical 告警" 'alert: OMCResourcePlanCAdvisorAbsent' "$HOST_ALERTS"
