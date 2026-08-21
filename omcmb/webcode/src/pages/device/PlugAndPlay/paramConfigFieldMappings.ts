@@ -18,7 +18,7 @@ export const ENB_SHEET_FIELD_MAPPINGS: readonly ParamConfigSheetFieldMapping[] =
   { field: 'plmnId', sheet: 'NETWORK_ENABLE', header: '*PLMN' },
   { field: 'ipsecEnable', sheet: 'NETWORK_ENABLE', header: 'IPSEC_ENABLE' },
   { field: 'halobEnable', sheet: 'NETWORK_ENABLE', header: 'HALOB_ENABLE' },
-  { field: 'totalTxPower', sheet: 'CELL', header: 'MaxTxPower' },
+  { field: 'totalTxPower', sheet: 'CELL', header: 'X_COM_MaxTxPowerExpanded' },
   { field: 'serviceIp', sheet: 'NETWORK', header: 'WAN IP' },
   { field: 'ntpSync', sheet: 'NETWORK', header: 'NTP Enable' },
   { field: 'tfcsManagerPrimsrc', sheet: '1588_CONFIGURATION', header: '*SYNCHRONIZATION_MODE' },

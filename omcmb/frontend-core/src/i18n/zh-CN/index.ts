@@ -5150,6 +5150,7 @@ const messages: Record<string, string> = {
   'provision.ipsecParameterConfig':   'IPSec 参数',
   'provision.nrTddConfig':            'TDD 配置',
   'provision.otherTemplateParams':    '其他模板参数',
+  'provision.gsmQuick.abisParameters': 'ABIS 参数',
   'provision.cell':                   '小区',
   'provision.bts':                    'BTS',
   'provision.radioInstanceList':      '{item}列表',

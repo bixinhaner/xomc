@@ -140,7 +140,12 @@ export function ParameterConfigFields({
   return (
     <>
       {deviceType && (
-        <PrimaryRadioInstanceEditor deviceType={deviceType} productClass={productClass} readOnly={readOnly} />
+        <PrimaryRadioInstanceEditor
+          deviceType={deviceType}
+          productClass={productClass}
+          excludedFieldIds={commonScope && deviceType === 'gNB' ? ['PCI'] : []}
+          readOnly={readOnly}
+        />
       )}
       {deviceType === 'gNB' && (
         <>

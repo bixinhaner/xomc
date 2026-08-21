@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  materializeParamConfigDisplayValues,
   mergeParamConfigFormValues,
   toParamConfigFormValues,
   withTemplateSheetParameters,
@@ -74,6 +75,43 @@ describe('parameter configuration detail mapping', () => {
       freqBandIndicator: 78,
       dlbandwidth: '51',
       ulbandwidth: '51',
+    });
+  });
+
+  it('materializes imported workbook values for policy table display after reload', () => {
+    expect(materializeParamConfigDisplayValues({
+      deviceType: 'gNB',
+      serialNumber: '120200054822CHB0004',
+      cellName: '',
+      updatedBy: 'import',
+      sheetParameters: {
+        CELL: [{
+          'gNB Name': 'BNQ Site A',
+          Band: 78,
+          PCI: 500,
+          'DL Carrier Bandwidth': 51,
+          NRARFCNDL: 377483,
+          'SSB Frequency': 614522,
+          TAC: 1,
+        }],
+        DEVICE: [{ 'gNB ID': 2451329 }],
+      },
+      workbookMappings: [
+        { sheet: 'CELL', header: 'Band', trPath: 'Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.1.FreqBandIndicatorNR' },
+        { sheet: 'CELL', header: 'PCI', trPath: 'Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID' },
+        { sheet: 'CELL', header: 'DL Carrier Bandwidth', trPath: 'Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.1.SCSSpecificCarrier.CarrierBandwidth' },
+        { sheet: 'CELL', header: 'TAC', trPath: 'Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.TAC' },
+        { sheet: 'DEVICE', header: 'gNB ID', trPath: 'Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBId' },
+      ],
+    })).toMatchObject({
+      cellName: 'BNQ Site A',
+      gnbId: 2451329,
+      pci: 500,
+      freqBandIndicator: 78,
+      dlbandwidth: '51',
+      nrarfcnndl: 377483,
+      ssbFrequency: 614522,
+      tac: 1,
     });
   });
 
@@ -872,7 +910,7 @@ describe('parameter configuration detail mapping', () => {
       'CELL', 'NETWORK_ENABLE', 'NETWORK_IPSEC', '1588_CONFIGURATION', 'NETWORK',
     ]);
     expect(Object.values(hydrated.sheetParameters ?? {})
-      .flatMap((rows) => Object.keys(rows[0] ?? {}))).toHaveLength(62);
+      .flatMap((rows) => Object.keys(rows[0] ?? {}))).toHaveLength(63);
     expect(hydrated.sheetParameters?.CELL[0]['*SERIAL_NUMBER'])
       .toBe('4G-HISTORY-001');
     expect(hydrated.sheetParameters?.['1588_CONFIGURATION'][0])

@@ -13,6 +13,7 @@ export interface ParamConfigInsightSource {
   dlbandwidth?: unknown;
   frequency?: unknown;
   nrarfcnndl?: unknown;
+  nrarfcndl?: unknown;
   ssbFrequency?: unknown;
   tac?: unknown;
   sheetParameters?: Record<string, Record<string, unknown>[]>;
@@ -111,7 +112,7 @@ export function buildParamConfigInsights(
       bandwidth: text(config.dlbandwidth ?? config.bandWidth)
         ?? mappedPathValue(config, ['DLBandwidth', 'CarrierBandwidth', 'Bandwidth'])
         ?? firstSheetValue(config, 'CELL', 'DLBandwidth', '*BANDWIDTH_DL', 'DL Carrier Bandwidth'),
-      frequency: text(config.nrarfcnndl ?? config.frequency)
+      frequency: text(config.nrarfcnndl ?? config.nrarfcndl ?? config.frequency)
         ?? mappedPathValue(config, ['NRARFCNDL', 'EARFCNDL'])
         ?? firstSheetValue(config, 'CELL', 'NRARFCNDL', '*EARFCN_DL'),
       ssbFrequency: text(config.ssbFrequency)

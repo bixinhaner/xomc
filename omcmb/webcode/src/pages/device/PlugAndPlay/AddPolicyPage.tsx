@@ -79,6 +79,7 @@ import {
 import { toParamConfigDeviceType } from './paramConfigTemplate';
 import { getParamConfigExportFields } from './paramConfigExportFields';
 import {
+  materializeParamConfigDisplayValues,
   mergeParamConfigFormValues,
   toParamConfigFormValues,
 } from './paramConfigDetail';
@@ -125,6 +126,15 @@ function inferFunctionModule(
   if (hasSelfConfigPayload) return '2';
   if (flags.licenseEnabled === true) return '1';
   return configured ?? '0';
+}
+
+function inferParamConfigMode(config: Record<string, unknown>): ParamConfigMode {
+  if (config.paramConfigMode === 'specified' || config.paramConfigMode === 'common') {
+    return config.paramConfigMode;
+  }
+  return Array.isArray(config.paramConfigList) && config.paramConfigList.length > 0
+    ? 'specified'
+    : 'common';
 }
 
 // T-0136: 保留为 export 占位，避免 TS6196 同时不破坏未来可能复用
@@ -740,7 +750,7 @@ export default function AddPolicyPage() {
         .filter(Boolean);
     form.setFieldsValue({
       ...config,
-      paramConfigMode: config.paramConfigMode === 'specified' ? 'specified' : 'common',
+      paramConfigMode: inferParamConfigMode(config),
       originalVersion: originalVersions,
       policyName: persistedPolicy.name,
       productTechnology: normalizeProductTechnology(String(config.productTechnology ?? ''))
@@ -759,7 +769,9 @@ export default function AddPolicyPage() {
     });
     setProductClasses(savedProductNames);
     if (Array.isArray(config.paramConfigList)) {
-      setParamConfigList(config.paramConfigList as ParamConfig[]);
+      setParamConfigList((config.paramConfigList as ParamConfig[]).map((item) => (
+        materializeParamConfigDisplayValues(item) as ParamConfig
+      )));
     }
   }, [persistedPolicy, form, productCatalog?.items]);
 
@@ -1279,20 +1291,22 @@ export default function AddPolicyPage() {
           importedAt,
           parseContext,
         );
-        importedConfigs.push(...rows.map((row, index) => ({
-          id: `import-${importId}-${fileIndex}-${index}`,
-          deviceType: row.deviceType ?? activeParamDeviceType,
-          serialNumber: row.serialNumber,
-          cellName: row.cellName ?? '',
-          bandsSupport: row.bandsSupport,
-          bandWidth: row.bandWidth,
-          frequency: row.frequency,
-          subframeAssignment: row.subframeAssignment,
-          sheetParameters: row.sheetParameters,
-          workbookMappings: row.workbookMappings,
-          updatedBy: row.updatedBy ?? 'import',
-          updatedAt: row.updatedAt ?? importedAt,
-        })));
+        importedConfigs.push(...rows.map((row, index) => (
+          materializeParamConfigDisplayValues({
+            id: `import-${importId}-${fileIndex}-${index}`,
+            deviceType: row.deviceType ?? activeParamDeviceType,
+            serialNumber: row.serialNumber,
+            cellName: row.cellName ?? '',
+            bandsSupport: row.bandsSupport,
+            bandWidth: row.bandWidth,
+            frequency: row.frequency,
+            subframeAssignment: row.subframeAssignment,
+            sheetParameters: row.sheetParameters,
+            workbookMappings: row.workbookMappings,
+            updatedBy: row.updatedBy ?? 'import',
+            updatedAt: row.updatedAt ?? importedAt,
+          }) as ParamConfig
+        )));
       }
       const preview = buildParamConfigImportPreview(paramConfigList, importedConfigs);
       setPendingImportedConfigs(importedConfigs);
@@ -1347,24 +1361,21 @@ export default function AddPolicyPage() {
       // values from the currently mounted panel, while getFieldsValue(true)
       // also includes the preserved values of the other selected modules.
       const values = form.getFieldsValue(true);
-      let commonParamConfig = persistedPolicy?.config?.commonParamConfig ?? {};
-      let submittedParamConfigList = paramConfigList;
+      let commonParamConfig = {};
+      let submittedParamConfigList: ParamConfig[] = [];
       const submittedParamConfigMode: ParamConfigMode = values.paramConfigMode === 'specified' ? 'specified' : 'common';
       const submittedFunctionModule = isFunctionModule(values.functionModule) ? values.functionModule : '0';
-      if (submittedFunctionModule === '2') {
-        if (values.selfConfigEnable && submittedParamConfigMode === 'common') {
+      if (submittedFunctionModule === '2' && values.selfConfigEnable) {
+        if (submittedParamConfigMode === 'common') {
           await commonConfigForm.validateFields();
           commonParamConfig = sanitizeCommonParamConfig({
             ...commonConfigForm.getFieldsValue(true),
             deviceType: activeParamDeviceType,
           });
           submittedParamConfigList = [];
-        } else if (values.selfConfigEnable && submittedParamConfigMode === 'specified') {
-          commonParamConfig = {};
-          submittedParamConfigList = paramConfigList;
         } else {
           commonParamConfig = {};
-          submittedParamConfigList = [];
+          submittedParamConfigList = paramConfigList;
         }
       }
       const selectedProductNames = (values.productClasses ?? []) as string[];
@@ -1418,7 +1429,7 @@ export default function AddPolicyPage() {
       submittingRef.current = false;
       setLoading(false);
     }
-  }, [activeParamDeviceType, commonConfigForm, form, hasPersistedPolicy, isEdit, navigate, persistedPolicy?.config?.commonParamConfig, productCatalog?.items, productCatalogLoading, t, savePolicyMutation, paramConfigList]);
+  }, [activeParamDeviceType, commonConfigForm, form, hasPersistedPolicy, isEdit, navigate, productCatalog?.items, productCatalogLoading, t, savePolicyMutation, paramConfigList]);
 
   // Handle cancel
   const handleCancel = useCallback(() => {

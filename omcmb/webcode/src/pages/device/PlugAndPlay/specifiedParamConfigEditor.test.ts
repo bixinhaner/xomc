@@ -42,8 +42,9 @@ describe('specified-device parameter editor', () => {
   it('submits only the selected parameter configuration mode', () => {
     expect(pageSource).toContain("const submittedParamConfigMode: ParamConfigMode = values.paramConfigMode === 'specified' ? 'specified' : 'common';");
     expect(pageSource).toContain("const submittedFunctionModule = isFunctionModule(values.functionModule)");
-    expect(pageSource).toContain("if (submittedFunctionModule === '2')");
-    expect(pageSource).toContain("submittedParamConfigList = [];");
+    expect(pageSource).toContain("if (submittedFunctionModule === '2' && values.selfConfigEnable)");
+    expect(pageSource).toContain('let commonParamConfig = {};');
+    expect(pageSource).toContain('let submittedParamConfigList: ParamConfig[] = [];');
     expect(pageSource).toContain('commonParamConfig = {};');
     expect(pageSource).toContain('paramConfigMode: submittedParamConfigMode');
     expect(pageSource).toContain('paramConfigList: submittedParamConfigList');
@@ -65,6 +66,13 @@ describe('specified-device parameter editor', () => {
     expect(pageSource).toContain('selfConfigEnabled: persistedPolicy.selfConfigEnabled');
   });
 
+  it('recovers specified-device mode from existing per-device configs when mode is missing', () => {
+    expect(pageSource).toContain('function inferParamConfigMode');
+    expect(pageSource).toContain("config.paramConfigMode === 'specified' || config.paramConfigMode === 'common'");
+    expect(pageSource).toContain('Array.isArray(config.paramConfigList) && config.paramConfigList.length > 0');
+    expect(pageSource).toContain('paramConfigMode: inferParamConfigMode(config)');
+  });
+
   it('initializes common parameter form before switching to parameter module', () => {
     expect(pageSource).toContain('withInitialCommonParamConfig(');
     expect(pageSource).not.toContain("functionModule !== '2'");
@@ -74,7 +82,8 @@ describe('specified-device parameter editor', () => {
     expect(pageSource).toContain('const previewImportConfigFiles = useCallback(async (files: UploadFile[]) => {');
     expect(pageSource).toContain('for (const [fileIndex, uploadFile] of files.entries())');
     expect(pageSource).toContain('const importedConfigs: ParamConfig[] = [];');
-    expect(pageSource).toContain('importedConfigs.push(...rows.map((row, index) => ({');
+    expect(pageSource).toContain('importedConfigs.push(...rows.map((row, index) => (');
+    expect(pageSource).toContain('materializeParamConfigDisplayValues({');
     expect(pageSource).toContain('multiple');
     expect(pageSource).toContain('beforeUpload={(_, fileList) => {');
     expect(pageSource).toContain('const nextFiles = toSelectedParamImportFiles(fileList as UploadFile[]);');
@@ -87,7 +96,11 @@ describe('specified-device parameter editor', () => {
     expect(drawerSection).not.toContain('<GnbNetworkConfigCards');
     expect(drawerSection).not.toContain('<Collapse.Panel');
     expect(sharedPanelSource).toContain('export function ParameterConfigFields');
-    expect(sharedPanelSource).toContain('<PrimaryRadioInstanceEditor deviceType={deviceType} productClass={productClass} readOnly={readOnly} />');
+    expect(sharedPanelSource).toContain('<PrimaryRadioInstanceEditor');
+    expect(sharedPanelSource).toContain('deviceType={deviceType}');
+    expect(sharedPanelSource).toContain('productClass={productClass}');
+    expect(sharedPanelSource).toContain("excludedFieldIds={commonScope && deviceType === 'gNB' ? ['PCI'] : []}");
+    expect(sharedPanelSource).toContain('readOnly={readOnly}');
     expect(sharedPanelSource).toContain('<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} readOnly={readOnly} />');
   });
 

@@ -66,7 +66,7 @@ const ENB_STRUCTURED_FIELDS = [
   ...fields('CELL', [
     'CELL_NAME', '*ECI', '*BAND', '*EARFCN_DL', '*BANDWIDTH_DL', '*PCI',
     'SPECIAL_SUBFRAME_PATTERNS', 'SUBFRAME_ASSIGNMENT', '*ROOT_SEQUENCE_INDEX', '*TAC',
-    'MaxTxPower',
+    'X_COM_MaxTxPowerExpanded', 'MaxTxPower',
   ]),
   ...fields('NETWORK_ENABLE', ['*PLMN', 'MME_IP', 'IPSEC_ENABLE', 'HALOB_ENABLE']),
   ...fields('NETWORK_IPSEC', [

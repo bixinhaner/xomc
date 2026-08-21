@@ -106,6 +106,21 @@ describe('parameter configuration insights', () => {
     });
   });
 
+  it('accepts legacy DL NRARFCN field spelling when summarizing persisted rows', () => {
+    const insights = buildParamConfigInsights([{
+      serialNumber: 'SN-LEGACY',
+      deviceType: 'gNB',
+      gnbId: 1001,
+      pci: 10,
+      nrarfcndl: 640000,
+    }]);
+
+    expect(insights.get('SN-LEGACY')).toMatchObject({
+      validationStatus: 'valid',
+      frequency: '640000',
+    });
+  });
+
   it('previews add, update and duplicate import actions', () => {
     expect(buildParamConfigImportPreview(
       [{ serialNumber: 'SN-001' }],

@@ -26,7 +26,11 @@ export function useSavePlugAndPlayPolicy(id?: string) {
   return useMutation({
     mutationFn: (data: SavePlugAndPlayPolicyRequest) =>
       id ? provisionApi.updatePolicy(id, data) : provisionApi.createPolicy(data),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['provisioning', 'policies'] }),
+    onSuccess: (savedPolicy) => {
+      queryClient.setQueryData(['provisioning', 'policy', savedPolicy.id], savedPolicy);
+      void queryClient.invalidateQueries({ queryKey: ['provisioning', 'policy', savedPolicy.id] });
+      void queryClient.invalidateQueries({ queryKey: ['provisioning', 'policies'] });
+    },
   });
 }
 

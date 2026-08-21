@@ -11,7 +11,7 @@ import { sanitizeRetiredParamConfigFields } from './retiredParamConfigFields';
 
 export type ImportedSheetParameters = Record<string, Record<string, unknown>[]>;
 
-interface ParamConfigDetailSource {
+export interface ParamConfigDetailSource {
   deviceType?: string;
   serialNumber?: unknown;
   sheetParameters?: ImportedSheetParameters;
@@ -1042,6 +1042,7 @@ export function toParamConfigFormValues(
         halobEnable: stringValue(mappedWorkbookValue(config, 'halobEnable')
           ?? value(network, 'HALOB_ENABLE')),
         totalTxPower: mappedWorkbookValue(config, 'totalTxPower')
+          ?? value(cell, 'X_COM_MaxTxPowerExpanded', 'ReferenceSignalPower', 'PowerClass', 'Transmit Power', 'Tx Power')
           ?? value(cell, 'MaxTxPower'),
         serviceIp: mappedWorkbookValue(config, 'serviceIp')
           ?? value(firstRow(sheets, 'NETWORK'), 'WAN IP'),
@@ -1069,4 +1070,20 @@ export function toParamConfigFormValues(
     sheetParameters: sheets,
     ...(Object.keys(networkParameterValues).length > 0 ? { networkParameterValues } : {}),
   };
+}
+
+export function materializeParamConfigDisplayValues<T extends ParamConfigDetailSource>(
+  config: T,
+): T & Record<string, unknown> {
+  const formValues = toParamConfigFormValues(config);
+  const cellName = stringValue(
+    stringValue(formValues.cellName)
+      ?? stringValue(formValues.gnbName)
+      ?? stringValue(config.cellName),
+  );
+  return {
+    ...config,
+    ...formValues,
+    ...(cellName !== undefined ? { cellName } : {}),
+  } as T & Record<string, unknown>;
 }

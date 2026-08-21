@@ -5123,6 +5123,7 @@ const messages: Record<string, string> = {
   'provision.ipsecParameterConfig':   'IPSec Parameters',
   'provision.nrTddConfig':            'TDD Configuration',
   'provision.otherTemplateParams':    'Other Template Parameters',
+  'provision.gsmQuick.abisParameters': 'ABIS Parameters',
   'provision.cell':                   'Cell',
   'provision.bts':                    'BTS',
   'provision.radioInstanceList':      '{item} List',
