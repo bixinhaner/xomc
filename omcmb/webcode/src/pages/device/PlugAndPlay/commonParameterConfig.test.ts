@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeCommonParamConfig, withInitialCommonRadioInstance } from './commonParameterConfig';
+import {
+  sanitizeCommonParamConfig,
+  withInitialCommonParamConfig,
+  withInitialCommonRadioInstance,
+} from './commonParameterConfig';
 
 describe('sanitizeCommonParamConfig', () => {
   it('removes excluded and retired fields from common parameters', () => {
@@ -37,5 +41,51 @@ describe('withInitialCommonRadioInstance', () => {
   it('does not recreate a deliberately empty radio instance list', () => {
     const result = withInitialCommonRadioInstance({ sheetParameters: { CELL: [] } }, 'eNB');
     expect(result.sheetParameters.CELL).toEqual([]);
+  });
+});
+
+describe('withInitialCommonParamConfig', () => {
+  it('backfills required gNB allocation defaults for legacy common configs', () => {
+    const result = withInitialCommonParamConfig({
+      deviceType: 'gNB',
+      sheetParameters: { CELL: [{ 'Cell Index': 1 }] },
+    }, 'gNB');
+
+    expect(result.gnbIdLength).toBe(24);
+    expect(result.gnbIdAllocation).toEqual({
+      start: 1,
+      end: 16_777_215,
+      step: 1,
+      reserved: [],
+    });
+    expect(result.pciAllocation).toEqual({
+      start: 0,
+      end: 1007,
+      step: 1,
+      reserved: [],
+    });
+    expect(result.sheetParameters.CELL).toEqual([{ 'Cell Index': 1 }]);
+  });
+
+  it('keeps saved gNB allocation values while filling missing fields', () => {
+    const result = withInitialCommonParamConfig({
+      gnbIdAllocation: { start: 10, reserved: [{ start: 20, end: 30 }] },
+      pciAllocation: { end: 500 },
+      gnbIdLength: 28,
+    }, 'gNB');
+
+    expect(result.gnbIdLength).toBe(28);
+    expect(result.gnbIdAllocation).toEqual({
+      start: 10,
+      end: 16_777_215,
+      step: 1,
+      reserved: [{ start: 20, end: 30 }],
+    });
+    expect(result.pciAllocation).toEqual({
+      start: 0,
+      end: 500,
+      step: 1,
+      reserved: [],
+    });
   });
 });

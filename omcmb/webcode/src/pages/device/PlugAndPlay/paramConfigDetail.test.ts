@@ -1092,4 +1092,136 @@ describe('parameter configuration detail mapping', () => {
     expect(secondSave.sheetParameters.INTERFACE[0]['IP Address']).toBe('192.0.2.30');
     expect(secondSave).not.toHaveProperty('networkParameterValues');
   });
+
+  it('persists interface name edits in the INTERFACE sheet instead of custom parameters', () => {
+    const path = 'Device.Ethernet.Interface.1.Name';
+    const current = withTemplateSheetParameters({
+      deviceType: 'gNB',
+      serialNumber: '5G-SN-INTERFACE',
+      sheetParameters: {
+        INTERFACE: [{ 'Serial Number': '5G-SN-INTERFACE', 'IP Address': '192.0.2.10' }],
+      },
+    });
+    const firstSave = mergeParamConfigFormValues(current, {
+      ...toParamConfigFormValues(current),
+      customParams: [{ trPath: 'Device.ManagementServer.URL', value: 'http://acs.example.test' }],
+      networkParameterValues: { [path]: 'wan1' },
+    });
+
+    expect(firstSave.customParams).toEqual([
+      { trPath: 'Device.ManagementServer.URL', value: 'http://acs.example.test' },
+    ]);
+    expect(firstSave.sheetParameters.INTERFACE[0]['Interface Name']).toBe('wan1');
+    expect(firstSave).not.toHaveProperty('networkParameterValues');
+    expect(toParamConfigFormValues(firstSave).networkParameterValues).toEqual({ [path]: 'wan1' });
+
+    const secondSave = mergeParamConfigFormValues(firstSave, {
+      ...toParamConfigFormValues(firstSave),
+      networkParameterValues: { [path]: 'wan2' },
+    });
+
+    expect(secondSave.customParams).toEqual([
+      { trPath: 'Device.ManagementServer.URL', value: 'http://acs.example.test' },
+    ]);
+    expect(secondSave.sheetParameters.INTERFACE[0]['Interface Name']).toBe('wan2');
+    expect(toParamConfigFormValues(secondSave).networkParameterValues).toEqual({ [path]: 'wan2' });
+  });
+
+  it('preserves submitted interface names when the imported INTERFACE sheet has no Interface Name column', () => {
+    const current = {
+      deviceType: 'gNB' as const,
+      serialNumber: '5G-SN-INTERFACE-NO-COLUMN',
+      sheetParameters: {
+        INTERFACE: [{
+          'Serial Number': '5G-SN-INTERFACE-NO-COLUMN',
+          'IP Address [1.1]': '192.0.2.10',
+        }],
+      },
+    };
+
+    const saved = mergeParamConfigFormValues(current, {
+      ...toParamConfigFormValues(current),
+      sheetParameters: {
+        INTERFACE: [{
+          'Serial Number': '5G-SN-INTERFACE-NO-COLUMN',
+          'IP Address [1.1]': '192.0.2.10',
+          'Interface Name': 'wan-no-column',
+        }],
+      },
+    });
+
+    expect(saved.sheetParameters.INTERFACE[0]['Interface Name']).toBe('wan-no-column');
+    expect(toParamConfigFormValues(saved).networkParameterValues).toEqual({
+      'Device.Ethernet.Interface.1.Name': 'wan-no-column',
+    });
+  });
+
+  it('adds the Interface Name column from network TRPath values when the imported INTERFACE sheet lacks it', () => {
+    const path = 'Device.Ethernet.Interface.1.Name';
+    const current = {
+      deviceType: 'gNB' as const,
+      serialNumber: '5G-SN-INTERFACE-TRPATH-NO-COLUMN',
+      sheetParameters: {
+        INTERFACE: [{
+          'Serial Number': '5G-SN-INTERFACE-TRPATH-NO-COLUMN',
+          'IP Address [1.1]': '192.0.2.10',
+        }],
+      },
+    };
+
+    const saved = mergeParamConfigFormValues(current, {
+      ...toParamConfigFormValues(current),
+      networkParameterValues: { [path]: 'wan-trpath-no-column' },
+    });
+
+    expect(saved.sheetParameters.INTERFACE[0]['Interface Name']).toBe('wan-trpath-no-column');
+    expect(toParamConfigFormValues(saved).networkParameterValues).toEqual({
+      [path]: 'wan-trpath-no-column',
+    });
+  });
+
+  it('falls back to the INTERFACE sheet when an interface name mapping cannot be written', () => {
+    const path = 'Device.Ethernet.Interface.1.Name';
+    const current = withTemplateSheetParameters({
+      deviceType: 'gNB',
+      serialNumber: '5G-SN-INTERFACE-MAPPED',
+      workbookMappings: [{
+        sheet: 'INTERFACE',
+        header: 'Interface Name [1]',
+        trPath: path,
+      }],
+      sheetParameters: {
+        INTERFACE: [{
+          'Serial Number': '5G-SN-INTERFACE-MAPPED',
+          'IP Address': '192.0.2.10',
+        }],
+      },
+    });
+
+    const saved = mergeParamConfigFormValues(current, {
+      ...toParamConfigFormValues(current),
+      networkParameterValues: { [path]: 'wan-mapped' },
+    });
+
+    expect(saved.sheetParameters.INTERFACE[0]['Interface Name']).toBe('wan-mapped');
+    expect(toParamConfigFormValues(saved).networkParameterValues).toEqual({ [path]: 'wan-mapped' });
+  });
+
+  it('moves previously materialized interface names out of custom parameters', () => {
+    const path = 'Device.Ethernet.Interface.1.Name';
+    const current = withTemplateSheetParameters({
+      deviceType: 'gNB',
+      serialNumber: '5G-SN-INTERFACE-NAME',
+      customParams: [{ name: 'WAN Name', trPath: path, value: 'wan1' }],
+    });
+
+    const saved = mergeParamConfigFormValues(current, {
+      ...toParamConfigFormValues(current),
+      networkParameterValues: { [path]: 'wan2' },
+    });
+
+    expect(saved.customParams).toBeUndefined();
+    expect(saved.sheetParameters.INTERFACE[0]['Interface Name']).toBe('wan2');
+    expect(toParamConfigFormValues(saved).networkParameterValues).toEqual({ [path]: 'wan2' });
+  });
 });

@@ -116,6 +116,36 @@ describe('parameter config workbook', () => {
     expect(mappingRows.map((row) => row['参数列名'])).toEqual(['PCI', 'DL Carrier Bandwidth']);
   });
 
+  it('keeps edited gNB interface names in per-device downloads even when the imported mapping lacked the column', () => {
+    const workbook = createParamConfigWorkbook([{
+      deviceType: 'gNB',
+      serialNumber: 'SN-INTERFACE-001',
+      sheetParameters: {
+        INTERFACE: [{
+          'Serial Number': 'SN-INTERFACE-001',
+          'Interface Name': 'wan-test',
+          'Address Type': 'Static',
+        }],
+      },
+      workbookMappings: [
+        {
+          displayName: 'Address Type',
+          sheet: 'INTERFACE',
+          header: 'Address Type',
+          trPath: 'Device.IP.Interface.1.IPv4Address.1.AddressingType',
+          source: 'system',
+        },
+      ],
+    }]);
+
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.INTERFACE, {
+      header: 1,
+      defval: '',
+    });
+    expect(rows[0]).toEqual(['Serial Number', 'Interface Name', 'Address Type']);
+    expect(rows[1]).toEqual(['SN-INTERFACE-001', 'wan-test', 'Static']);
+  });
+
   it('rejects placeholder serial numbers instead of guessing their target device', () => {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
@@ -634,6 +664,40 @@ describe('parameter config workbook', () => {
       type: 'list',
       formulae: ['"DHCP,Static"'],
     });
+  });
+
+  it('supplements exported existing workbooks with missing interface TRPath mappings', async () => {
+    const metadata = {
+      deviceType: 'gNB' as const,
+      quickSettingsGroups: [{
+        id: 'gnb-network-interface',
+        titleZh: 'WAN(VLAN)/LAN',
+        titleEn: 'WAN(VLAN)/LAN',
+        multiInstance: true,
+        objectPath: 'Device.Ethernet.Interface.{i}.',
+        params: [
+          { name: 'Name', titleZh: '接口名称', titleEn: 'Interface Name', leaf: 'Name' },
+        ],
+      }],
+    };
+    const source = createParamConfigWorkbook([{
+      deviceType: 'gNB',
+      serialNumber: '5G-SN-INTERFACE',
+      sheetParameters: {
+        INTERFACE: [{
+          'Serial Number': '5G-SN-INTERFACE',
+          'Interface Name': 'wan1',
+        }],
+      },
+      workbookMappings: [],
+    }]);
+
+    const downloaded = await enrichParamConfigWorkbook(source, metadata);
+    const mappingPaths = downloaded.getWorksheet(PARAM_MAPPING_SHEET)?.getColumn(4).values.map(String);
+
+    expect(mappingPaths).toEqual(expect.arrayContaining([
+      'Device.Ethernet.Interface.1.Name',
+    ]));
   });
 
   it('moves 1588 and synchronization settings into a dedicated sheet', async () => {
