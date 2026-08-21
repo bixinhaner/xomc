@@ -518,6 +518,71 @@ function leafName(path: string): string {
   return path.split('.').filter(Boolean).pop() ?? path;
 }
 
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function decodeXmlText(value: string): string {
+  return value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+function readXmlTagText(xml: string, tag: string): string | undefined {
+  const match = xml.match(new RegExp(`<(?:[a-zA-Z][\\w-]*:)?${tag}\\b[^>]*>([\\s\\S]*?)<\\/(?:[a-zA-Z][\\w-]*:)?${tag}>`));
+  return match ? decodeXmlText(match[1].trim()) : undefined;
+}
+
+function faultMessageFromRawResponse(rawResponse?: string): string | undefined {
+  if (!rawResponse) return undefined;
+  const soapCode = readXmlTagText(rawResponse, 'faultcode');
+  const soapString = readXmlTagText(rawResponse, 'faultstring');
+  const cwmpCode = readXmlTagText(rawResponse, 'FaultCode');
+  const cwmpString = readXmlTagText(rawResponse, 'FaultString');
+  const primaryString = cwmpString ?? soapString;
+  const primaryCode = cwmpCode ?? soapCode;
+  if (primaryCode && primaryString) return `[${primaryCode}] ${primaryString}`;
+  return primaryString ?? primaryCode;
+}
+
+function formatParamFault(fault: unknown): string | undefined {
+  if (!fault || typeof fault !== 'object') return undefined;
+  const source = fault as Record<string, unknown>;
+  const path = nonEmptyString(source.parameter_name) ?? nonEmptyString(source.parameterName);
+  const code = typeof source.fault_code === 'number'
+    ? String(source.fault_code)
+    : nonEmptyString(source.fault_code) ?? nonEmptyString(source.faultCode);
+  const text = nonEmptyString(source.fault_string) ?? nonEmptyString(source.faultString);
+  const detail = [code, text].filter(Boolean).join(' ');
+  if (path && detail) return `${path}: ${detail}`;
+  return detail || path;
+}
+
+function deviceFaultMessageFromResult(result: unknown): string | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+  const source = result as Record<string, unknown>;
+  const paramFaults = Array.isArray(source.param_faults)
+    ? source.param_faults.map(formatParamFault).filter((item): item is string => Boolean(item))
+    : [];
+  if (paramFaults.length > 0) return paramFaults.join('; ');
+
+  const code = typeof source.fault_code === 'number'
+    ? String(source.fault_code)
+    : nonEmptyString(source.fault_code) ?? nonEmptyString(source.faultCode);
+  const text = nonEmptyString(source.fault_string) ?? nonEmptyString(source.faultString);
+  if (code && text) return `[${code}] ${text}`;
+  if (text) return text;
+
+  return faultMessageFromRawResponse(nonEmptyString(source.raw_response));
+}
+
+function resultItemFaultText(item: DeviceTaskResultItem, fallback?: string): string | undefined {
+  return deviceFaultMessageFromResult(item.result?.parsedData) ?? item.failReason ?? fallback;
+}
+
 const pathTemplateMatcherCache = new Map<string, RegExp>();
 
 function pathTemplateMatcher(template: string): RegExp {
@@ -838,7 +903,9 @@ export function applyFrameToRow(
     deviceTaskId: frame.device_task_id ?? prev.deviceTaskId,
     status,
     cells,
-    faultCode: frame.error_message || prev.faultCode,
+    faultCode: status === 'failed'
+      ? (deviceFaultMessageFromResult(frame.result) ?? frame.error_message ?? prev.faultCode)
+      : prev.faultCode,
     dispatchedAt: toClock(frame.sent_at) ?? prev.dispatchedAt,
     respondedAt: toClock(frame.completed_at) ?? prev.respondedAt,
     raw,
@@ -880,7 +947,7 @@ export function mapResultItemToRow(
     deviceTaskId: item.deviceTaskId ?? '',
     status,
     cells,
-    faultCode: item.failReason,
+    faultCode: resultItemFaultText(item),
     dispatchedAt: toClock(item.startedAt), // 下发时间 = device_tasks.sent_at（后端透传为 started_at）
     respondedAt: toClock(item.finishedAt),
     raw: item.result.rawOutput ?? '',
@@ -948,7 +1015,9 @@ export function buildDeviceRows(
         status: base[i].status,
         dispatchedAt: base[i].dispatchedAt ?? '',
         respondedAt: base[i].respondedAt ?? '',
-        value: base[i].status === 'success' ? (base[i].cells[path] ?? '') : (it.failReason ?? PATH_TASK_FAILED_FALLBACK),
+        value: base[i].status === 'success'
+          ? (base[i].cells[path] ?? '')
+          : (resultItemFaultText(it, PATH_TASK_FAILED_FALLBACK) ?? PATH_TASK_FAILED_FALLBACK),
       });
     });
     pathTasks.sort((a, b) => a.pathIndex - b.pathIndex);
@@ -1033,13 +1102,20 @@ export function buildMODReadbackRows(
         status: modOk ? 'success' : 'failed',
         dispatchedAt: toClock(firstMod?.startedAt) ?? '',
         respondedAt: toClock(firstMod?.finishedAt) ?? '',
-        value: modOk ? (setValues[path] ?? '') : (firstMod?.failReason ?? PATH_TASK_FAILED_FALLBACK),
+        value: modOk
+          ? (setValues[path] ?? '')
+          : (firstMod ? (resultItemFaultText(firstMod, PATH_TASK_FAILED_FALLBACK) ?? PATH_TASK_FAILED_FALLBACK) : PATH_TASK_FAILED_FALLBACK),
       });
     }
     if (lstItem) {
       const lstRows: { path: string; value: string; item?: DeviceTaskResultItem }[] = hasReadback
         ? readbackPairs
-        : Object.keys(setValues).map((path) => ({ path, value: lstOk ? '' : (lstItem.failReason ?? READBACK_FAILED_FALLBACK) }));
+        : Object.keys(setValues).map((path) => ({
+            path,
+            value: lstOk
+              ? ''
+              : (resultItemFaultText(lstItem, READBACK_FAILED_FALLBACK) ?? READBACK_FAILED_FALLBACK),
+          }));
       for (const { path, value, item = lstItem } of lstRows) {
         pathTasks.push({
           pathIndex: 1,
@@ -1074,7 +1150,9 @@ export function buildMODReadbackRows(
       deviceTaskId: modTaskId,
       status,
       cells,
-      faultCode: modOk ? undefined : (firstMod?.failReason ?? DISPATCH_FAILED_FALLBACK),
+      faultCode: modOk
+        ? undefined
+        : (firstMod ? (resultItemFaultText(firstMod, DISPATCH_FAILED_FALLBACK) ?? DISPATCH_FAILED_FALLBACK) : DISPATCH_FAILED_FALLBACK),
       unverifiedReason: status === 'unverified' ? 'query-failed' : undefined,
       pathTasks,
       dispatchedAt: toClock(firstMod?.startedAt),

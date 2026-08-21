@@ -5123,7 +5123,7 @@ INSERT INTO public.mml_commands VALUES
 	('94278d2f-7ec3-4853-9a37-4e1c19c077a8', 'MML350 DeviceGSM / OmlRemoteIpBak', 'LST MML350_DEVICEGSM__OMLREMOTEIPBAK', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["DeviceGSM.OmlRemoteIpBak"]', NULL, '67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', '{"en-US": "MML350 DeviceGSM / OmlRemoteIpBak", "zh-CN": "MML350 DeviceGSM / OmlRemoteIpBak"}', false, '{}', 'LST', '{"en-US": "OmlRemoteIpBak", "zh-CN": "OmlRemoteIpBak"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('9fcab18d-ac8c-4b42-b8fc-205752dc245a', 'MML350 DeviceGSM / Cs7Instance', 'LST MML350_DEVICEGSM__CS7INSTANCE', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["DeviceGSM.Cs7Instance.ForAs.Index", "DeviceGSM.Cs7Instance.ForAsp.Index", "DeviceGSM.Cs7Instance.ForSccpAddr.Index", "DeviceGSM.Cs7Instance.{i}.NetworkIndicator", "DeviceGSM.Cs7Instance.{i}.PointCode", "DeviceGSM.Cs7Instance.{i}.PointCodeFormat", "DeviceGSM.Cs7Instance.{i}.XuaRkmRoutingKeyAllocation"]', NULL, '67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', '{"en-US": "MML350 DeviceGSM / Cs7Instance", "zh-CN": "MML350 DeviceGSM / Cs7Instance"}', false, '{}', 'LST', '{"en-US": "Cs7Instance", "zh-CN": "Cs7Instance"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('a5e4c091-3e1b-4f75-aca7-a2a39e8d732c', 'MML350 InternetGatewayDevice / Time', 'LST MML350_INTERNETGATEWAYDEVICE__TIME', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["InternetGatewayDevice.Time.NTPServer3", "InternetGatewayDevice.Time.NTPServer5"]', NULL, '986ffbd6-66d0-41a9-b19a-60e87b7f8455', '{"en-US": "MML350 InternetGatewayDevice / Time", "zh-CN": "MML350 InternetGatewayDevice / Time"}', false, '{}', 'LST', '{"en-US": "Time", "zh-CN": "Time"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
-	('9b325987-c371-4e3f-b77d-022577f30a70', 'MML350 Device.KeepalivedMgmt / VrrpMgmt', 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.KeepalivedMgmt.VrrpMgmt.Index", "Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt", "Device.KeepalivedMgmt.VrrpMgmt.{i}.DstIpAddr", "Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable", "Device.KeepalivedMgmt.VrrpMgmt.{i}.Interface", "Device.KeepalivedMgmt.VrrpMgmt.{i}.MaxVirtualIpEntries", "Device.KeepalivedMgmt.VrrpMgmt.{i}.Name", "Device.KeepalivedMgmt.VrrpMgmt.{i}.Priority", "Device.KeepalivedMgmt.VrrpMgmt.{i}.SrcIpAddr", "Device.KeepalivedMgmt.VrrpMgmt.{i}.State", "Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.IP", "Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface", "Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Label", "Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.NetmaskPrefix", "Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpNumberOfEntries", "Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualRouterId"]', NULL, '777212fe-ba49-4ca2-b528-26416bbe444f', '{"en-US": "MML350 Device.KeepalivedMgmt / VrrpMgmt", "zh-CN": "MML350 Device.KeepalivedMgmt / VrrpMgmt"}', false, '{}', 'LST', '{"en-US": "VrrpMgmt", "zh-CN": "VrrpMgmt"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
+	('9b325987-c371-4e3f-b77d-022577f30a70', 'MML350 Device.KeepalivedMgmt / VrrpMgmt', 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.KeepalivedMgmt.VrrpMgmt.Index", "Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt", "Device.KeepalivedMgmt.VrrpMgmt.{i}.DstIpAddr", "Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable", "Device.KeepalivedMgmt.VrrpMgmt.{i}.Interface", "Device.KeepalivedMgmt.VrrpMgmt.{i}.MaxVirtualIpEntries", "Device.KeepalivedMgmt.VrrpMgmt.{i}.Name", "Device.KeepalivedMgmt.VrrpMgmt.{i}.Priority", "Device.KeepalivedMgmt.VrrpMgmt.{i}.SrcIpAddr", "Device.KeepalivedMgmt.VrrpMgmt.{i}.State", "Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpNumberOfEntries", "Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualRouterId"]', NULL, '777212fe-ba49-4ca2-b528-26416bbe444f', '{"en-US": "MML350 Device.KeepalivedMgmt / VrrpMgmt", "zh-CN": "MML350 Device.KeepalivedMgmt / VrrpMgmt"}', false, '{}', 'LST', '{"en-US": "VrrpMgmt", "zh-CN": "VrrpMgmt"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('b3aad92e-1f6a-4551-8934-27f5aa5f58d5', 'MML350 DeviceGSM / Bts', 'LST MML350_DEVICEGSM__BTS', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["DeviceGSM.Bts.Index", "DeviceGSM.Bts.Trx.Index", "DeviceGSM.Bts.{i}.Band", "DeviceGSM.Bts.{i}.Bsic", "DeviceGSM.Bts.{i}.C0PowerRed", "DeviceGSM.Bts.{i}.CellId", "DeviceGSM.Bts.{i}.CellReselectHysteresis", "DeviceGSM.Bts.{i}.CellReselectOffset", "DeviceGSM.Bts.{i}.CellReselectPenaltyTime", "DeviceGSM.Bts.{i}.CodecSupport", "DeviceGSM.Bts.{i}.GprsMode", "DeviceGSM.Bts.{i}.HandoverAlgorithm", "DeviceGSM.Bts.{i}.IpaRslIp", "DeviceGSM.Bts.{i}.IpaUnitId", "DeviceGSM.Bts.{i}.LocationAreaCode", "DeviceGSM.Bts.{i}.MsMaxPower", "DeviceGSM.Bts.{i}.NeighborCgiAdd", "DeviceGSM.Bts.{i}.NeighborCgiDel", "DeviceGSM.Bts.{i}.NeighborListMode", "DeviceGSM.Bts.{i}.NumofTrxChannel", "DeviceGSM.Bts.{i}.OmlConnectState", "DeviceGSM.Bts.{i}.OmlIpaStreamId", "DeviceGSM.Bts.{i}.RachCellBarred", "DeviceGSM.Bts.{i}.Si2quaterNeighborListAdd", "DeviceGSM.Bts.{i}.Si2quaterNeighborListDel", "DeviceGSM.Bts.{i}.Trx.{i}.Arfcn", "DeviceGSM.Bts.{i}.Trx.{i}.MaxPowerRed", "DeviceGSM.Bts.{i}.Trx.{i}.RfLocked", "DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.PhyChanConfig", "DeviceGSM.Bts.{i}.handover", "DeviceGSM.Bts.{i}.handover1.maximum.distance", "DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis", "DeviceGSM.Bts.{i}.handover1.power.budget.interval", "DeviceGSM.Bts.{i}.handover1.window.rxlev.averaging", "DeviceGSM.Bts.{i}.handover1.window.rxlev.neighbor.averaging", "DeviceGSM.Bts.{i}.handover1.window.rxqual.averaging", "DeviceGSM.Bts.{i}.handover2.afs-bias.rxlev", "DeviceGSM.Bts.{i}.handover2.afs-bias.rxqual", "DeviceGSM.Bts.{i}.handover2.assignment", "DeviceGSM.Bts.{i}.handover2.max-handovers", "DeviceGSM.Bts.{i}.handover2.maximum.distance", "DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-f", "DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-h", "DeviceGSM.Bts.{i}.handover2.min.rxlev", "DeviceGSM.Bts.{i}.handover2.min.rxqual", "DeviceGSM.Bts.{i}.handover2.penalty-time.failed-assignment", "DeviceGSM.Bts.{i}.handover2.penalty-time.failed-ho", "DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-assignment", "DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-ho", "DeviceGSM.Bts.{i}.handover2.penalty-time.max-distance", "DeviceGSM.Bts.{i}.handover2.power.budget.hysteresis", "DeviceGSM.Bts.{i}.handover2.power.budget.interval", "DeviceGSM.Bts.{i}.handover2.retries", "DeviceGSM.Bts.{i}.handover2.tdma-measurement", "DeviceGSM.Bts.{i}.handover2.window.rxlev.averaging", "DeviceGSM.Bts.{i}.handover2.window.rxlev.neighbor.averaging", "DeviceGSM.Bts.{i}.handover2.window.rxqual.averaging"]', NULL, '67d3e9e4-0c35-47a6-bfb2-d7f0aa4cc106', '{"en-US": "MML350 DeviceGSM / Bts", "zh-CN": "MML350 DeviceGSM / Bts"}', false, '{}', 'LST', '{"en-US": "Bts", "zh-CN": "Bts"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('c2a1f6f6-4fa8-423f-91a4-1786ab8458ca', '查询 PTP1588', 'LST MML350_DEVICE_FAP__PTP1588', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.FAP.PTP1588.DelayInterval", "Device.FAP.PTP1588.Domain", "Device.FAP.PTP1588.Interface", "Device.FAP.PTP1588.IpAddr", "Device.FAP.PTP1588.Profile", "Device.FAP.PTP1588.ServerAddr", "Device.FAP.PTP1588.SyncInterval", "Device.FAP.PTP1588.Transmode", "Device.FAP.PTP1588.UnicastMode", "Device.FAP.PTP1588.VlanId"]', NULL, 'f75bff35-e50a-4c40-b7d8-9d3e87107d7a', '{"en-US": "Query PTP1588", "zh-CN": "查询 PTP1588"}', false, '{}', 'LST', '{"en-US": "PTP1588", "zh-CN": "PTP1588"}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
 	('c2eb2ea1-fed3-484e-ba55-8c441cc18dbf', 'MML350 Device.LAN_HostConfigManagement / IPInterface.NgapMgmt.', 'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NGAPMGMT', 'mml-350-20260704', 'omcgo/data/model-library/add-mml-config-20260704--350 .xlsx 按 Excel group/commands 列追加的 MML 配置 path 分组树数据', 'GetParameterValues', '2026-07-16 10:27:00.870631+08', '["Device.LAN_HostConfigManagement.IPInterface.NgapMgmt.NgapLocalIpAddrList", "Device.LAN_HostConfigManagement.IPInterface.NgapMgmt.NguLocalIpAddrList"]', NULL, 'dbaf234a-3d34-47e3-93b1-be9766de95aa', '{"en-US": "MML350 Device.LAN_HostConfigManagement / IPInterface.NgapMgmt.", "zh-CN": "MML350 Device.LAN_HostConfigManagement / IPInterface.NgapMgmt."}', false, '{}', 'LST', '{"en-US": "IPInterface.NgapMgmt.", "zh-CN": "IPInterface.NgapMgmt."}', 'admin', false, '{}', '2026-07-16 10:27:00.870631+08', NULL, '[]', '[]', '', ''),
@@ -28091,6 +28091,9 @@ INSERT INTO public.standard_params (
 VALUES (
 	'Device.KeepalivedMgmt.VrrpMgmt.{i}.', 'object', 'READ_WRITE', NULL,
 	'Immediate', 'VRRP multi-instance object'
+), (
+	'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.', 'object', 'READ_WRITE', NULL,
+	'Immediate', 'VRRP virtual IP object'
 )
 ON CONFLICT (standard_path) DO UPDATE
 SET entry_type = 'object',
@@ -28106,6 +28109,13 @@ INSERT INTO public.param_mappings (
 SELECT pm.id,
 	'Device.KeepalivedMgmt.VrrpMgmt.{i}.',
 	'Device.KeepalivedMgmt.VrrpMgmt.{i}.',
+	'object', 'READ_WRITE', 'Immediate', true, true, true, 'builtin'
+FROM public.param_models pm
+WHERE pm.name = 'BSC'
+UNION ALL
+SELECT pm.id,
+	'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.',
+	'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.',
 	'object', 'READ_WRITE', 'Immediate', true, true, true, 'builtin'
 FROM public.param_models pm
 WHERE pm.name = 'BSC'
@@ -28188,7 +28198,11 @@ WITH desired_commands(command_code, command_name, logical_name, operation_type, 
 		('MOD MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT', '修改热备配置', '热备配置', 'MOD', 'SetParameterValues', NULL::varchar),
 		('MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', '修改VRRP实例', 'VRRP实例', 'MOD', 'SetParameterValues', NULL::varchar),
 		('ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', '添加VRRP实例', 'VRRP实例', 'ADD', 'AddObject', 'Device.KeepalivedMgmt.VrrpMgmt.'),
-		('RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', '删除VRRP实例', 'VRRP实例', 'RMV', 'DeleteObject', 'Device.KeepalivedMgmt.VrrpMgmt.')
+		('RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', '删除VRRP实例', 'VRRP实例', 'RMV', 'DeleteObject', 'Device.KeepalivedMgmt.VrrpMgmt.'),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST', '查询VRRP虚拟IP', 'VRRP虚拟IP', 'LST', 'GetParameterValues', NULL::varchar),
+		('MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST', '修改VRRP虚拟IP', 'VRRP虚拟IP', 'MOD', 'SetParameterValues', NULL::varchar),
+		('ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST', '添加VRRP虚拟IP', 'VRRP虚拟IP', 'ADD', 'AddObject', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.'),
+		('RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST', '删除VRRP虚拟IP', 'VRRP虚拟IP', 'RMV', 'DeleteObject', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.')
 )
 INSERT INTO public.mml_commands (
 	command_name, command_code, category, description, rpc_method,
@@ -28209,12 +28223,13 @@ SELECT
 	g.id,
 	jsonb_build_object('zh-CN', d.command_name, 'en-US',
 		CASE d.operation_type
-			WHEN 'MOD' THEN CASE WHEN d.command_code LIKE '%KEEPALIVEDMGMT' THEN 'Modify HA Configuration' ELSE 'Modify VRRP Instances' END
-			WHEN 'ADD' THEN 'Add VRRP Instance'
-			ELSE 'Delete VRRP Instance'
+			WHEN 'LST' THEN 'Query VRRP Virtual IPs'
+			WHEN 'MOD' THEN CASE WHEN d.command_code LIKE '%KEEPALIVEDMGMT' THEN 'Modify HA Configuration' WHEN d.command_code LIKE '%VIRTUALIPLIST' THEN 'Modify VRRP Virtual IPs' ELSE 'Modify VRRP Instances' END
+			WHEN 'ADD' THEN CASE WHEN d.command_code LIKE '%VIRTUALIPLIST' THEN 'Add VRRP Virtual IP' ELSE 'Add VRRP Instance' END
+			ELSE CASE WHEN d.command_code LIKE '%VIRTUALIPLIST' THEN 'Delete VRRP Virtual IP' ELSE 'Delete VRRP Instance' END
 		END),
 	jsonb_build_object('zh-CN', d.logical_name, 'en-US',
-		CASE WHEN d.command_code LIKE '%KEEPALIVEDMGMT' THEN 'HA Configuration' ELSE 'VRRP Instances' END),
+		CASE WHEN d.command_code LIKE '%KEEPALIVEDMGMT' THEN 'HA Configuration' WHEN d.command_code LIKE '%VIRTUALIPLIST' THEN 'VRRP Virtual IPs' ELSE 'VRRP Instances' END),
 	'admin',
 	false,
 	'{}'::jsonb,
@@ -28263,12 +28278,12 @@ WITH field_paths(command_code, standard_path, source_order) AS (
 		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.Priority', 8),
 		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.SrcIpAddr', 9),
 		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.State', 10),
-		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.IP', 11),
-		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface', 12),
-		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Label', 13),
-		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.NetmaskPrefix', 14),
-		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpNumberOfEntries', 15),
-		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualRouterId', 16)
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpNumberOfEntries', 11),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualRouterId', 12),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.IP', 1),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface', 2),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Label', 3),
+		('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.NetmaskPrefix', 4)
 ), command_fields AS (
 	SELECT command_code, standard_path, source_order
 	FROM field_paths
@@ -28306,6 +28321,29 @@ WITH field_paths(command_code, standard_path, source_order) AS (
 	WHERE fp.command_code = 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT'
 	  AND bpm.access = 'READ_WRITE'
 	  AND regexp_count(fp.standard_path, '\{i\}') = 1
+	UNION ALL
+	SELECT 'MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST', fp.standard_path, fp.source_order
+	FROM field_paths fp
+	JOIN public.param_models pm ON pm.name = 'BSC'
+	JOIN public.param_mappings bpm ON bpm.param_model_id = pm.id
+	 AND bpm.standard_path = fp.standard_path
+	 AND bpm.entry_type = 'parameter'
+	 AND bpm.is_active
+	 AND bpm.is_supported
+	WHERE fp.command_code = 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST'
+	  AND bpm.access = 'READ_WRITE'
+	UNION ALL
+	SELECT 'ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST', fp.standard_path, fp.source_order
+	FROM field_paths fp
+	JOIN public.param_models pm ON pm.name = 'BSC'
+	JOIN public.param_mappings bpm ON bpm.param_model_id = pm.id
+	 AND bpm.standard_path = fp.standard_path
+	 AND bpm.entry_type = 'parameter'
+	 AND bpm.is_active
+	 AND bpm.is_supported
+	WHERE fp.command_code = 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST'
+	  AND bpm.access = 'READ_WRITE'
+	  AND regexp_count(fp.standard_path, '\{i\}') = 2
 ), prepared AS (
 	SELECT
 		cf.command_code,
@@ -28350,14 +28388,21 @@ SET deprecated_at = COALESCE(sf.deprecated_at, NOW()),
 FROM public.mml_commands c
 WHERE c.id = sf.command_id
 	AND c.command_code IN (
+		'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
 		'MOD MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT',
 		'MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
 		'ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
-		'RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT'
+		'RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
+		'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST',
+		'MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST',
+		'ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST',
+		'RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST'
 	)
 	AND (
 		c.operation_type = 'RMV'
-		OR NOT EXISTS (
+		OR (
+			c.operation_type IN ('MOD', 'ADD')
+			AND NOT EXISTS (
 			SELECT 1
 			FROM public.standard_params bound_sp
 			JOIN public.param_models pm ON pm.name = 'BSC'
@@ -28368,13 +28413,26 @@ WHERE c.id = sf.command_id
 			 AND bpm.is_supported
 			WHERE bound_sp.id = sf.standard_path_id
 			  AND bpm.access = 'READ_WRITE'
+			)
+		)
+		OR EXISTS (
+			SELECT 1
+			FROM public.standard_params bound_sp
+			WHERE bound_sp.id = sf.standard_path_id
+			  AND bound_sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.%'
+			  AND c.command_code IN (
+				  'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
+				  'MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
+				  'ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
+				  'RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT'
+			  )
 		)
 		OR (
 			c.operation_type = 'ADD'
 			AND EXISTS (
 				SELECT 1 FROM public.standard_params bound_sp
 				WHERE bound_sp.id = sf.standard_path_id
-				  AND regexp_count(bound_sp.standard_path, '\{i\}') <> 1
+				  AND regexp_count(bound_sp.standard_path, '\{i\}') <> regexp_count(c.target_object, '\{i\}') + 1
 			)
 		)
 	)
@@ -28393,22 +28451,26 @@ UPDATE public.mml_commands
 SET command_name = CASE command_code
 		WHEN 'LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT' THEN '查询热备配置'
 		WHEN 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT' THEN '查询VRRP实例'
+		WHEN 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST' THEN '查询VRRP虚拟IP'
 		ELSE command_name
 	END,
 	command_name_i18n = CASE command_code
 		WHEN 'LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT' THEN '{"zh-CN":"查询热备配置","en-US":"Query HA Configuration"}'::jsonb
 		WHEN 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT' THEN '{"zh-CN":"查询VRRP实例","en-US":"Query VRRP Instances"}'::jsonb
+		WHEN 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST' THEN '{"zh-CN":"查询VRRP虚拟IP","en-US":"Query VRRP Virtual IPs"}'::jsonb
 		ELSE command_name_i18n
 	END,
 	logical_name_i18n = CASE command_code
 		WHEN 'LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT' THEN '{"zh-CN":"热备配置","en-US":"HA Configuration"}'::jsonb
 		WHEN 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT' THEN '{"zh-CN":"VRRP实例","en-US":"VRRP Instances"}'::jsonb
+		WHEN 'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST' THEN '{"zh-CN":"VRRP虚拟IP","en-US":"VRRP Virtual IPs"}'::jsonb
 		ELSE logical_name_i18n
 	END,
 	updated_at = NOW()
 WHERE command_code IN (
 	'LST MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT',
-	'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT'
+	'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
+	'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST'
 )
   AND source = 'admin';
 
@@ -28430,7 +28492,11 @@ WITH refreshed AS (
 		'MOD MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT',
 		'MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
 		'ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
-		'RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT'
+		'RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT',
+		'LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST',
+		'MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST',
+		'ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST',
+		'RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST'
 	)
 	GROUP BY c.id, c.operation_type, c.target_object
 )
@@ -28440,6 +28506,27 @@ SET target_paths = r.paths,
 	updated_at = NOW()
 FROM refreshed r
 WHERE c.id = r.id;
+
+-- Object deletion commands should not expose parameter sub-fields. DeleteObject
+-- only consumes target_object plus the selected instance index; keep the object
+-- path in target_paths/tree_node_refs for filtering and display.
+UPDATE public.mml_command_sub_fields sf
+SET deprecated_at = COALESCE(sf.deprecated_at, NOW()),
+	updated_at = NOW()
+FROM public.mml_commands c
+WHERE c.id = sf.command_id
+  AND c.operation_type = 'RMV'
+  AND c.deprecated_at IS NULL
+  AND sf.deprecated_at IS NULL
+  AND COALESCE(c.target_object, '') <> '';
+
+UPDATE public.mml_commands c
+SET target_paths = jsonb_build_array(c.target_object),
+	tree_node_refs = jsonb_build_array(c.target_object),
+	updated_at = NOW()
+WHERE c.operation_type = 'RMV'
+  AND c.deprecated_at IS NULL
+  AND COALESCE(c.target_object, '') <> '';
 
 COMMIT;
 

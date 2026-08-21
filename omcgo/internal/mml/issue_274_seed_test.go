@@ -135,7 +135,12 @@ func TestKeepalivedSeedRestoresPermissionDrivenCommandSet(t *testing.T) {
 	assert.Contains(t, block, "('MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', '修改VRRP实例'")
 	assert.Contains(t, block, "('ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', '添加VRRP实例'")
 	assert.Contains(t, block, "('RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT', '删除VRRP实例'")
+	assert.Contains(t, block, "('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST', '查询VRRP虚拟IP'")
+	assert.Contains(t, block, "('MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST', '修改VRRP虚拟IP'")
+	assert.Contains(t, block, "('ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST', '添加VRRP虚拟IP'")
+	assert.Contains(t, block, "('RMV MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST', '删除VRRP虚拟IP'")
 	assert.Contains(t, block, "'Device.KeepalivedMgmt.VrrpMgmt.{i}.', 'object', 'READ_WRITE'")
+	assert.Contains(t, block, "'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.', 'object', 'READ_WRITE'")
 	assert.Contains(t, block, "INSERT INTO public.param_mappings")
 	assert.Contains(t, block, "WHERE pm.name = 'BSC'")
 	assert.NotContains(t, block, "ADD MML350_DEVICE_KEEPALIVEDMGMT__KEEPALIVEDMGMT")
@@ -146,11 +151,61 @@ func TestKeepalivedSeedRestoresPermissionDrivenCommandSet(t *testing.T) {
 	assert.Contains(t, block, "'Device.KeepalivedMgmt.VrrpMgmt.{i}.DstIpAddr', 'READ_ONLY', 'STRING'")
 	assert.Contains(t, block, "'Device.KeepalivedMgmt.VrrpMgmt.{i}.SrcIpAddr', 'READ_ONLY', 'STRING'")
 	assert.Contains(t, block, "'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.IP', 'READ_ONLY', 'STRING'")
+	assert.Contains(t, block, "('LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST', 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.IP', 1)")
+	assert.Contains(t, block, "SELECT 'MOD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST'")
+	assert.Contains(t, block, "SELECT 'ADD MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT_VIRTUALIPLIST'")
 	assert.Contains(t, block, "'Device.KeepalivedMgmt.MaxVrrpEntries', 'READ_ONLY', 'U_INT'")
 	assert.Contains(t, block, "'Device.KeepalivedMgmt.VrrpMgmt.{i}.MaxVirtualIpEntries', 'READ_ONLY', 'U_INT'")
 	assert.Contains(t, block, "'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpNumberOfEntries', 'READ_ONLY', 'U_INT'")
 	assert.Contains(t, block, "'Device.KeepalivedMgmt.VrrpMgmt.'")
 	assert.Contains(t, block, "WHEN c.operation_type IN ('ADD', 'RMV') AND COALESCE(c.target_object, '') <> ''")
+	assert.Contains(t, block, "c.operation_type IN ('MOD', 'ADD')")
+	assert.Contains(t, block, "regexp_count(bound_sp.standard_path, '\\{i\\}') <> regexp_count(c.target_object, '\\{i\\}') + 1")
+}
+
+func TestKeepalivedVrrpMgmtCommandsExcludeVirtualIpListSubObject(t *testing.T) {
+	paths := []string{
+		"../../migrations/seed/000001_init_seed.sql",
+		"../../scripts/mml_apply_config_updates_20260721.sql",
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			contents, err := os.ReadFile(path)
+			require.NoError(t, err)
+			sql := string(contents)
+
+			assert.NotRegexp(t,
+				`(?m)['"]LST MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT['"].*VirtualIpList\.\{i\}`,
+				sql,
+				"VRRP instance query command must not bind nested VirtualIpList object fields",
+			)
+			assert.NotRegexp(t,
+				`(?m)['"](?:MOD|ADD|RMV) MML350_DEVICE_KEEPALIVEDMGMT__VRRPMGMT['"].*VirtualIpList\.\{i\}`,
+				sql,
+				"VRRP instance write/object commands must not bind nested VirtualIpList object fields",
+			)
+		})
+	}
+}
+
+func TestObjectDeleteCommandsDoNotExposeSubFields(t *testing.T) {
+	paths := []string{
+		"../../migrations/seed/000001_init_seed.sql",
+		"../../scripts/mml_apply_config_updates_20260721.sql",
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			contents, err := os.ReadFile(path)
+			require.NoError(t, err)
+			sql := string(contents)
+
+			assert.Contains(t, sql, "-- Object deletion commands should not expose parameter sub-fields.")
+			assert.Contains(t, sql, "c.operation_type = 'RMV'")
+			assert.Contains(t, sql, "sf.deprecated_at IS NULL")
+			assert.Contains(t, sql, "SET target_paths = jsonb_build_array(c.target_object)")
+			assert.Contains(t, sql, "tree_node_refs = jsonb_build_array(c.target_object)")
+		})
+	}
 }
 
 func issue274CorrectionBlock(sql string) string {

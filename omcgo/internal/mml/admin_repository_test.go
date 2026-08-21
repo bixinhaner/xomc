@@ -188,6 +188,42 @@ func Test_ListEnrichedByCommand_NilParamModelReturnsAllSubFields(t *testing.T) {
 		"paramModelID=nil should return all sub_fields regardless of csf.is_supported (PR-C)")
 }
 
+func Test_SubFieldReadPathsExcludeDeprecatedRows(t *testing.T) {
+	pool := newMMLTestPool(t)
+	if pool == nil {
+		return
+	}
+	ctx := context.Background()
+	fx := newMMLFixture(t, pool)
+	defer fx.cleanup()
+
+	commandID := fx.insertCommand("LST_DEPRECATED_SUBFIELDS", "chapter:DEPRECATED")
+	fx.insertSubField(commandID, "Device.Deprecated.Active", true, 1)
+	deprecatedID := fx.insertSubField(commandID, "Device.Deprecated.Hidden", true, 2)
+	_, err := pool.Exec(ctx,
+		`UPDATE mml_command_sub_fields SET deprecated_at = NOW() WHERE id = $1`,
+		deprecatedID,
+	)
+	require.NoError(t, err)
+
+	repo := NewPgSubFieldRepository(pool)
+
+	basicRows, err := repo.ListByCommand(ctx, commandID)
+	require.NoError(t, err)
+	require.Len(t, basicRows, 1)
+	assert.Contains(t, basicRows[0].MMLCode, "Device.Deprecated.Active")
+
+	enrichedRows, err := repo.ListEnrichedByCommand(ctx, commandID, nil)
+	require.NoError(t, err)
+	require.Len(t, enrichedRows, 1)
+	assert.Equal(t, "Device.Deprecated.Active", enrichedRows[0].Tr069Path)
+
+	adminRows, err := repo.ListAdminByCommand(ctx, commandID)
+	require.NoError(t, err)
+	require.Len(t, adminRows, 1)
+	assert.Equal(t, "Device.Deprecated.Active", adminRows[0].Tr069Path)
+}
+
 func Test_ListEnrichedByCommand_ReturnsStandardRange(t *testing.T) {
 	pool := newMMLTestPool(t)
 	if pool == nil {
