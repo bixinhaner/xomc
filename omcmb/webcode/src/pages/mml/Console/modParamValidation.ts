@@ -21,6 +21,28 @@ const NAMED_VALIDATION_PATTERNS: Record<string, string> = {
   no_zh: '^(?:(?![\\u4E00-\\u9FA5]|[\\uFE30-\\uFFA0]).)+$',
 };
 
+function isBooleanValueType(valueType?: string): boolean {
+  const normalized = valueType?.trim().toLowerCase();
+  return normalized === 'boolean' || normalized === 'bool';
+}
+
+function normalizeBooleanEquivalent(value: unknown): 'true' | 'false' | undefined {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') return 'true';
+  if (normalized === 'false' || normalized === '0') return 'false';
+  return undefined;
+}
+
+function enumContainsValue(path: CommandParamPath, value: string): boolean {
+  const options = path.enumOptions ?? [];
+  if (options.some((option) => option.value === value)) return true;
+  if (!isBooleanValueType(path.valueType)) return false;
+
+  const normalizedValue = normalizeBooleanEquivalent(value);
+  return normalizedValue != null
+    && options.some((option) => normalizeBooleanEquivalent(option.value) === normalizedValue);
+}
+
 export function validateModParamValue(
   path: CommandParamPath,
   value: string,
@@ -31,7 +53,7 @@ export function validateModParamValue(
     return path.isRequired === false ? null : { code: 'required' };
   }
 
-  if (path.enumOptions?.length && !path.enumOptions.some((option) => option.value === value)) {
+  if (path.enumOptions?.length && !enumContainsValue(path, value)) {
     return { code: 'enumValue' };
   }
 

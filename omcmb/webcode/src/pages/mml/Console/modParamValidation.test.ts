@@ -139,6 +139,19 @@ describe('validateModParamValue', () => {
     ).toEqual({ code: 'enumValue' });
   });
 
+  it('accepts boolean UI values when the model enum uses 0/1 wire values', () => {
+    const boolPath = param({
+      valueType: 'BOOLEAN',
+      enumOptions: [
+        { value: '0', label: 'false' },
+        { value: '1', label: 'true' },
+      ],
+    });
+
+    expect(validateModParamValue(boolPath, 'true')).toBeNull();
+    expect(validateModParamValue(boolPath, 'false')).toBeNull();
+  });
+
   it('validates the model validation pattern after range checks', () => {
     expect(
       validateModParamValue(
