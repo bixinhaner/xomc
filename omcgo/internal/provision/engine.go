@@ -525,6 +525,7 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 	} else {
 		e.ensureGPVWorkersStarted()
 	}
+	gpvHandler = provisionGPVRouteGuard(gpvHandler)
 	var gpvSub event.Subscription
 	if keyedBus, ok := bus.(interface {
 		KeyedPullSubscribe(
@@ -1989,6 +1990,9 @@ func gpvShardIndex(deviceSN string, shardCount int) int {
 }
 
 func provisionGPVDeviceKey(evt event.Event) (string, error) {
+	if deviceSN := strings.TrimSpace(evt.Metadata[event.MetadataDeviceSN]); deviceSN != "" {
+		return deviceSN, nil
+	}
 	var payload gpvResponsePayload
 	if err := evt.DecodePayload(&payload); err != nil {
 		return "", fmt.Errorf("decode GPV response key: %w", err)
@@ -1999,11 +2003,33 @@ func provisionGPVDeviceKey(evt event.Event) (string, error) {
 	return payload.DeviceSN, nil
 }
 
+func provisionGPVRouteGuard(next event.EventHandler) event.EventHandler {
+	return func(ctx context.Context, evt event.Event) error {
+		if !provisionOwnsGPVResponse(evt) {
+			return nil
+		}
+		return next(ctx, evt)
+	}
+}
+
+func provisionOwnsGPVResponse(evt event.Event) bool {
+	owner := evt.Metadata[event.MetadataGPVOwner]
+	switch owner {
+	case "", event.GPVOwnerProvision, event.GPVOwnerDeviceRPC:
+		return true
+	default:
+		return false
+	}
+}
+
 // handleGPVResponse processes GetParameterValuesResponse events from ACS.
 //
 // T-0098 P5-01：先尝试 Path B 翻译落库（standardPath）；命中即返回，否则
 // 用旧 HandleSyncResult 直写 privatePath（兜底，参数保留可见性）。
 func (e *ProvisioningEngine) handleGPVResponse(ctx context.Context, evt event.Event) error {
+	if !provisionOwnsGPVResponse(evt) {
+		return nil
+	}
 	var payload gpvResponsePayload
 	if err := evt.DecodePayload(&payload); err != nil {
 		e.logger.Error("decode GPV response event", zap.Error(err))

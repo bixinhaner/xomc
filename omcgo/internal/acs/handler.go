@@ -1800,23 +1800,32 @@ func isDurableParamSyncGPVTask(taskItem *task.Task) bool {
 
 func gpvResponseOwner(taskItem *task.Task) string {
 	if isDurableParamSyncGPVTask(taskItem) {
-		return "param_sync"
+		return event.GPVOwnerParamSync
 	}
 	if taskItem == nil {
-		return "device_rpc"
+		return event.GPVOwnerDeviceRPC
 	}
 	switch {
+	case isAlarmSyncGPVTask(taskItem):
+		return event.GPVOwnerAlarmSync
 	case taskItem.Source == task.TaskSourceDeviceAccess:
-		return "device_access"
+		return event.GPVOwnerDeviceAccess
 	case strings.HasPrefix(taskItem.CommandKey, "rollback-enable-check-"):
-		return "software_rollback"
+		return event.GPVOwnerSoftwareRollback
 	case strings.HasPrefix(taskItem.CommandKey, "provision-") ||
 		strings.HasPrefix(taskItem.CommandKey, "PNP") ||
 		strings.HasPrefix(taskItem.CommandKey, "model-upload-"):
-		return "provision"
+		return event.GPVOwnerProvision
 	default:
-		return "device_rpc"
+		return event.GPVOwnerDeviceRPC
 	}
+}
+
+func isAlarmSyncGPVTask(taskItem *task.Task) bool {
+	return taskItem != nil &&
+		taskItem.Method == "GetParameterValues" &&
+		(strings.HasPrefix(taskItem.CommandKey, "alarm-sync-") ||
+			taskItem.Description == "alarm sync: query device current alarms")
 }
 
 func isRecoverableGPVBadPath(badPath string, faultCode int) bool {
@@ -2205,8 +2214,10 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 	if taskItem != nil && taskItem.CommandKey != "" {
 		payload["command_key"] = taskItem.CommandKey
 	}
+	gpvOwner := ""
 	if method == soap.MethodGetParameterValuesResp {
-		payload["gpv_owner"] = gpvResponseOwner(taskItem)
+		gpvOwner = gpvResponseOwner(taskItem)
+		payload["gpv_owner"] = gpvOwner
 	}
 
 	// 从 lastCmdParams 提取原始命令路径（用于 GPN/GPV 关联）+ object_name（AddObject/DeleteObject）。
@@ -2267,6 +2278,10 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 	if err != nil {
 		log.Error("create RPC response event", zap.Error(err))
 		return
+	}
+	evt.Metadata = map[string]string{event.MetadataDeviceSN: deviceSN}
+	if gpvOwner != "" {
+		evt.Metadata[event.MetadataGPVOwner] = gpvOwner
 	}
 	if err := h.eventBus.Publish(ctx, subject, evt); err != nil {
 		log.Error("publish RPC response event", zap.Error(err), zap.String("subject", subject))
@@ -2331,13 +2346,19 @@ func (h *Handler) publishRPCFaultEvent(ctx context.Context, deviceSN string, tas
 		"fault_code_text": soapFaultCode, // 字符串：soap:faultcode（SOAP 1.1 outer，如 "Server.Internal"）
 		"fault_string":    faultMsg,      // 已含 [soapFaultCode] 前缀的人类可读消息
 	}
+	gpvOwner := ""
 	if taskItem.Method == "GetParameterValues" {
-		payload["gpv_owner"] = gpvResponseOwner(taskItem)
+		gpvOwner = gpvResponseOwner(taskItem)
+		payload["gpv_owner"] = gpvOwner
 	}
 	evt, err := event.NewEvent(subject, payload)
 	if err != nil {
 		log.Warn("build RPC fault event", zap.Error(err), zap.String("subject", subject))
 		return
+	}
+	evt.Metadata = map[string]string{event.MetadataDeviceSN: deviceSN}
+	if gpvOwner != "" {
+		evt.Metadata[event.MetadataGPVOwner] = gpvOwner
 	}
 	if err := h.eventBus.Publish(ctx, subject, evt); err != nil {
 		log.Error("publish RPC fault event", zap.Error(err), zap.String("subject", subject))

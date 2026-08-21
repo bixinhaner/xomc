@@ -85,6 +85,31 @@ func TestProcessSync_PublishesDedicatedEmailRaisedEventForAddedAlarm(t *testing.
 	assert.Equal(t, []string{event.SubjectAlarmRaised, event.SubjectAlarmEmailRaised}, bus.published)
 }
 
+func TestHandleGPVResponse_SkipsNonAlarmOwnerBeforePayloadProcessing(t *testing.T) {
+	store := newMockAlarmStore()
+	bus := &recordingAlarmEmailEventBus{}
+	engine := NewAlarmEngine(store, nil, nil, bus, zap.NewNop())
+	processor := NewAlarmSyncProcessor(engine, store, nil, bus, zap.NewNop())
+	evt, err := event.NewEvent(event.SubjectCommandGetParamsResponse, map[string]any{
+		"device_sn": "SN-NON-ALARM-GPV",
+		"task_id":   "task-non-alarm-gpv",
+		"path":      "Device.FaultMgmt.CurrentAlarm.",
+		"parameter_values": []tr069.ParameterValueStruct{
+			{Name: "Device.FaultMgmt.CurrentAlarm.1.AlarmIdentifier", Value: "70011"},
+			{Name: "Device.FaultMgmt.CurrentAlarm.1.PerceivedSeverity", Value: "Major"},
+		},
+	})
+	require.NoError(t, err)
+	evt.Metadata = map[string]string{
+		event.MetadataGPVOwner: event.GPVOwnerDeviceRPC,
+	}
+
+	require.NoError(t, processor.handleGPVResponse(context.Background(), evt))
+
+	assert.Empty(t, store.active)
+	assert.Empty(t, bus.published)
+}
+
 func TestProcessSync_UsesExistingAlarmDeviceFieldsWhenLookupMissing(t *testing.T) {
 	store := newMockAlarmStore()
 	engine := newTestEngine(store)
