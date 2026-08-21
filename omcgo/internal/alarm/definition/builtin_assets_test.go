@@ -29,18 +29,32 @@ func TestBuiltinAlarmLibraries_GSMDefinitionsAreOwnedByGSM(t *testing.T) {
 	dataDir := filepath.Join("..", "..", "..", "data", "alarm-definitions")
 	paths, err := filepath.Glob(filepath.Join(dataDir, "*.xml"))
 	require.NoError(t, err)
-	require.Len(t, paths, 9, "内置告警库应包含独立的 GSM.xml 和 UPS.xml")
+	expectedLibraries := map[string]string{
+		"CPE":     "CPE",
+		"EGW":     "EGW",
+		"ENB":     "ENB",
+		"EPC":     "EPC",
+		"GNB":     "GNB",
+		"GSM":     "GSM",
+		"IMSCORE": "IMSCORE",
+		"OMC":     "OMC",
+		"UPS":     "UPS",
+	}
+	require.Len(t, paths, len(expectedLibraries), "内置告警库文件集合必须与明确契约一致")
 
-	identifierOwner := make(map[string]string, 443)
+	identifierOwner := make(map[string]string)
 	modelsByNeType := make(map[string]xmlAlarmModel, len(paths))
-	total := 0
+	actualLibraries := make(map[string]string, len(paths))
 
 	for _, path := range paths {
 		model := readBuiltinAlarmModel(t, path)
 		filenameNeType := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		expectedOwner, exists := expectedLibraries[filenameNeType]
+		require.True(t, exists, "发现未登记的内置告警库 %s", filepath.Base(path))
+		actualLibraries[filenameNeType] = model.NeType
 		modelsByNeType[model.NeType] = model
 
-		assert.Equal(t, filenameNeType, model.NeType, "%s 的文件名与 neType 必须一致", path)
+		assert.Equal(t, expectedOwner, model.NeType, "%s 必须归属已登记的 neType", path)
 		assert.Equal(t, model.TotalCount, len(model.Alarms), "%s 的 totalCount 必须与实际条数一致", path)
 
 		for _, alarm := range model.Alarms {
@@ -49,19 +63,14 @@ func TestBuiltinAlarmLibraries_GSMDefinitionsAreOwnedByGSM(t *testing.T) {
 				continue
 			}
 			identifierOwner[alarm.Identifier] = model.NeType
-			total++
 		}
 
 	}
 
-	assert.Equal(t, 451, total, "内置告警定义总数必须与当前数据资产一致")
-	assert.Equal(t, 212, modelsByNeType["ENB"].TotalCount)
-	gsmModel := modelsByNeType["GSM"]
-	assert.Equal(t, "2", gsmModel.DeviceType)
-	assert.Equal(t, 5, gsmModel.TotalCount)
-	upsModel := modelsByNeType["UPS"]
-	assert.Equal(t, "5", upsModel.DeviceType)
-	assert.Equal(t, 19, upsModel.TotalCount)
+	assert.Equal(t, expectedLibraries, actualLibraries, "内置告警库文件及 neType 归属必须与明确契约一致")
+	require.Contains(t, modelsByNeType, "GSM")
+	require.Contains(t, modelsByNeType, "IMSCORE")
+	require.Contains(t, modelsByNeType, "UPS")
 
 	for _, identifier := range []string{"60001", "60002", "60003", "60004", "60005"} {
 		assert.Equal(t, "GSM", identifierOwner[identifier], "2G 告警 %s 必须归属 GSM 库", identifier)

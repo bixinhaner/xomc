@@ -42,24 +42,33 @@ func (p *recordingFullRunProjection) Refresh(_ context.Context, deviceID uuid.UU
 	return nil
 }
 
-func insertSucceededFullRunForProjectionTest(t *testing.T, pool *pgxpool.Pool, completedAt time.Time) (uuid.UUID, uuid.UUID) {
+func insertSucceededFullRunForProjectionTest(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	completedAt time.Time,
+	projectionNextAttemptAt time.Time,
+) (uuid.UUID, uuid.UUID) {
 	t.Helper()
 	req := insertParamSyncRequestForTest(t, pool, RequestStatusSucceeded)
 	runID := uuid.New()
 	_, err := pool.Exec(context.Background(), `INSERT INTO parameter_sync_runs
-(id, request_id, device_id, device_sn, trigger_reason, sync_scope, status, completed_at, projection_status)
-VALUES ($1, $2, $3, $4, 'manual', 'full', 'succeeded', $5, 'pending')`,
-		runID, req.ID, req.DeviceID, req.DeviceSN, completedAt)
+(id, request_id, device_id, device_sn, trigger_reason, sync_scope, status, completed_at,
+ projection_status, projection_next_attempt_at)
+VALUES ($1, $2, $3, $4, 'manual', 'full', 'succeeded', $5, 'pending', $6)`,
+		runID, req.ID, req.DeviceID, req.DeviceSN, completedAt, projectionNextAttemptAt)
 	require.NoError(t, err)
 	return runID, req.DeviceID
 }
 
 func TestCompletionProjectorContinuesAfterOneRunFails(t *testing.T) {
 	pool := newParamSyncTestPool(t)
-	_, firstDevice := insertSucceededFullRunForProjectionTest(t, pool, time.Now().Add(-time.Minute))
-	secondRun, secondDevice := insertSucceededFullRunForProjectionTest(t, pool, time.Now())
+	testNow := time.Now().UTC()
+	projectionDueAt := testNow.Add(time.Hour)
+	_, firstDevice := insertSucceededFullRunForProjectionTest(t, pool, testNow.Add(-time.Minute), projectionDueAt)
+	secondRun, secondDevice := insertSucceededFullRunForProjectionTest(t, pool, testNow, projectionDueAt)
 	projection := &recordingFullRunProjection{failDevice: firstDevice}
 	projector := NewCompletionProjector(pool, nil, projection)
+	projector.now = func() time.Time { return projectionDueAt.Add(time.Second) }
 
 	completed, err := projector.ReconcilePending(context.Background(), 100)
 
@@ -78,7 +87,7 @@ func TestCompletionProjectorContinuesAfterOneRunFails(t *testing.T) {
 
 func TestCompletionProjectorClaimsRunOnlyOnceAcrossConcurrentWorkers(t *testing.T) {
 	pool := newParamSyncTestPool(t)
-	runID, _ := insertSucceededFullRunForProjectionTest(t, pool, time.Now())
+	runID, _ := insertSucceededFullRunForProjectionTest(t, pool, time.Now(), time.Now().Add(-time.Minute))
 	projection := &blockingFullRunProjection{
 		started: make(chan struct{}, 1),
 		release: make(chan struct{}),
@@ -103,8 +112,9 @@ func TestCompletionProjectorClaimsRunOnlyOnceAcrossConcurrentWorkers(t *testing.
 
 func TestCompletionProjectorRecoversMissingLegacyLeaseWithoutStealingLiveLease(t *testing.T) {
 	pool := newParamSyncTestPool(t)
-	expiredRun, expiredDevice := insertSucceededFullRunForProjectionTest(t, pool, time.Now().Add(-time.Minute))
-	liveRun, _ := insertSucceededFullRunForProjectionTest(t, pool, time.Now())
+	projectionDueAt := time.Now().Add(time.Hour)
+	expiredRun, expiredDevice := insertSucceededFullRunForProjectionTest(t, pool, time.Now().Add(-time.Minute), projectionDueAt)
+	liveRun, _ := insertSucceededFullRunForProjectionTest(t, pool, time.Now(), projectionDueAt)
 	_, err := pool.Exec(context.Background(), `UPDATE parameter_sync_runs SET
 projection_status='processing', projection_lease_token=$2, projection_lease_until=$3
 WHERE id=$1`, expiredRun, uuid.New(), nil)

@@ -467,6 +467,25 @@ func (r *recordingRecoveryTaskReleaser) ReleasePlannedTaskWithoutWake(_ context.
 	return true, nil
 }
 
+func cleanupGPVFaultRecoveryReplacement(t *testing.T, pool *pgxpool.Pool, replacementID string) {
+	t.Helper()
+	parsedID, err := uuid.Parse(replacementID)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		taskTag, cleanupErr := pool.Exec(context.Background(), `DELETE FROM device_tasks WHERE id=$1`, parsedID)
+		assert.NoError(t, cleanupErr)
+		assert.Equal(t, int64(1), taskTag.RowsAffected())
+		outboxTag, cleanupErr := pool.Exec(context.Background(), `DELETE FROM parameter_sync_outbox WHERE aggregate_id=$1`, parsedID)
+		assert.NoError(t, cleanupErr)
+		assert.GreaterOrEqual(t, outboxTag.RowsAffected(), int64(1))
+		var outboxCount, taskCount int
+		assert.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM parameter_sync_outbox WHERE aggregate_id=$1`, parsedID).Scan(&outboxCount))
+		assert.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM device_tasks WHERE id=$1`, parsedID).Scan(&taskCount))
+		assert.Zero(t, outboxCount)
+		assert.Zero(t, taskCount)
+	})
+}
+
 func TestGPVFaultRecovererReleasesReplacementBeforeReturning(t *testing.T) {
 	pool := newParamSyncTestPool(t)
 	req := insertParamSyncRequestForTest(t, pool, RequestStatusRunning)
@@ -485,24 +504,33 @@ VALUES ($1, $2, $3, $4, 'manual', 'full', 'executing', 1, 0, 0, 0)`,
 		Source:     task.TaskSourceParamSync, SourceID: runID.String(), CreatorID: req.ID.String(),
 	})
 	releaser := &recordingRecoveryTaskReleaser{}
+	recoverer := NewGPVFaultRecoverer(pool, releaser)
+	fallbackDueAt := time.Now().UTC().Add(time.Hour)
+	recoverer.outboxNextAttemptAtOverride = &fallbackDueAt
 
-	replacement, err := NewGPVFaultRecoverer(pool, releaser).Recover(
+	replacement, err := recoverer.Recover(
 		context.Background(), original, []string{"Device.Good"},
 	)
 
 	require.NoError(t, err)
 	require.NotNil(t, replacement)
+	cleanupGPVFaultRecoveryReplacement(t, pool, replacement.ID)
 	require.Same(t, replacement, releaser.planned)
 	assert.Equal(t, []byte(`{"names":["Device.Good"]}`), []byte(replacement.Params))
 	assert.Equal(t, original.CommandKey+"-r", replacement.CommandKey)
 
 	var taskCount, expected, outboxCount int
+	var storedFallbackDueAt time.Time
 	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM device_tasks WHERE id=$1`, replacement.ID).Scan(&taskCount))
 	require.NoError(t, pool.QueryRow(context.Background(), `SELECT expected_task_count FROM parameter_sync_runs WHERE id=$1`, runID).Scan(&expected))
-	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM parameter_sync_outbox WHERE aggregate_id=$1 AND status='pending'`, replacement.ID).Scan(&outboxCount))
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM parameter_sync_outbox
+WHERE aggregate_id=$1 AND event_type='param_sync.task.enqueue' AND status='pending'`, replacement.ID).Scan(&outboxCount))
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT next_attempt_at FROM parameter_sync_outbox
+WHERE aggregate_id=$1 AND event_type='param_sync.task.enqueue'`, replacement.ID).Scan(&storedFallbackDueAt))
 	assert.Equal(t, 1, taskCount)
 	assert.Equal(t, 2, expected)
 	assert.Equal(t, 1, outboxCount, "outbox remains the crash-safe delivery fallback")
+	assert.WithinDuration(t, fallbackDueAt, storedFallbackDueAt, time.Microsecond)
 }
 
 func TestGPVFaultRecovererKeepsDurableFallbackWhenImmediateReleaseFails(t *testing.T) {
@@ -523,18 +551,27 @@ VALUES ($1, $2, $3, $4, 'manual', 'full', 'executing', 1, 0, 0, 0)`,
 		Source:     task.TaskSourceParamSync, SourceID: runID.String(), CreatorID: req.ID.String(),
 	})
 	releaser := &recordingRecoveryTaskReleaser{err: errors.New("redis unavailable")}
+	recoverer := NewGPVFaultRecoverer(pool, releaser)
+	fallbackDueAt := time.Now().UTC().Add(time.Hour)
+	recoverer.outboxNextAttemptAtOverride = &fallbackDueAt
 
-	replacement, err := NewGPVFaultRecoverer(pool, releaser).Recover(
+	replacement, err := recoverer.Recover(
 		context.Background(), original, []string{"Device.Good"},
 	)
 
 	require.ErrorContains(t, err, "release parameter sync recovery task")
 	require.NotNil(t, replacement, "a post-commit release failure must be distinguishable from a transaction failure")
+	cleanupGPVFaultRecoveryReplacement(t, pool, replacement.ID)
 	var taskCount, outboxCount int
+	var storedFallbackDueAt time.Time
 	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM device_tasks WHERE id=$1`, replacement.ID).Scan(&taskCount))
-	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM parameter_sync_outbox WHERE aggregate_id=$1 AND status='pending'`, replacement.ID).Scan(&outboxCount))
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM parameter_sync_outbox
+WHERE aggregate_id=$1 AND event_type='param_sync.task.enqueue' AND status='pending'`, replacement.ID).Scan(&outboxCount))
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT next_attempt_at FROM parameter_sync_outbox
+WHERE aggregate_id=$1 AND event_type='param_sync.task.enqueue'`, replacement.ID).Scan(&storedFallbackDueAt))
 	assert.Equal(t, 1, taskCount)
 	assert.Equal(t, 1, outboxCount)
+	assert.WithinDuration(t, fallbackDueAt, storedFallbackDueAt, time.Microsecond)
 }
 
 func TestReconcileCancellingRunsCancelsLateRecoveryAndFinalizes(t *testing.T) {
