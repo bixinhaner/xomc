@@ -21444,6 +21444,46 @@ CREATE INDEX IF NOT EXISTS idx_event_outbox_claimable
     ON public.event_outbox (status, next_attempt_at, claim_expires_at, created_at)
     WHERE status IN ('pending', 'failed', 'publishing');
 
+-- GPV response durable handoff queue. Pure additive and replay-safe. This
+-- statement lives inside the enclosing MainReconcile section so pre-release
+-- databases that already recorded goose version 1 still receive the table.
+CREATE TABLE IF NOT EXISTS public.command_gpv_response_handoffs (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    durable varchar(128) NOT NULL,
+    event_id varchar(64) NOT NULL,
+    device_sn varchar(128) NOT NULL,
+    subject varchar(160) NOT NULL,
+    payload jsonb NOT NULL,
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    event_timestamp timestamptz NOT NULL,
+    status varchar(16) NOT NULL DEFAULT 'pending',
+    attempt_count integer NOT NULL DEFAULT 0,
+    next_attempt_at timestamptz NOT NULL DEFAULT now(),
+    lease_token uuid,
+    lease_until timestamptz,
+    last_error text,
+    delivered_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT command_gpv_response_handoffs_dedupe_unique UNIQUE (durable, event_id),
+    CONSTRAINT command_gpv_response_handoffs_status_check
+        CHECK (status IN ('pending', 'processing', 'delivered', 'failed', 'dead')),
+    CONSTRAINT command_gpv_response_handoffs_attempt_check CHECK (attempt_count >= 0),
+    CONSTRAINT command_gpv_response_handoffs_lease_check CHECK (
+        (status = 'processing' AND lease_token IS NOT NULL AND lease_until IS NOT NULL)
+        OR
+        (status <> 'processing' AND lease_token IS NULL AND lease_until IS NULL)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_command_gpv_handoffs_claimable
+    ON public.command_gpv_response_handoffs (durable, status, next_attempt_at, lease_until, created_at, id)
+    WHERE status IN ('pending', 'failed', 'processing');
+
+CREATE INDEX IF NOT EXISTS idx_command_gpv_handoffs_device_chain
+    ON public.command_gpv_response_handoffs (durable, device_sn, created_at, id)
+    WHERE status IN ('pending', 'failed', 'processing');
+
 CREATE TABLE IF NOT EXISTS public.geofence_evaluations (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     binding_id uuid NOT NULL

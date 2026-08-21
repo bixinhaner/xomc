@@ -47,6 +47,7 @@ type RPCResponseSubscriber struct {
 	taskEnqueuer      task.Enqueuer
 	logger            *zap.Logger
 	gpvConsumer       appconfig.GPVResponseConsumerConfig
+	gpvHandoffRepo    event.GPVHandoffRepository
 
 	subscriptions []event.Subscription
 }
@@ -118,6 +119,10 @@ func NewRPCResponseSubscriber(
 	}
 }
 
+func (s *RPCResponseSubscriber) SetGPVHandoffRepository(repo event.GPVHandoffRepository) {
+	s.gpvHandoffRepo = repo
+}
+
 // Start 订阅 RPC 响应事件并启动 handler。当前仅订阅
 // command.get_parameters.response（GPV）——SetParameterValuesResponse 不
 // 返回 path/value（仅 Status），Inform 走另一条链路（device_service.go），
@@ -132,6 +137,29 @@ func (s *RPCResponseSubscriber) Start() error {
 		sub event.Subscription
 		err error
 	)
+	gpvHandler := s.handleGPVResponse
+	if s.gpvHandoffRepo != nil {
+		if err := event.RunGPVHandoffWorkers(
+			context.Background(),
+			s.gpvHandoffRepo,
+			event.GPVHandoffWorkerConfig{
+				Durable:     config.RPCDurable,
+				Concurrency: config.RPCConcurrency,
+				BatchSize:   1,
+				Lease:       gpvHandoffLease(config.AckWait),
+				MaxAttempts: config.MaxDeliver,
+			},
+			s.handleGPVResponse,
+			s.logger.Named("gpv-handoff-worker"),
+		); err != nil {
+			return fmt.Errorf("start GPV handoff workers for %s: %w", config.RPCDurable, err)
+		}
+		gpvHandler = event.GPVHandoffEnqueueHandler(
+			s.gpvHandoffRepo,
+			config.RPCDurable,
+			gpvResponseDeviceKey,
+		)
+	}
 	if keyedBus, ok := s.bus.(keyedQueueEventBus); ok {
 		sub, err = keyedBus.KeyedQueueSubscribe(
 			event.SubjectCommandGetParamsResponse,
@@ -145,7 +173,7 @@ func (s *RPCResponseSubscriber) Start() error {
 				MaxAckPending: config.MaxAckPending,
 			},
 			gpvResponseDeviceKey,
-			s.handleGPVResponse,
+			gpvHandler,
 		)
 	} else {
 		if config.RPCStartSequence > 0 {
@@ -158,7 +186,7 @@ func (s *RPCResponseSubscriber) Start() error {
 		sub, err = s.bus.QueueSubscribe(
 			event.SubjectCommandGetParamsResponse,
 			config.RPCDurable,
-			s.handleGPVResponse,
+			gpvHandler,
 		)
 	}
 	if err != nil {
@@ -190,6 +218,18 @@ func (s *RPCResponseSubscriber) Start() error {
 		}),
 	)
 	return nil
+}
+
+func gpvHandoffLease(ackWait time.Duration) time.Duration {
+	const minLease = 2 * time.Minute
+	if ackWait <= 0 {
+		return minLease
+	}
+	lease := ackWait * 4
+	if lease < minLease {
+		return minLease
+	}
+	return lease
 }
 
 func gpvResponseDeviceKey(evt event.Event) (string, error) {

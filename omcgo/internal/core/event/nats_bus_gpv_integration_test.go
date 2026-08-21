@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -1250,4 +1251,118 @@ func TestPrepareGPVHandoffFreshInstallStartsAtTailAndCapturesFutureMessages(t *t
 	}
 	require.Never(t, func() bool { return len(got) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.NoError(t, sub.Unsubscribe())
+}
+
+func TestGPVHandoffEnqueueAdvancesSourceAckFloorWhenDownstreamIsBlocked(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("GPV_HANDOFF_ACK_%d", suffix)
+	subject := fmt.Sprintf("test.gpv.handoff-ack.%d", suffix)
+	durable := fmt.Sprintf("gpv-handoff-ack-%d", suffix)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name:      stream,
+		Subjects:  []string{subject},
+		Storage:   nats.MemoryStorage,
+		Retention: nats.LimitsPolicy,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	repo := &countingGPVHandoffRepo{seen: make(chan Event, 8)}
+	bus := NewNATSEventBus(nc, js, zap.NewNop())
+	t.Cleanup(func() { _ = bus.Close() })
+	sub, err := bus.KeyedQueueSubscribe(
+		subject,
+		KeyedQueueConfig{
+			Durable:       durable,
+			Concurrency:   2,
+			QueueDepth:    8,
+			AckWait:       time.Second,
+			MaxDeliver:    3,
+			MaxAckPending: 16,
+		},
+		testDeviceKey,
+		GPVHandoffEnqueueHandler(repo, durable, testDeviceKey),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	for _, deviceSN := range []string{"SN-SLOW-HEAD", "SN-FAST-1", "SN-FAST-2"} {
+		evt, err := NewEvent(subject, map[string]any{"device_sn": deviceSN})
+		require.NoError(t, err)
+		data, err := json.Marshal(evt)
+		require.NoError(t, err)
+		_, err = js.Publish(subject, data)
+		require.NoError(t, err)
+	}
+
+	require.Eventually(t, func() bool {
+		return repo.Count() == 3
+	}, 5*time.Second, 20*time.Millisecond)
+	require.Eventually(t, func() bool {
+		stats, err := bus.QueueStats(context.Background(), subject, durable)
+		if err != nil {
+			return false
+		}
+		return stats.AckPending == 0 &&
+			stats.DeliverySequence >= 3 &&
+			stats.AckConsumerSequence >= stats.DeliverySequence &&
+			stats.AckGap == 0
+	}, 5*time.Second, 20*time.Millisecond,
+		"source durable AckFloor and ack gap must settle after durable handoff insert, even though downstream processing has not run")
+}
+
+func testDeviceKey(evt Event) (string, error) {
+	var payload struct {
+		DeviceSN string `json:"device_sn"`
+	}
+	if err := evt.DecodePayload(&payload); err != nil {
+		return "", err
+	}
+	return payload.DeviceSN, nil
+}
+
+type countingGPVHandoffRepo struct {
+	mu    sync.Mutex
+	count int
+	seen  chan Event
+}
+
+func (r *countingGPVHandoffRepo) Enqueue(_ context.Context, req GPVHandoffEnqueue) error {
+	r.mu.Lock()
+	r.count++
+	r.mu.Unlock()
+	r.seen <- req.Event
+	return nil
+}
+
+func (r *countingGPVHandoffRepo) Count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.count
+}
+
+func (r *countingGPVHandoffRepo) ClaimDue(context.Context, GPVHandoffClaimOptions) ([]GPVHandoffEntry, error) {
+	return nil, nil
+}
+
+func (r *countingGPVHandoffRepo) MarkDelivered(context.Context, uuid.UUID, uuid.UUID, time.Time) (bool, error) {
+	return true, nil
+}
+
+func (r *countingGPVHandoffRepo) MarkFailed(context.Context, uuid.UUID, uuid.UUID, string, time.Time) (bool, error) {
+	return true, nil
+}
+
+func (r *countingGPVHandoffRepo) MarkDead(context.Context, uuid.UUID, uuid.UUID, string, time.Time) (bool, error) {
+	return true, nil
 }
