@@ -16,11 +16,11 @@
 | 瞬时失败 | `internal/core/event.TestKeyedQueueHandlerFailureNaksThenSuccessAcks` | 第一次 NAK、第二次 ACK，最终 `AckGap=0` |
 | 永久失败 | `internal/core/event.TestKeyedQueueTerminalHeadFailureExhaustsMaxDeliverBeforeFollower` | head 消息耗尽 `MaxDeliver` 后 follower 才执行，避免同设备乱序 |
 | ACK 断连 | `internal/paramsync.TestResultConsumerRealNATSRedeliveryAfterCommitDoesNotDuplicateBusinessProjection` | PG commit 后模拟 ACK 链路失败，NATS redelivery 后业务投影仍只一份 |
-| redelivery 幂等 | `internal/paramsync.TestResultConsumerRealNATSRedeliveryAfterCommitDoesNotDuplicateBusinessProjection` | `parameter_sync_task_results`、`device_parameters`、run、task 计数均为 1 |
+| redelivery 幂等 | `internal/paramsync.TestResultConsumerRealNATSRedeliveryAfterCommitDoesNotDuplicateBusinessProjection` | `parameter_sync_task_results`、`device_parameters`、run、task 计数均为 1，staging 最多 1 份且终态可清理为 0 |
 | 慢设备 | `internal/core/event.TestCommandGPVQueueStatsShowsAckGapWhileAckRateLagsAndSettles` | 慢处理期间 `DeliverySequence > AckConsumerSequence` 且 `AckGap > 0` |
 
 - `internal/core/event.TestCommandGPVQueueStatsShowsAckGapWhileAckRateLagsAndSettles`
-  - 使用真实 NATS JetStream，创建唯一 `test.command.gpv.issue372.<suffix>` subject、stream 和 durable，避免与本地真栈既有 `command.get_parameters.response` stream 重叠。
+  - 使用真实 NATS JetStream，创建唯一 `issue372.command.gpv.<suffix>` subject、stream 和 durable，避免与本地真栈既有 `command.get_parameters.response` 或 `test.*` stream 重叠。
   - 发布 3 条 GPV 响应，第一条模拟慢设备处理。
   - 慢处理期间断言 `LastSequence=3`、`DeliverySequence > AckConsumerSequence`、`AckGap > 0`、`AckPending > 0`。
   - 释放处理后断言 `AckSequence=3`、`Pending=0`、`AckPending=0`、`AckGap=0`。
@@ -30,7 +30,7 @@
   - 构造一条 parameter-sync request/run/device_task/device 投影。
   - 第一次消费先让 `PGResultProcessor` 提交事务，再模拟 ACK 链路失败并返回错误，触发 NATS redelivery。
   - 第二次消费同一事件时必须命中重复结果保护。
-  - 断言 `parameter_sync_task_results`、`parameter_sync_staging_values`、`device_parameters`、`parameter_sync_runs`、`device_tasks` 都只有 1 份业务记录，request/run 进入 succeeded，`active_run_id` 清空，`last_param_sync_at` 更新，旧失败字段清空。
+  - 断言 `parameter_sync_task_results`、`device_parameters`、`parameter_sync_runs`、`device_tasks` 都只有 1 份业务记录；`parameter_sync_staging_values` 不超过 1 份（当前 partial 同步成功后会被收敛清理为 0）；request/run 进入 succeeded，`active_run_id` 清空，`last_param_sync_at` 更新，旧失败字段清空。
 
 本地 Docker 真栈执行：
 

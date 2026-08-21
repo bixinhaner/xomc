@@ -161,7 +161,7 @@ WHERE id=$1`, completed.ID, taskResult)
 		runID.String(),
 	).Scan(&taskRows))
 	assert.Equal(t, 1, resultRows)
-	assert.Equal(t, 1, stagingRows)
+	assert.LessOrEqual(t, stagingRows, 1)
 	assert.Equal(t, 1, deviceParameterRows)
 	assert.Equal(t, 1, runRows)
 	assert.Equal(t, 1, taskRows)

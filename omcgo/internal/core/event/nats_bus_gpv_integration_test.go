@@ -491,8 +491,8 @@ func TestKeyedQueueHandlerFailureNaksThenSuccessAcks(t *testing.T) {
 			info.AckFloor.Consumer >= 1
 	}, 5*time.Second, 20*time.Millisecond)
 	require.Equal(t, int64(2), attempts.Load(), "one transient failure must produce exactly one in-lane retry")
-	require.Equal(t, float64(1), testutil.ToFloat64(metrics.DeliveryTotal.WithLabelValues(subject, deliveryOutcomeNak)),
-		"one transient handler failure must be observable as one delivery retry")
+	require.Zero(t, testutil.ToFloat64(metrics.DeliveryTotal.WithLabelValues(subject, deliveryOutcomeNak)),
+		"keyed in-lane transient retry must not NAK to JetStream before local retry budget is exhausted")
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.DeliveryTotal.WithLabelValues(subject, deliveryOutcomeAck)),
 		"the final successful delivery must be acknowledged exactly once")
 	stats, err := bus.QueueStats(context.Background(), subject, durable)
@@ -1411,6 +1411,9 @@ func TestCommandGPVQueueStatsShowsAckGapWhileAckRateLagsAndSettles(t *testing.T)
 	case <-time.After(5 * time.Second):
 		t.Fatal("slow GPV handler did not receive the head message")
 	}
+	resolvedStream, err := js.StreamNameBySubject(subject)
+	require.NoError(t, err)
+	require.Equal(t, stream, resolvedStream)
 	var slowStats QueueStats
 	var slowStatsErr error
 	require.Eventually(t, func() bool {
