@@ -13,6 +13,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
@@ -453,7 +455,10 @@ func TestKeyedQueueHandlerFailureNaksThenSuccessAcks(t *testing.T) {
 	_, err = js.Publish(subject, data)
 	require.NoError(t, err)
 
+	reg := prometheus.NewRegistry()
+	metrics := NewEventBusMetrics(reg)
 	bus := NewNATSEventBus(nc, js, zap.NewNop())
+	bus.SetMetrics(metrics)
 	t.Cleanup(func() { _ = bus.Close() })
 	var attempts atomic.Int64
 	sub, err := bus.KeyedQueueSubscribe(
@@ -486,6 +491,14 @@ func TestKeyedQueueHandlerFailureNaksThenSuccessAcks(t *testing.T) {
 			info.AckFloor.Consumer >= 1
 	}, 5*time.Second, 20*time.Millisecond)
 	require.Equal(t, int64(2), attempts.Load(), "one transient failure must produce exactly one in-lane retry")
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.DeliveryTotal.WithLabelValues(subject, deliveryOutcomeNak)),
+		"one transient handler failure must be observable as one delivery retry")
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.DeliveryTotal.WithLabelValues(subject, deliveryOutcomeAck)),
+		"the final successful delivery must be acknowledged exactly once")
+	stats, err := bus.QueueStats(context.Background(), subject, durable)
+	require.NoError(t, err)
+	require.Zero(t, stats.AckGap, "ack rate must catch up to delivered rate after retry success")
+	require.GreaterOrEqual(t, stats.DeliverySequence, stats.AckConsumerSequence)
 	require.NoError(t, sub.Unsubscribe())
 }
 
@@ -1319,6 +1332,114 @@ func TestGPVHandoffEnqueueAdvancesSourceAckFloorWhenDownstreamIsBlocked(t *testi
 			stats.AckGap == 0
 	}, 5*time.Second, 20*time.Millisecond,
 		"source durable AckFloor and ack gap must settle after durable handoff insert, even though downstream processing has not run")
+}
+
+func TestCommandGPVQueueStatsShowsAckGapWhileAckRateLagsAndSettles(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("GPV_RATE_%d", suffix)
+	subject := fmt.Sprintf("issue372.command.gpv.%d", suffix)
+	durable := fmt.Sprintf("device-rpc-gpv-rate-%d", suffix)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name: stream, Subjects: []string{subject}, Storage: nats.MemoryStorage,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	bus := NewNATSEventBus(nc, js, zap.NewNop())
+	t.Cleanup(func() { _ = bus.Close() })
+	bus.SetQueueTuning(subject, QueueTuning{
+		AckWait:       2 * time.Second,
+		MaxDeliver:    3,
+		MaxAckPending: 3,
+	})
+	blocked := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseSlowHandler := func() {
+		releaseOnce.Do(func() { close(release) })
+	}
+	var processed atomic.Int64
+	sub, err := bus.KeyedQueueSubscribe(
+		subject,
+		KeyedQueueConfig{
+			Durable: durable, Concurrency: 1, QueueDepth: 2,
+			AckWait: 2 * time.Second, MaxDeliver: 3, MaxAckPending: 3,
+		},
+		func(Event) (string, error) { return "SN-SLOW-ISSUE-372", nil },
+		func(_ context.Context, evt Event) error {
+			var payload struct {
+				Sequence int `json:"sequence"`
+			}
+			if err := evt.DecodePayload(&payload); err != nil {
+				return err
+			}
+			if payload.Sequence == 1 {
+				close(blocked)
+				<-release
+			}
+			processed.Add(1)
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	t.Cleanup(releaseSlowHandler)
+
+	for sequence := 1; sequence <= 3; sequence++ {
+		evt, eventErr := NewEvent(subject, map[string]any{
+			"device_sn": "SN-SLOW-ISSUE-372",
+			"sequence":  sequence,
+		})
+		require.NoError(t, eventErr)
+		data, marshalErr := json.Marshal(evt)
+		require.NoError(t, marshalErr)
+		_, publishErr := js.Publish(subject, data)
+		require.NoError(t, publishErr)
+	}
+	select {
+	case <-blocked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("slow GPV handler did not receive the head message")
+	}
+	var slowStats QueueStats
+	var slowStatsErr error
+	require.Eventually(t, func() bool {
+		stats, statsErr := bus.QueueStats(context.Background(), subject, durable)
+		slowStatsErr = statsErr
+		if statsErr == nil {
+			slowStats = stats
+		}
+		return statsErr == nil &&
+			stats.LastSequence == 3 &&
+			stats.DeliverySequence > stats.AckConsumerSequence &&
+			stats.AckGap > 0 &&
+			stats.AckPending > 0
+	}, 5*time.Second, 20*time.Millisecond,
+		"while the slow device head is unacked, delivery/publish progress must be visible ahead of ACK floor; last stats=%+v err=%v", slowStats, slowStatsErr)
+
+	releaseSlowHandler()
+	require.Eventually(t, func() bool { return processed.Load() == 3 }, 5*time.Second, 20*time.Millisecond)
+	require.Eventually(t, func() bool {
+		stats, statsErr := bus.QueueStats(context.Background(), subject, durable)
+		return statsErr == nil &&
+			stats.LastSequence == 3 &&
+			stats.AckSequence == 3 &&
+			stats.Pending == 0 &&
+			stats.AckPending == 0 &&
+			stats.AckGap == 0 &&
+			stats.AckConsumerSequence >= stats.DeliverySequence
+	}, 5*time.Second, 20*time.Millisecond,
+		"after the slow handler completes, ACK floor must catch up with delivered/published progress")
 }
 
 func testDeviceKey(evt Event) (string, error) {
