@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -28,7 +29,7 @@ func TestBuiltinAlarmLibraries_GSMDefinitionsAreOwnedByGSM(t *testing.T) {
 	dataDir := filepath.Join("..", "..", "..", "data", "alarm-definitions")
 	paths, err := filepath.Glob(filepath.Join(dataDir, "*.xml"))
 	require.NoError(t, err)
-	require.Len(t, paths, 8, "内置告警库应包含独立的 GSM.xml")
+	require.Len(t, paths, 9, "内置告警库应包含独立的 GSM.xml 和 UPS.xml")
 
 	identifierOwner := make(map[string]string, 443)
 	modelsByNeType := make(map[string]xmlAlarmModel, len(paths))
@@ -53,14 +54,69 @@ func TestBuiltinAlarmLibraries_GSMDefinitionsAreOwnedByGSM(t *testing.T) {
 
 	}
 
-	assert.Equal(t, 443, total, "内置告警定义总数必须与当前数据资产一致")
+	assert.Equal(t, 451, total, "内置告警定义总数必须与当前数据资产一致")
 	assert.Equal(t, 212, modelsByNeType["ENB"].TotalCount)
 	gsmModel := modelsByNeType["GSM"]
 	assert.Equal(t, "2", gsmModel.DeviceType)
 	assert.Equal(t, 5, gsmModel.TotalCount)
+	upsModel := modelsByNeType["UPS"]
+	assert.Equal(t, "5", upsModel.DeviceType)
+	assert.Equal(t, 19, upsModel.TotalCount)
 
 	for _, identifier := range []string{"60001", "60002", "60003", "60004", "60005"} {
 		assert.Equal(t, "GSM", identifierOwner[identifier], "2G 告警 %s 必须归属 GSM 库", identifier)
+	}
+	for i := 42000; i <= 42018; i++ {
+		identifier := strconv.Itoa(i)
+		assert.Equal(t, "UPS", identifierOwner[identifier], "UPS 告警 %s 必须归属 UPS 库", identifier)
+	}
+}
+
+func TestBuiltinAlarmLibraries_UPSDefinitionsMatchReferenceDoc(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "data", "alarm-definitions", "UPS.xml")
+	upsModel := readBuiltinAlarmModel(t, path)
+	require.Equal(t, "UPS", upsModel.NeType)
+	require.Equal(t, "5", upsModel.DeviceType)
+	require.Equal(t, 19, upsModel.TotalCount)
+	require.Len(t, upsModel.Alarms, 19)
+
+	type expectedUPSAlarm struct {
+		enName       string
+		cnName       string
+		cnSuggestion string
+	}
+	expected := map[string]expectedUPSAlarm{
+		"42000": {"AC Power Off", "市电掉电", "检查 UPS current，>20mA 时认为 AC 掉电"},
+		"42001": {"Sensor fault", "LTC 故障", "检查 UPS current"},
+		"42002": {"DC Power Off", "直流无输出", "检查 AC，电压 >85V 时认为 DC 故障"},
+		"42003": {"Charger Over Temperature", "电源过温", "检查 Charger 温度"},
+		"42004": {"Charger Over Current", "电源过流", "检查 charger current，>20A"},
+		"42005": {"Battery Under Temperature", "低温保护", "电池温度 < -20"},
+		"42006": {"Over Temperature Charging", "高温充电保护", "电池温度 > 50"},
+		"42007": {"Over Temperature DisCharging", "高温放电保护", "电池温度 > 55"},
+		"42008": {"Cell malfunction", "电芯故障", "检查电芯 min/max 电压"},
+		"42009": {"Battery over discharge alarm voltage", "Battery over discharge alarm voltage", ""},
+		"42010": {"Battery Communication Error", "电池通信故障", "检查通信线缆"},
+		"42011": {"Alarm When Door Opened", "机柜门开", "检查机柜"},
+		"42012": {"Cabin was soggy", "机柜进水", "检查机柜"},
+		"42013": {"Smoking detected in cabin", "机柜烟雾", "有物体燃烧"},
+		"42014": {"SPD Out", "防雷失效", "雷击"},
+		"42015": {"Fan out work", "风扇故障", "线缆/风扇损坏"},
+		"42016": {"Inverter overload", "逆变器过载", "负载过大"},
+		"42017": {"High temperature", "高温", "温度 > 60"},
+		"42018": {"Low temperature", "低温", "温度 < -5"},
+	}
+
+	for _, alarm := range upsModel.Alarms {
+		want, ok := expected[alarm.Identifier]
+		require.Truef(t, ok, "unexpected UPS alarm identifier %s", alarm.Identifier)
+		assert.Equal(t, "Major", alarm.Severity, "UPS 告警 %s severity 必须为 Major", alarm.Identifier)
+		assert.Equal(t, "30003", alarm.EventType, "UPS 告警 %s eventType 必须为设备类 30003", alarm.Identifier)
+		assert.Equal(t, want.enName, alarm.EnName, "UPS 告警 %s 英文名必须匹配旧系统文档", alarm.Identifier)
+		assert.Equal(t, want.cnName, alarm.CnName, "UPS 告警 %s 中文名必须匹配旧系统文档", alarm.Identifier)
+		assert.Equal(t, want.cnName, alarm.CnProbableCause, "UPS 告警 %s 当前系统展示名称口径必须稳定", alarm.Identifier)
+		assert.Equal(t, want.enName, alarm.EnProbableCause, "UPS 告警 %s 英文 probable cause 必须稳定", alarm.Identifier)
+		assert.Equal(t, want.cnSuggestion, alarm.CnSuggestion, "UPS 告警 %s 触发判定必须匹配旧系统文档", alarm.Identifier)
 	}
 }
 

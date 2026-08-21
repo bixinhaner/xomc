@@ -643,6 +643,40 @@ func TestHandler_ListDevices_TechnologyNormalization(t *testing.T) {
 	}
 }
 
+func TestHandler_ListDevices_DeviceTypeTabFilter(t *testing.T) {
+	h, deviceRepo, _ := newTestHandler()
+	router := setupRouter(h)
+
+	seedDevice(deviceRepo, uuid.New(), "SN-LIST-UPS-001", model.CarrierCMCC, model.TechLTE, model.DeviceActive)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices?page=1&page_size=20&device_type=ups", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, DeviceListDeviceTypeUPS, deviceRepo.lastListFilter.DeviceType)
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/devices?page=1&page_size=20&device_type=base_station", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, DeviceListDeviceTypeBaseStation, deviceRepo.lastListFilter.DeviceType)
+}
+
+func TestHandler_ListDevices_InvalidDeviceType(t *testing.T) {
+	h, deviceRepo, _ := newTestHandler()
+	router := setupRouter(h)
+
+	seedDevice(deviceRepo, uuid.New(), "SN-LIST-INVALID-TYPE", model.CarrierCMCC, model.TechLTE, model.DeviceActive)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices?page=1&page_size=20&device_type=power", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
 func TestHandler_ListRecycleBin_TechnologyNormalization(t *testing.T) {
 	h, deviceRepo, _ := newTestHandler()
 	router := setupRouter(h)
@@ -896,6 +930,27 @@ func TestHandler_SyncDeviceParams_OfflineLegacyRejectedBeforeStart(t *testing.T)
 	assert.EqualValues(t, global.ErrCodeDeviceOffline, resp["biz_code"])
 	assert.Contains(t, resp["msg"].(string), "offline")
 	assert.Empty(t, starter.calls, "offline device must not create a parameter sync request/run")
+}
+
+func TestHandler_SyncDeviceParams_UPSRejectedBeforeStart(t *testing.T) {
+	h, deviceRepo, _ := newTestHandler()
+	starter := &fakeParamSyncStarter{defaultUsed: true, defaultGPVTaskCount: 5}
+	h.service.SetParamSyncStarter(starter)
+	router := setupRouter(h)
+	id := uuid.New()
+	dev := seedDevice(deviceRepo, id, "SN-UPS-NO-SYNC", model.CarrierCMCC, model.TechLTE, model.DeviceActive)
+	dev.ProductClass = "UPS_M3_BMU"
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/"+id.String()+"/sync-params", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.EqualValues(t, global.ErrCodeDeviceInvalidInput, resp["biz_code"])
+	assert.Contains(t, resp["msg"].(string), "UPS devices do not support parameter synchronization")
+	assert.Empty(t, starter.calls, "UPS device must not create a parameter sync request/run")
 }
 
 func TestHandler_SyncDeviceParams_OfflineDurableQueuedWhenConfigured(t *testing.T) {

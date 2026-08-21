@@ -13,6 +13,8 @@ import (
 	"github.com/omcgo/omcgo/internal/software"
 )
 
+const deviceUpgradeVirtualCategory = "device_upgrade"
+
 type Overview struct {
 	EnabledTypeCount int     `json:"enabledTypeCount"`
 	RunningTaskCount int     `json:"runningTaskCount"`
@@ -391,6 +393,35 @@ func builtInTaskTypes() []TaskType {
 			UpdatedAt:              now,
 			softwareTaskType:       software.TaskTypeUpgrade,
 			techHint:               &gsm,
+		},
+		{
+			TypeCode:               "UPS_AP_UPGRADE",
+			SortOrder:              25,
+			Category:               "ups_upgrade",
+			CategoryLabel:          "UPS升级",
+			DisplayName:            "UPS 软件升级",
+			Description:            "复用 TR-069 Download + TransferComplete + 1 BOOT 版本确认链路，统一承载 UPS AP 固件升级任务。",
+			RPCType:                "DOWNLOAD",
+			BuiltIn:                true,
+			Enabled:                true,
+			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE", "WAIT_REBOOT_COMPLETE"},
+			PermissionCode:         "CODE_UPS_UPGRADE_IMAGE",
+			PlatformScope:          []string{"UPS"},
+			Products:               []string{"UPS"},
+			FileType:               "1 Firmware Upgrade Image",
+			FileTypeLabel:          "1 Firmware Upgrade Image",
+			FileTypeEditable:       true,
+			FirmwareFileType:       firmwareFileTypePtr(software.FileTypeAP),
+			URLTemplate:            "firmware/{ap_path}",
+			TargetFileNameTemplate: "{firmware_name}",
+			FileNameTemplate:       "{firmware_name}",
+			FileSizeField:          "firmware.fileSize",
+			ChecksumField:          "firmware.md5",
+			RawMode:                "false",
+			TransportPath:          "/smallcell/FileDownloadService/firmware/ap/{path}",
+			LastEditor:             "system",
+			UpdatedAt:              now,
+			softwareTaskType:       software.TaskTypeUpgrade,
 		},
 		{
 			TypeCode:         "VERSION_ROLLBACK",
@@ -833,6 +864,9 @@ func stepForTask(item TaskType, status software.TaskStatus) string {
 	if item.softwareTaskType == software.TaskTypeRollback {
 		return "WAIT_REBOOT_COMPLETE"
 	}
+	if item.softwareTaskType == software.TaskTypeUpgrade && taskTypeProductsContain(item.Products, "UPS") {
+		return "WAIT_REBOOT_COMPLETE"
+	}
 	if item.PostTCEventCode != "" {
 		return "WAIT_INFORM_EVENT"
 	}
@@ -940,7 +974,7 @@ func filterTaskTypeSet(catalog []TaskType, category, typeCode string) (map[softw
 	}
 	set := make(map[software.TaskType]struct{})
 	for _, item := range catalog {
-		if category != "" && item.Category != category {
+		if !categoryMatchesFilter(category, item.Category) {
 			continue
 		}
 		if item.softwareTaskType == 0 {
@@ -949,6 +983,25 @@ func filterTaskTypeSet(catalog []TaskType, category, typeCode string) (map[softw
 		set[item.softwareTaskType] = struct{}{}
 	}
 	return set, nil
+}
+
+func categoryMatchesFilter(filterCategory, itemCategory string) bool {
+	if filterCategory == "" {
+		return true
+	}
+	if filterCategory == deviceUpgradeVirtualCategory {
+		return isDeviceUpgradeCategoryMember(itemCategory)
+	}
+	return itemCategory == filterCategory
+}
+
+func isDeviceUpgradeCategoryMember(category string) bool {
+	switch category {
+	case "enb_upgrade", "gnb_upgrade", "gsm_upgrade", "ups_upgrade", deviceUpgradeVirtualCategory:
+		return true
+	default:
+		return false
+	}
 }
 
 func techForCandidateFilter(catalog []TaskType, category string) *coremodel.Technology {
@@ -962,6 +1015,9 @@ func techForCandidateFilter(catalog []TaskType, category string) *coremodel.Tech
 }
 
 func categoryLabelForCandidate(catalog []TaskType, category string) string {
+	if category == deviceUpgradeVirtualCategory {
+		return "设备升级"
+	}
 	for _, item := range catalog {
 		if item.Category == category {
 			return item.CategoryLabel

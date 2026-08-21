@@ -211,6 +211,7 @@ var failureReasonZH = map[string]string{
 	"ROLLBACK_NOT_SUPPORTED":        "回退失败，设备不支持回退",
 	"TC_FAULT":                      "文件传输失败，设备 TransferComplete 异常",
 	"UPGRADE_5G_FAILED":             "升级失败，5G 升级状态异常",
+	"VERSION_MISMATCH":              "升级失败，重启后版本与目标版本不一致",
 	"TASK_TIMEOUT":                  "任务超时，未收到设备 TransferComplete",
 	"FIRMWARE_NOT_FOUND":            "任务无法启动，固件文件不存在",
 	"INTERNAL_ERROR":                "系统内部错误",
@@ -338,7 +339,7 @@ func (h *Handler) ExportDevices(c *gin.Context) {
 				// 升级类型显示规则与前端 getUpgradeTypeLabel 一致
 				upType := it.TypeDisplayName
 				switch it.Category {
-				case "gnb_upgrade", "enb_upgrade":
+				case "gnb_upgrade", "enb_upgrade", "gsm_upgrade", "ups_upgrade", deviceUpgradeVirtualCategory:
 					upType = "软件升级"
 				case "version_rollback":
 					upType = "版本回退"

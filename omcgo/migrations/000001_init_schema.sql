@@ -4036,7 +4036,7 @@ CREATE TABLE public.firmware_versions (
     public_key_id character varying(128),
     product_id uuid,
     product_ids uuid[] DEFAULT '{}'::uuid[] NOT NULL,
-    CONSTRAINT chk_firmware_versions_file_type CHECK ((file_type = ANY (ARRAY[0, 1, 6]))),
+    CONSTRAINT chk_firmware_versions_file_type CHECK ((file_type = ANY (ARRAY[0, 1, 5, 6]))),
     CONSTRAINT chk_firmware_versions_status CHECK (((status)::text = ANY (ARRAY[('active'::character varying)::text, ('deprecated'::character varying)::text, ('archived'::character varying)::text])))
 );
 
@@ -13990,6 +13990,15 @@ CREATE INDEX idx_device_licenses_product_type ON public.device_licenses USING bt
 CREATE INDEX idx_device_licenses_update_time ON public.device_licenses USING btree (update_time DESC);
 
 
+-- Existing pre-release databases may have applied goose version 1 before the
+-- license auto-dispatch flag was folded into the consolidated baseline. Keep
+-- the additive repair idempotent for those databases.
+-- +omcgo MainReconcileBegin
+ALTER TABLE public.device_licenses
+    ADD COLUMN IF NOT EXISTS auto_dispatch_pending boolean DEFAULT true NOT NULL;
+-- +omcgo MainReconcileEnd
+
+
 --
 -- Name: idx_device_location_observations_observed_at; Type: INDEX; Schema: public; Owner: -
 --
@@ -22350,6 +22359,190 @@ CREATE INDEX IF NOT EXISTS idx_parameter_sync_requests_auto_backpressure
     WHERE status = 'queued' AND result_code = 'AUTOMATIC_BACKPRESSURE';
 -- +omcgo MainReconcileEnd
 
+-- Allow UPS AP firmware library entries (file_type=5) alongside existing IMG,
+-- PATCH and FPGA files.
+-- +omcgo MainReconcileBegin
+ALTER TABLE public.firmware_versions
+    DROP CONSTRAINT IF EXISTS chk_firmware_versions_file_type;
+ALTER TABLE public.firmware_versions
+    ADD CONSTRAINT chk_firmware_versions_file_type
+    CHECK ((file_type = ANY (ARRAY[0, 1, 5, 6])));
+-- +omcgo MainReconcileEnd
+
+-- UPS device projection. Pure additive: keeps UPS power/battery fields out of
+-- the radio-oriented device_info table and leaves existing technologies untouched.
+-- +omcgo MainReconcileBegin
+CREATE TABLE IF NOT EXISTS public.device_ups_info (
+    device_id uuid NOT NULL,
+    device_serial_number character varying(64),
+    device_name character varying(128),
+    site_id character varying(64),
+    address character varying(256),
+    remark text,
+    first_online_time timestamp with time zone,
+    last_online_time timestamp with time zone,
+    last_offline_time timestamp with time zone,
+    run_time bigint DEFAULT 0,
+    cumulative_online_duration bigint DEFAULT 0 NOT NULL,
+    external_ip character varying(64),
+    total_voltage text,
+    total_temperature text,
+    total_current text,
+    software_version character varying(128),
+    hardware_version character varying(128),
+    manufacturer character varying(128),
+    manufacturer_oui character varying(16),
+    bms_charging character varying(32),
+    ac_power character varying(32),
+    ac_voltage text,
+    dc_voltage text,
+    dc_current text,
+    board_temperature text,
+    sfp_state character varying(32),
+    port0_state character varying(32),
+    port1_state character varying(32),
+    port2_state character varying(32),
+    port3_state character varying(32),
+    average_soc integer,
+    average_soc_values text,
+    pack_counts integer,
+    last_inform_at timestamp with time zone,
+    creator character varying(64),
+    updater character varying(64),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT device_ups_info_pkey PRIMARY KEY (device_id),
+    CONSTRAINT chk_device_ups_info_average_soc CHECK (average_soc IS NULL OR (average_soc >= 0 AND average_soc <= 100)),
+    CONSTRAINT chk_device_ups_info_pack_counts CHECK (pack_counts IS NULL OR pack_counts >= 0)
+);
+
+ALTER TABLE public.device_ups_info
+    ADD COLUMN IF NOT EXISTS average_soc_values text;
+
+COMMENT ON TABLE public.device_ups_info IS 'UPS-only device info table. Stores local display fields, common connection timestamps, and one-to-one UPS runtime projection outside the radio-oriented device_info table.';
+COMMENT ON COLUMN public.device_ups_info.device_id IS 'Foreign key-like reference to devices.id. Kept without FK because devices is partitioned.';
+COMMENT ON COLUMN public.device_ups_info.device_name IS 'UPS local display name maintained by OMC; never pushed to the UPS.';
+COMMENT ON COLUMN public.device_ups_info.site_id IS 'UPS local Site ID maintained by OMC; never pushed to the UPS.';
+COMMENT ON COLUMN public.device_ups_info.run_time IS 'UPS reported uptime in seconds parsed from Inform.';
+COMMENT ON COLUMN public.device_ups_info.cumulative_online_duration IS 'OMC-side cumulative online duration in seconds for UPS devices.';
+COMMENT ON COLUMN public.device_ups_info.average_soc IS 'UPS average battery SOC parsed from Inform.';
+COMMENT ON COLUMN public.device_ups_info.average_soc_values IS 'UPS average battery SOC raw Inform value, preserving comma-separated multi values if reported.';
+COMMENT ON COLUMN public.device_ups_info.pack_counts IS 'UPS battery pack count parsed from Inform.';
+
+CREATE INDEX IF NOT EXISTS idx_device_ups_info_serial
+    ON public.device_ups_info (device_serial_number);
+CREATE INDEX IF NOT EXISTS idx_device_ups_info_device_name
+    ON public.device_ups_info (device_name)
+    WHERE device_name IS NOT NULL AND btrim(device_name) <> '';
+CREATE INDEX IF NOT EXISTS idx_device_ups_info_site_id
+    ON public.device_ups_info (site_id)
+    WHERE site_id IS NOT NULL AND btrim(site_id) <> '';
+CREATE INDEX IF NOT EXISTS idx_device_ups_info_last_online
+    ON public.device_ups_info (last_online_time DESC);
+CREATE INDEX IF NOT EXISTS idx_device_ups_info_last_inform
+    ON public.device_ups_info (last_inform_at DESC);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'trigger_device_ups_info_updated_at'
+          AND tgrelid = 'public.device_ups_info'::regclass
+    ) THEN
+        CREATE TRIGGER trigger_device_ups_info_updated_at
+            BEFORE UPDATE ON public.device_ups_info
+            FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+    END IF;
+END
+$$;
+
+CREATE TABLE IF NOT EXISTS public.device_ups_batteries (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    device_id uuid NOT NULL,
+    device_serial_number character varying(64) NOT NULL,
+    pack_index integer NOT NULL,
+    serial_number character varying(128),
+    soc integer,
+    soc_values text,
+    voltage text,
+    temperature text,
+    current_value text,
+    status character varying(32),
+    recycle_count integer,
+    charging character varying(32),
+    model character varying(128),
+    software_version character varying(128),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT device_ups_batteries_pkey PRIMARY KEY (id),
+    CONSTRAINT chk_device_ups_batteries_pack_index CHECK (pack_index >= 1),
+    CONSTRAINT chk_device_ups_batteries_soc CHECK (soc IS NULL OR (soc >= 0 AND soc <= 100)),
+    CONSTRAINT chk_device_ups_batteries_recycle_count CHECK (recycle_count IS NULL OR recycle_count >= 0)
+);
+
+ALTER TABLE public.device_ups_batteries
+    ADD COLUMN IF NOT EXISTS soc_values text;
+
+COMMENT ON TABLE public.device_ups_batteries IS 'UPS battery pack projection rebuilt from each Inform; source of truth remains device_parameters.';
+COMMENT ON COLUMN public.device_ups_batteries.soc_values IS 'UPS battery pack SOC raw Inform value, preserving comma-separated cell values if reported.';
+
+CREATE INDEX IF NOT EXISTS idx_device_ups_batteries_device
+    ON public.device_ups_batteries (device_id, pack_index);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_device_ups_batteries_device_pack
+    ON public.device_ups_batteries (device_id, pack_index);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_device_ups_batteries_device_serial
+    ON public.device_ups_batteries (device_id, serial_number)
+    WHERE serial_number IS NOT NULL
+      AND btrim(serial_number) <> ''
+      AND upper(btrim(serial_number)) <> 'N/A'
+      AND btrim(serial_number) <> '--';
+
+UPDATE public.device_ups_info u
+SET average_soc_values = NULLIF(dp.parameter_value, '')
+FROM public.device_parameters dp
+WHERE dp.device_id = u.device_id
+  AND dp.parameter_path = 'InternetGatewayDevice.ChargerInfo.AverageSOC'
+  AND NULLIF(dp.parameter_value, '') IS NOT NULL
+  AND u.average_soc_values IS DISTINCT FROM NULLIF(dp.parameter_value, '');
+
+UPDATE public.device_ups_batteries b
+SET soc_values = COALESCE(
+    (
+        SELECT NULLIF(dp.parameter_value, '')
+        FROM public.device_parameters dp
+        WHERE dp.device_id = b.device_id
+          AND dp.parameter_path = ('InternetGatewayDevice.BMSInfo.' || b.pack_index::text || '.SOC')
+        LIMIT 1
+    ),
+    (
+        SELECT NULLIF(dp.parameter_value, '')
+        FROM public.device_parameters dp
+        WHERE dp.device_id = b.device_id
+          AND dp.parameter_path = 'InternetGatewayDevice.BMSInfo.SOC'
+        LIMIT 1
+    ),
+    b.soc_values
+)
+WHERE EXISTS (
+    SELECT 1
+    FROM public.device_ups_info u
+    WHERE u.device_id = b.device_id
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'trigger_device_ups_batteries_updated_at'
+          AND tgrelid = 'public.device_ups_batteries'::regclass
+    ) THEN
+        CREATE TRIGGER trigger_device_ups_batteries_updated_at
+            BEFORE UPDATE ON public.device_ups_batteries
+            FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+    END IF;
+END
+$$;
+-- +omcgo MainReconcileEnd
 
 -- +goose Down
 -- +goose StatementBegin

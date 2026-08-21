@@ -20,7 +20,7 @@
  *     force=true 重试,后端覆盖归属文件并自动备份旧文件 .bak.<ts>。
  *   - 后端上传端点内部自动 destructive 重载(删孤儿)+ 刷新缓存,前端无需单独调。
  */
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, Button, Space, message, Upload, Modal, Form, Typography } from 'antd';
 import type { UploadFile } from 'antd';
@@ -29,7 +29,12 @@ import {
   useParamModelList,
   useUploadParamModelXML,
 } from '@core/hooks/api/useParamModels';
+import { useSystemLicense } from '@core/hooks/api/useSystemLicense';
 import type { AxiosError } from 'axios';
+import {
+  filterDeviceScopedItemsByLicense,
+  isDeviceStandardValueVisibleByLicense,
+} from '@core/utils/licenseFeatures';
 import { extractXmlRootAttr } from '@core/utils/xmlRootAttr';
 import ModelsTab from './ModelsTab';
 import MappingsTab from './MappingsTab';
@@ -54,6 +59,12 @@ export default function ParamModelPage() {
   const uploadMut = useUploadParamModelXML();
   // 上传前查重数据源:已存在的参数模型清单(按 name / loadedFrom basename 比对)。
   const { data: modelListData } = useParamModelList();
+  const { data: systemLicense, isLoading: systemLicenseLoading } = useSystemLicense();
+  const visibleModels = useMemo(
+    () => filterDeviceScopedItemsByLicense(modelListData?.items || [], systemLicense, systemLicenseLoading),
+    [modelListData, systemLicense, systemLicenseLoading],
+  );
+  const visibleModelNames = useMemo(() => visibleModels.map((model) => model.name), [visibleModels]);
 
   // 导入弹框状态
   const [importOpen, setImportOpen] = useState(false);
@@ -62,7 +73,24 @@ export default function ParamModelPage() {
   const [derivedName, setDerivedName] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | undefined>();
 
-  const inDetail = Boolean(selectedModelName);
+  const selectedModelVisible = !selectedModelName
+    || isDeviceStandardValueVisibleByLicense(selectedModelName, systemLicense, systemLicenseLoading);
+  const inDetail = Boolean(selectedModelName && selectedModelVisible);
+
+  useEffect(() => {
+    if (systemLicenseLoading || !selectedModelName) return;
+    if (isDeviceStandardValueVisibleByLicense(selectedModelName, systemLicense, false)) return;
+    const params = new URLSearchParams(searchParams);
+    params.delete('name');
+    setSearchParams(params, { replace: true });
+  }, [searchParams, selectedModelName, setSearchParams, systemLicense, systemLicenseLoading]);
+
+  useEffect(() => {
+    if (!derivedName || systemLicenseLoading) return;
+    if (!isDeviceStandardValueVisibleByLicense(derivedName, systemLicense, false)) {
+      setImportError(t('systemLicense.deviceStandardImportDenied', { standard: derivedName }));
+    }
+  }, [derivedName, systemLicense, systemLicenseLoading, t]);
 
   // 查重:与已存在模型的 name / loadedFrom basename 大小写不敏感比对(预检查)。
   const isDuplicate = (name: string): boolean => {
@@ -133,6 +161,14 @@ export default function ParamModelPage() {
       setImportError(t('product.upload.missingAttr', { attr: 'paramModel' }));
       return;
     }
+    if (systemLicenseLoading) {
+      setImportError(t('common.loading'));
+      return;
+    }
+    if (!isDeviceStandardValueVisibleByLicense(derivedName, systemLicense, false)) {
+      setImportError(t('systemLicense.deviceStandardImportDenied', { standard: derivedName }));
+      return;
+    }
     // 提交前本地查重:模型已存在 → 弹覆盖确认(后端 409 仍是兜底真值源)。
     if (isDuplicate(derivedName)) {
       confirmOverwrite(derivedName, () => doUpload(importFile, true));
@@ -179,6 +215,7 @@ export default function ParamModelPage() {
           selectedName={selectedModelName}
           onSelect={selectModel}
           keyword={keyword}
+          visibleModelNames={visibleModelNames}
         />
       )}
 

@@ -453,7 +453,7 @@ func TestExecuteOneIMGDownload_VerificationFailureDoesNotResolveAddress(t *testi
 	assert.Equal(t, FailureIntegrityCheck, failure.code)
 }
 
-func TestExecuteOneDownload_PATCHAndFPGAUseTransferPolicy(t *testing.T) {
+func TestExecuteOneDownload_PATCHAPAndFPGAUseTransferPolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		fileType   FileType
@@ -484,6 +484,16 @@ func TestExecuteOneDownload_PATCHAndFPGAUseTransferPolicy(t *testing.T) {
 			capability: transfercfg.HTTPSCapabilityUnknown,
 			wantURL:    "http://download.example.com:8080/base/smallcell/FileDownloadService/firmware/fpga/product/V2.0.0/fpga.bin",
 		},
+		{
+			name:       "ap uses UPS firmware download path",
+			fileType:   FileTypeAP,
+			path:       "ap/product/V2.0.0/ap.bin",
+			fileName:   "ap.bin",
+			baseURL:    "http://download.example.com:8080/base",
+			httpsURL:   "https://download.example.com:9443/secure",
+			capability: transfercfg.HTTPSCapabilityUnknown,
+			wantURL:    "http://download.example.com:8080/base/smallcell/FileDownloadService/firmware/ap/product/V2.0.0/ap.bin",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newDownloadAddressHarness(t)
@@ -509,16 +519,4 @@ func TestExecuteOneDownload_PATCHAndFPGAUseTransferPolicy(t *testing.T) {
 			assert.Equal(t, tc.wantURL, h.queuedDownloadURL(t))
 		})
 	}
-}
-
-func TestExecuteOneDownload_APKeepsLegacyRelativeURLAndSkipsResolver(t *testing.T) {
-	h := newDownloadAddressHarness(t)
-	h.exec.SetDownloadAddressResolver(failingDownloadAddressResolver{err: errors.New("must not be called")})
-	fw := validIMGFirmware()
-	fw.FileType = FileTypeAP
-	fw.MinIOPath = "ap/product/V2.0.0/ap.bin"
-
-	h.run(fw)
-
-	assert.Equal(t, "firmware/ap/product/V2.0.0/ap.bin", h.queuedDownloadURL(t))
 }

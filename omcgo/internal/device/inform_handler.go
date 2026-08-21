@@ -566,7 +566,7 @@ func (h *InformHandler) evaluateInformAccess(
 		SerialNumber:    inform.DeviceId.SerialNumber,
 		OUI:             inform.DeviceId.OUI,
 		ProductClass:    inform.DeviceId.ProductClass,
-		SoftwareVersion: findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion"),
+		SoftwareVersion: informSoftwareVersion(inform.ParameterList),
 		RemoteIP:        payload.RemoteIP,
 		Authenticated:   payload.Authenticated,
 		AuthMethod:      payload.AuthMethod,

@@ -88,6 +88,7 @@ function mapBackendRebootRecord(b: BackendRebootRecord): RebootRecord {
 interface BackendDeviceRebootStat {
   device_sn: string;
   device_name?: string;
+  device_type?: string;
   total_count: number;
   abnormal_count: number;
   latest_at?: string | null;
@@ -96,6 +97,7 @@ interface BackendDeviceRebootStat {
 export interface DeviceRebootStat {
   deviceSn: string;
   deviceName: string;
+  deviceType: string;
   totalCount: number;
   abnormalCount: number;
   latestAt: string;
@@ -118,6 +120,7 @@ function mapBackendDeviceRebootStat(b: BackendDeviceRebootStat): DeviceRebootSta
   return {
     deviceSn: b.device_sn,
     deviceName: b.device_name ?? '',
+    deviceType: b.device_type ?? '',
     totalCount: b.total_count,
     abnormalCount: b.abnormal_count,
     latestAt: b.latest_at ?? '',

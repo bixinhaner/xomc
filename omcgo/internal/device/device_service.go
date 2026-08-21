@@ -75,6 +75,8 @@ type DeviceService struct {
 	groupAssigner          GroupAssigner
 	groupCountsInvalidator DeviceGroupCountsInvalidator
 	infoSyncer             *InfoSyncer
+	upsInfoRepo            UPSDeviceInfoRepository
+	upsRuntimeRepo         UPSRuntimeRepository
 	reconciler             *DeviceStatusReconciler
 	eventBus               event.EventBus
 	taskSvc                task.Enqueuer
@@ -231,9 +233,20 @@ func (s *DeviceService) SetDeviceInfoRepo(repo DeviceInfoRepository) {
 	s.deviceInfoRepo = repo
 }
 
+// SetUPSDeviceInfoRepository wires the UPS-only local device info repository.
+func (s *DeviceService) SetUPSDeviceInfoRepository(repo UPSDeviceInfoRepository) {
+	s.upsInfoRepo = repo
+}
+
 // SetInfoSyncer sets the parameter-to-device_info syncer.
 func (s *DeviceService) SetInfoSyncer(syncer *InfoSyncer) {
 	s.infoSyncer = syncer
+}
+
+// SetUPSRuntimeRepository wires the UPS-specific projection repository.
+// nil keeps existing radio/CPE Inform behaviour unchanged.
+func (s *DeviceService) SetUPSRuntimeRepository(repo UPSRuntimeRepository) {
+	s.upsRuntimeRepo = repo
 }
 
 // SetRegistrationRepo sets the device registration repository for pre-registration lookup.
@@ -412,6 +425,13 @@ func (s *DeviceService) SyncDeviceParamsManualDetailed(ctx context.Context, devi
 	}
 	if dev == nil {
 		return nil, nil, commonerrors.ErrNotFound
+	}
+	if isUPSProductClass(dev.ProductClass) {
+		return nil, dev, commonerrors.NewBusinessError(
+			global.ErrCodeDeviceInvalidInput,
+			"UPS devices do not support parameter synchronization",
+			commonerrors.ErrInvalidInput,
+		)
 	}
 	if s.paramSyncStarter == nil {
 		return nil, dev, fmt.Errorf("paramSyncStarter not configured")
@@ -867,7 +887,7 @@ func (s *DeviceService) RegisterFromInformEvent(
 	}
 
 	modelName := findParamValue(inform.ParameterList, "Device.DeviceInfo.ModelName")
-	firmwareVersion := findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion")
+	firmwareVersion := informSoftwareVersion(inform.ParameterList)
 
 	// Detect technology from Inform paths first, then known product identities.
 	tech := detectTechnologyForInform(inform.DeviceId.ProductClass, modelName, firmwareVersion, inform.ParameterList)
@@ -875,8 +895,12 @@ func (s *DeviceService) RegisterFromInformEvent(
 		zap.String("technology", string(tech)))
 
 	now := time.Now()
-	connReqURL := findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL")
+	connReqURL := informConnectionRequestURL(inform.ParameterList)
 	udpAddr := deriveUDPConnectionRequestAddress(inform.ParameterList)
+	ipAddress := deriveInformIPAddress(udpAddr, connReqURL)
+	if ipAddress == "" && isUPSProductClass(inform.DeviceId.ProductClass) {
+		ipAddress = informUPSExternalIPAddress(inform.ParameterList)
+	}
 
 	device := &model.Device{
 		ID:                          uuid.New(),
@@ -890,7 +914,7 @@ func (s *DeviceService) RegisterFromInformEvent(
 		OpState:                     model.DeriveOpState(model.DeviceActive),
 		FirmwareVersion:             firmwareVersion,
 		ConnectionRequestURL:        connReqURL,
-		IPAddress:                   deriveInformIPAddress(udpAddr, connReqURL),
+		IPAddress:                   ipAddress,
 		NatDetected:                 udpAddr != "",
 		UDPConnectionRequestAddress: udpAddr,
 		LastInformAt:                &now,
@@ -929,9 +953,10 @@ func (s *DeviceService) RegisterFromInformEvent(
 	// Write-through: cache the new device
 	s.cacheDevice(ctx, device)
 
-	// Create device_info record for extended info
-	if err := s.CreateDeviceInfo(ctx, device.ID); err != nil {
-		s.logger.Warn("create device_info for new device",
+	// Create device info record for extended info. UPS uses device_ups_info,
+	// base-station devices keep using the radio-oriented device_info table.
+	if err := s.createDeviceInfoForDevice(ctx, device); err != nil {
+		s.logger.Warn("create device info for new device",
 			zap.String("device_id", device.ID.String()),
 			zap.Error(err))
 	}
@@ -939,12 +964,10 @@ func (s *DeviceService) RegisterFromInformEvent(
 	// 记录激活时间：新设备首次 bootstrap inform 即激活，写 first_online_time，
 	// 使 op_state（激活状态）反映之。UpdateFromInform 的 shouldActivate 分支已有
 	// 同样调用；bootstrap 路径在此补齐——否则全程保持 active 的新设备永不写入。
-	if s.infoSyncer != nil {
-		if err := s.infoSyncer.RecordOnline(ctx, device.ID); err != nil {
-			s.logger.Warn("record online time for new device",
-				zap.String("device_id", device.ID.String()),
-				zap.Error(err))
-		}
+	if err := s.recordDeviceOnline(ctx, device); err != nil {
+		s.logger.Warn("record online time for new device",
+			zap.String("device_id", device.ID.String()),
+			zap.Error(err))
 	}
 
 	// Assign new devices to the pre-registered group when present; otherwise to
@@ -996,12 +1019,12 @@ func (s *DeviceService) RegisterFromInformEvent(
 	s.logger.Debug("RegisterFromInform: storing inform parameters",
 		zap.Int("param_count", len(inform.ParameterList)))
 	s.storeInformParameters(ctx, device.ID, inform.ParameterList)
+	s.projectUPSRuntime(ctx, device, inform)
 
-	// 新设备 device_info 行已在 CreateDeviceInfo 创建（空字段）。这里立刻 sync 一遍把
-	// 首次 Inform 携带的 LAC/TAC 等关键字段写入，让按 LAC/TAC 匹配的分组规则在首次
-	// 注册就能命中，而不必等下一次周期 Inform。NULL→有值 也算变化，会触发
-	// device.attributes.changed 事件 → GroupMatchEngine 异步归组。
-	if s.infoSyncer != nil {
+	// 新基站 device_info 行已创建（空字段）。这里立刻 sync 一遍把首次 Inform
+	// 携带的 LAC/TAC 等关键字段写入。UPS 不支持参数同步/参数树，信息投影走
+	// device_ups_info + device_ups_batteries，不进入 radio device_info。
+	if s.infoSyncer != nil && !isUPSProductClass(device.ProductClass) {
 		changedAttrs, err := s.infoSyncer.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology, device.ProductClass)
 		if err != nil {
 			s.logger.Warn("RegisterFromInform: sync device info from parameters",
@@ -1043,6 +1066,41 @@ func deriveInformIPAddress(udpAddr, connReqURL string) string {
 	return parsed.Hostname()
 }
 
+const (
+	upsProductClassPrefix = "UPS"
+
+	deviceSoftwareVersionPath = "Device.DeviceInfo.SoftwareVersion"
+	igdSoftwareVersionPath    = "InternetGatewayDevice.DeviceInfo.SoftwareVersion"
+
+	deviceConnectionRequestURLPath = "Device.ManagementServer.ConnectionRequestURL"
+	igdConnectionRequestURLPath    = "InternetGatewayDevice.ManagementServer.ConnectionRequestURL"
+
+	deviceUDPConnectionRequestAddressPath = "Device.ManagementServer.UDPConnectionRequestAddress"
+	igdUDPConnectionRequestAddressPath    = "InternetGatewayDevice.ManagementServer.UDPConnectionRequestAddress"
+
+	igdUPSExternalIPAddressPath = "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress"
+)
+
+func isUPSProductClass(productClass string) bool {
+	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(productClass)), upsProductClassPrefix)
+}
+
+func informSoftwareVersion(params []tr069.ParameterValueStruct) string {
+	return findFirstParamValue(params, deviceSoftwareVersionPath, igdSoftwareVersionPath)
+}
+
+func informConnectionRequestURL(params []tr069.ParameterValueStruct) string {
+	return findFirstParamValue(params, deviceConnectionRequestURLPath, igdConnectionRequestURLPath)
+}
+
+func informUPSExternalIPAddress(params []tr069.ParameterValueStruct) string {
+	ip := strings.TrimSpace(findParamValue(params, igdUPSExternalIPAddressPath))
+	if ip == "" || net.ParseIP(ip) == nil {
+		return ""
+	}
+	return ip
+}
+
 // updateConnectionRequestSummary applies ConnectionRequestURL as a partial
 // Inform field: absence, an empty value, or an invalid URL must not erase the
 // last known management endpoint. Only a valid HTTP(S) URL updates both the
@@ -1051,22 +1109,16 @@ func updateConnectionRequestSummary(device *model.Device, params []tr069.Paramet
 	if device == nil {
 		return
 	}
-	for _, param := range params {
-		if param.Name != "Device.ManagementServer.ConnectionRequestURL" {
-			continue
-		}
-		candidate := strings.TrimSpace(param.Value)
-		if candidate == "" {
-			return
-		}
-		parsed, err := url.ParseRequestURI(candidate)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
-			return
-		}
-		device.ConnectionRequestURL = candidate
-		device.IPAddress = parsed.Hostname()
+	candidate := strings.TrimSpace(informConnectionRequestURL(params))
+	if candidate == "" {
 		return
 	}
+	parsed, err := url.ParseRequestURI(candidate)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
+		return
+	}
+	device.ConnectionRequestURL = candidate
+	device.IPAddress = parsed.Hostname()
 }
 
 func rebootDeviceType(tech model.Technology) string {
@@ -1081,7 +1133,7 @@ func rebootDeviceType(tech model.Technology) string {
 }
 
 func deriveUDPConnectionRequestAddress(params []tr069.ParameterValueStruct) string {
-	udpAddr := strings.TrimSpace(findParamValue(params, "Device.ManagementServer.UDPConnectionRequestAddress"))
+	udpAddr := strings.TrimSpace(findFirstParamValue(params, deviceUDPConnectionRequestAddressPath, igdUDPConnectionRequestAddressPath))
 	if udpAddr != "" && !netutil.IsUnspecifiedUDPAddress(udpAddr) {
 		return udpAddr
 	}
@@ -1125,7 +1177,7 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 			zap.String("old_technology", string(device.Technology)),
 			zap.String("new_technology", string(inferredTech)))
 		device.Technology = inferredTech
-	} else if inferredTech, ok := detectTechnologyFromIdentity(inform.DeviceId.ProductClass, findParamValue(inform.ParameterList, "Device.DeviceInfo.ModelName"), findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion")); ok && device.Technology != inferredTech {
+	} else if inferredTech, ok := detectTechnologyFromIdentity(inform.DeviceId.ProductClass, findParamValue(inform.ParameterList, "Device.DeviceInfo.ModelName"), informSoftwareVersion(inform.ParameterList)); ok && device.Technology != inferredTech {
 		s.logger.Info("UpdateFromInform: correcting device technology from product identity",
 			zap.String("serial_number", device.SerialNumber),
 			zap.String("old_technology", string(device.Technology)),
@@ -1135,7 +1187,7 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	}
 	// Phase 6: ProductRegistry 回填 model_name（仅在 ModelName 为空时尝试）
 	s.applyProductMetadata(ctx, device)
-	device.FirmwareVersion = findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion")
+	device.FirmwareVersion = informSoftwareVersion(inform.ParameterList)
 	updateConnectionRequestSummary(device, inform.ParameterList)
 	device.LastInformAt = &now
 	device.LastInformEvents = tr069.EventCodes(inform.Event)
@@ -1175,6 +1227,9 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 		// 本次 Inform 未上报有效地址 → 主动清除残留脏值（DB cache 可能携带历史派生兜底）。
 		device.UDPConnectionRequestAddress = ""
 		device.NatDetected = false
+		if device.IPAddress == "" && isUPSProductClass(inform.DeviceId.ProductClass) {
+			device.IPAddress = informUPSExternalIPAddress(inform.ParameterList)
+		}
 	}
 	// Auto-transition to active when device informs (it's communicating, so it's online)
 	// This provides fault tolerance for various non-active states:
@@ -1210,8 +1265,8 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	// 设备离线后再次收到 Inform 时，Status 可能已是 active（不会触发 shouldActivate），
 	// 但 is_online 会从 false 翻转到 true。该边沿必须刷新 last_online_time，
 	// 避免本次在线时长跨越离线区间。
-	if !oldIsOnline && device.IsOnline && s.infoSyncer != nil {
-		if err := s.infoSyncer.RecordOnline(ctx, device.ID); err != nil {
+	if !oldIsOnline && device.IsOnline {
+		if err := s.recordDeviceOnline(ctx, device); err != nil {
 			s.logger.Warn("record online time failed",
 				zap.String("device_id", device.ID.String()),
 				zap.Error(err))
@@ -1251,11 +1306,12 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 
 	// Store parameters
 	s.storeInformParameters(ctx, device.ID, inform.ParameterList)
+	s.projectUPSRuntime(ctx, device, inform)
 
 	// Sync key parameters to device_info for fast query access.
-	// 同时拿到 topology 关键列（LAC/TAC）的变化集，若非空发 device.attributes.changed
-	// 让 GroupMatchEngine 异步重匹配该设备，避免等 @hourly cron 兜底。
-	if s.infoSyncer != nil {
+	// UPS 只解析 Inform 投影到 device_ups_info / device_ups_batteries，不进入
+	// radio-oriented device_info，也不触发参数同步/拓扑属性重匹配。
+	if s.infoSyncer != nil && !isUPSProductClass(device.ProductClass) {
 		changedAttrs, err := s.infoSyncer.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology, device.ProductClass)
 		if err != nil {
 			s.logger.Warn("sync device info from parameters",
@@ -1425,7 +1481,10 @@ func (s *DeviceService) ListDevicesWithInfo(ctx context.Context, filter DeviceFi
 		}
 		items := make([]DeviceWithInfo, len(result.Items))
 		for i, d := range result.Items {
-			items[i] = DeviceWithInfo{Device: d}
+			items[i] = DeviceWithInfo{
+				Device:     d,
+				DeviceType: deviceListDeviceTypeFromProductClass(d.ProductClass),
+			}
 		}
 		fallback := model.NewListResponse(items, result.Total, result.Page, result.PageSize)
 		s.decorateListMMEPools(ctx, fallback)
@@ -1617,7 +1676,15 @@ func (s *DeviceService) applyProductMetadata(ctx context.Context, device *model.
 	//   · 登记了 tech("lte"/"nr"/"gsm") → 覆盖(修正首次 Inform 被默认推断成 LTE 的 5G 设备);
 	//   · 产品已登记但 tech 为空(非无线产品,如核心网 ImsCore) → 清空,
 	//     避免 detectTechnology 兜底推断的 lte 残留(设备列表错误显示 eNB(LTE))。
-	if normalized := model.NormalizeTechnology(matchRes.Product.Tech); normalized != "" {
+	if isUPSProductClass(device.ProductClass) {
+		if device.Technology != "" {
+			s.logger.Info("applyProductMetadata: technology cleared for UPS product",
+				zap.String("serial_number", device.SerialNumber),
+				zap.String("product_class", device.ProductClass),
+				zap.String("old", string(device.Technology)))
+			device.Technology = ""
+		}
+	} else if normalized := model.NormalizeTechnology(matchRes.Product.Tech); normalized != "" {
 		if device.Technology != normalized {
 			s.logger.Info("applyProductMetadata: technology corrected from ProductRegistry",
 				zap.String("serial_number", device.SerialNumber),
@@ -1684,6 +1751,18 @@ func (s *DeviceService) EnforceOnlineCapacity(ctx context.Context, productClass 
 
 // GetDeviceInfo retrieves extended info for a device.
 func (s *DeviceService) GetDeviceInfo(ctx context.Context, deviceID uuid.UUID) (*DeviceInfo, error) {
+	if s.deviceRepo != nil {
+		device, err := s.deviceRepo.GetByID(ctx, deviceID)
+		if err != nil {
+			return nil, fmt.Errorf("get device for info: %w", err)
+		}
+		if device != nil && isUPSProductClass(device.ProductClass) {
+			if s.upsInfoRepo == nil {
+				return &DeviceInfo{DeviceID: deviceID}, nil
+			}
+			return s.upsInfoRepo.GetByDeviceID(ctx, deviceID)
+		}
+	}
 	if s.deviceInfoRepo == nil {
 		return nil, nil
 	}
@@ -1692,6 +1771,21 @@ func (s *DeviceService) GetDeviceInfo(ctx context.Context, deviceID uuid.UUID) (
 
 // UpdateDeviceInfo updates the manually editable device info fields.
 func (s *DeviceService) UpdateDeviceInfo(ctx context.Context, deviceID uuid.UUID, req UpdateDeviceInfoRequest, updater string) error {
+	if s.deviceRepo != nil {
+		device, err := s.deviceRepo.GetByID(ctx, deviceID)
+		if err != nil {
+			return fmt.Errorf("get device for info update: %w", err)
+		}
+		if device == nil {
+			return commonerrors.ErrNotFound
+		}
+		if isUPSProductClass(device.ProductClass) {
+			if s.upsInfoRepo == nil {
+				return fmt.Errorf("UPS device info repository not configured")
+			}
+			return s.upsInfoRepo.UpdateManualFields(ctx, deviceID, device.SerialNumber, req, updater)
+		}
+	}
 	if s.deviceInfoRepo == nil {
 		return fmt.Errorf("device info repository not configured")
 	}
@@ -1710,6 +1804,36 @@ func (s *DeviceService) CreateDeviceInfo(ctx context.Context, deviceID uuid.UUID
 		// FirstOnlineTime: nil - will be set when device actually goes online
 	}
 	return s.deviceInfoRepo.Create(ctx, info)
+}
+
+func (s *DeviceService) createDeviceInfoForDevice(ctx context.Context, device *model.Device) error {
+	if device == nil {
+		return nil
+	}
+	if isUPSProductClass(device.ProductClass) {
+		if s.upsInfoRepo == nil {
+			return nil
+		}
+		return s.upsInfoRepo.CreateForDevice(ctx, device)
+	}
+	return s.CreateDeviceInfo(ctx, device.ID)
+}
+
+func (s *DeviceService) recordDeviceOnline(ctx context.Context, device *model.Device) error {
+	if device == nil {
+		return nil
+	}
+	now := time.Now()
+	if isUPSProductClass(device.ProductClass) {
+		if s.upsInfoRepo == nil {
+			return nil
+		}
+		return s.upsInfoRepo.RecordOnline(ctx, device, now)
+	}
+	if s.infoSyncer == nil {
+		return nil
+	}
+	return s.infoSyncer.RecordOnline(ctx, device.ID)
 }
 
 func (s *DeviceService) storeInformParameters(ctx context.Context, deviceID uuid.UUID, params []tr069.ParameterValueStruct) {
@@ -1734,6 +1858,18 @@ func (s *DeviceService) storeInformParameters(ctx context.Context, deviceID uuid
 			zap.Error(err),
 			zap.String("device_id", deviceID.String()),
 		)
+	}
+}
+
+func (s *DeviceService) projectUPSRuntime(ctx context.Context, device *model.Device, inform *tr069.InformMessage) {
+	if s == nil || s.upsRuntimeRepo == nil || device == nil || inform == nil || !isUPSProductClass(inform.DeviceId.ProductClass) {
+		return
+	}
+	if err := s.upsRuntimeRepo.UpsertFromInform(ctx, device, inform); err != nil {
+		s.logger.Warn("project UPS runtime from Inform failed",
+			zap.String("device_id", device.ID.String()),
+			zap.String("serial_number", device.SerialNumber),
+			zap.Error(err))
 	}
 }
 
@@ -2265,6 +2401,15 @@ func findParamValue(params []tr069.ParameterValueStruct, name string) string {
 	return ""
 }
 
+func findFirstParamValue(params []tr069.ParameterValueStruct, names ...string) string {
+	for _, name := range names {
+		if v := findParamValue(params, name); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // getDeviceBySerialNumber looks up a device with Redis cache → PostgreSQL fallback.
 func (s *DeviceService) getDeviceBySerialNumber(ctx context.Context, sn string) (*model.Device, error) {
 	if s.cache != nil {
@@ -2401,6 +2546,36 @@ func (s *DeviceService) GetDeviceDetailComposite(ctx context.Context, deviceID u
 
 	result := &DeviceDetailComposite{
 		Device: device,
+	}
+
+	if isUPSProductClass(device.ProductClass) {
+		if s.upsInfoRepo != nil {
+			info, err := s.upsInfoRepo.GetByDeviceID(ctx, deviceID)
+			if err != nil {
+				s.logger.Warn("get UPS device info for detail composite",
+					zap.String("device_id", deviceID.String()),
+					zap.Error(err))
+			}
+			result.Info = info
+		}
+		if result.Info == nil {
+			result.Info = &DeviceInfo{DeviceID: deviceID}
+		}
+		if device.IsOnline {
+			result.Info.OmcStatus = "connected"
+		} else {
+			result.Info.OmcStatus = "disconnected"
+		}
+		if s.upsRuntimeRepo != nil {
+			ups, err := s.upsRuntimeRepo.GetDetail(ctx, device)
+			if err != nil {
+				s.logger.Warn("get UPS runtime detail",
+					zap.String("device_id", deviceID.String()),
+					zap.Error(err))
+			}
+			result.UPS = ups
+		}
+		return result, nil
 	}
 
 	// Get device_info
@@ -2606,6 +2781,14 @@ func (s *DeviceService) CreateDevice(ctx context.Context, req CreateDeviceReques
 
 	if err := s.deviceRepo.Create(ctx, device); err != nil {
 		return nil, fmt.Errorf("create device: %w", err)
+	}
+	if isUPSProductClass(device.ProductClass) {
+		if err := s.createDeviceInfoForDevice(ctx, device); err != nil {
+			s.logger.Warn("create UPS device info via API",
+				zap.String("device_id", device.ID.String()),
+				zap.String("serial_number", device.SerialNumber),
+				zap.Error(err))
+		}
 	}
 
 	// T-0176-PR-D：INSERT 已成功，device.ID 已确定 — 写回 product_id（命中时）。

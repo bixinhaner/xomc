@@ -11,6 +11,7 @@ interface BackendDevice {
   serial_number: string;
   oui: string;
   product_class: string;
+  device_type?: string;
   manufacturer: string;
   model_name: string;
   carrier: string;
@@ -30,6 +31,7 @@ interface BackendDevice {
   last_inform_at?: string;
   inform_interval: number;
   device_name: string;
+  info_device_name?: string;
   site_id: string;
   latitude: number;
   longitude: number;
@@ -186,6 +188,33 @@ interface BackendDevice {
   energy_saving?: string;
   gnb_topo_cellmgr?: string;
   ssl_cert_validity?: string;
+  ups_summary?: BackendUPSSummary | null;
+}
+
+interface BackendUPSSummary {
+  external_ip?: string;
+  total_voltage?: string;
+  total_temperature?: string;
+  total_current?: string;
+  software_version?: string;
+  hardware_version?: string;
+  manufacturer?: string;
+  manufacturer_oui?: string;
+  up_time_seconds?: number;
+  bms_charging?: string;
+  ac_power?: string;
+  ac_voltage?: string;
+  dc_voltage?: string;
+  dc_current?: string;
+  board_temperature?: string;
+  sfp_state?: string;
+  port0_state?: string;
+  port1_state?: string;
+  port2_state?: string;
+  port3_state?: string;
+  average_soc?: number;
+  pack_counts?: number;
+  last_inform_at?: string;
 }
 
 interface BackendDeviceControlSummary {
@@ -543,6 +572,35 @@ function toRadioMode(technology: string): string {
   }
 }
 
+function mapBackendUPSSummary(summary?: BackendUPSSummary | null): Device['upsSummary'] {
+  if (!summary) return undefined;
+  return {
+    externalIp: summary.external_ip,
+    totalVoltage: summary.total_voltage,
+    totalTemperature: summary.total_temperature,
+    totalCurrent: summary.total_current,
+    softwareVersion: summary.software_version,
+    hardwareVersion: summary.hardware_version,
+    manufacturer: summary.manufacturer,
+    manufacturerOui: summary.manufacturer_oui,
+    upTimeSeconds: summary.up_time_seconds,
+    bmsCharging: summary.bms_charging,
+    acPower: summary.ac_power,
+    acVoltage: summary.ac_voltage,
+    dcVoltage: summary.dc_voltage,
+    dcCurrent: summary.dc_current,
+    boardTemperature: summary.board_temperature,
+    sfpState: summary.sfp_state,
+    port0State: summary.port0_state,
+    port1State: summary.port1_state,
+    port2State: summary.port2_state,
+    port3State: summary.port3_state,
+    averageSoc: summary.average_soc,
+    packCounts: summary.pack_counts,
+    lastInformAt: summary.last_inform_at,
+  };
+}
+
 function mapBackendDevice(bd: BackendDevice): Device {
   // 兼容旧后端：若尚未升级到 T-0162 双字段，回退到 status 口径。
   const lifecycleState = (bd.lifecycle_state || deriveLegacyLifecycle(bd.status)) as Device['lifecycleState'];
@@ -563,11 +621,13 @@ function mapBackendDevice(bd: BackendDevice): Device {
     offlineMinutes = totalMinutes % 60;
   }
 
-  // 设备名称统一回退：device_name 空时回落到 SN，避免设备列表 / 分组页 / 详情页
-  // 在 site_name 未填的设备上显示空白（用户看到"未命名设备"会失去识别能力）。
-  // 历史 mapper 中 name 字段已是这个回退，deviceName 字段当时填的空串 —— 现统一。
-  const friendlyName = bd.device_name || bd.serial_number;
-  const networkType = toRadioMode(bd.technology);
+  const deviceType = bd.device_type || (bd.product_class?.startsWith('UPS') ? 'UPS' : 'BASE_STATION');
+  const networkType = deviceType === 'UPS' ? 'UPS' : toRadioMode(bd.technology);
+  // 基站沿用 devices.device_name 口径；UPS 没有设备侧改名/同步流程，
+  // 优先使用后端从 device_ups_info 透出的 info_device_name 作为本地运维展示名。
+  const friendlyName = deviceType === 'UPS'
+    ? (bd.info_device_name || bd.device_name || bd.serial_number)
+    : (bd.device_name || bd.serial_number);
 
   return {
     id: bd.id,
@@ -576,6 +636,8 @@ function mapBackendDevice(bd: BackendDevice): Device {
     vendor: bd.manufacturer,
     productClass: bd.product_class,
     networkType,
+    deviceType,
+    upsSummary: mapBackendUPSSummary(bd.ups_summary),
     deviceModel: bd.model_name,
     region: bd.device_name,
     stationId: bd.site_id,
@@ -820,6 +882,7 @@ export const deviceApi = {
     // 批量输入：SN 列表 → CSV，对应后端 ?sn_list=（serial_number IN (...)）。
     if (params.snList && params.snList.length > 0) query.sn_list = params.snList.join(',');
     if (params.vendor) query.oui = params.vendor;
+    if (params.deviceType) query.device_type = params.deviceType;
     // productId → product_id（产品装配件 UUID 过滤，下拉来自 /products）
     if (params.productId) query.product_id = params.productId;
     // productClass → product_class
@@ -1007,6 +1070,12 @@ export const deviceApi = {
   async update(id: string, data: Partial<Device>, fallbackDevice?: Partial<Device>): Promise<Device> {
     const devicePayload: Record<string, unknown> = {};
     const deviceInfoPayload: Record<string, unknown> = {};
+    const isUPSUpdate = data.deviceType === 'UPS'
+      || fallbackDevice?.deviceType === 'UPS'
+      || data.networkType === 'UPS'
+      || fallbackDevice?.networkType === 'UPS'
+      || data.productClass?.startsWith('UPS')
+      || fallbackDevice?.productClass?.startsWith('UPS');
 
     if (data.sn !== undefined) devicePayload.serial_number = data.sn;
     if (data.vendor !== undefined) devicePayload.manufacturer = data.vendor;
@@ -1017,14 +1086,21 @@ export const deviceApi = {
     if (data.softwareVersion !== undefined) devicePayload.firmware_version = data.softwareVersion;
     if (data.ipAddress !== undefined) devicePayload.ip_address = data.ipAddress;
     if (data.site !== undefined) devicePayload.device_name = data.site;
-    if (data.name !== undefined) devicePayload.device_name = data.name;
-    if (data.stationId !== undefined) devicePayload.site_id = data.stationId;
+    if (data.name !== undefined) {
+      if (isUPSUpdate) deviceInfoPayload.device_name = data.name;
+      else devicePayload.device_name = data.name;
+    }
+    if (data.stationId !== undefined) {
+      if (isUPSUpdate) deviceInfoPayload.site_id = data.stationId;
+      else devicePayload.site_id = data.stationId;
+    }
     if (data.latitude !== undefined) devicePayload.latitude = data.latitude;
     if (data.longitude !== undefined) devicePayload.longitude = data.longitude;
     if (data.locationSourceMode !== undefined) devicePayload.location_source_mode = data.locationSourceMode;
 
     if (data.remark !== undefined) deviceInfoPayload.remark = data.remark;
     if (data.installAddress !== undefined) deviceInfoPayload.address = data.installAddress;
+    if (data.deviceName !== undefined) deviceInfoPayload.device_name = data.deviceName;
 
     if (Object.keys(devicePayload).length > 0) {
       await http.put<BackendDevice>(`/devices/${id}`, devicePayload);
@@ -1042,6 +1118,16 @@ export const deviceApi = {
       }
       throw new Error(`device ${id} update was skipped`);
     }
+  },
+
+  async updateInfo(id: string, data: { deviceName?: string; siteId?: string; remark?: string; address?: string }): Promise<void> {
+    const payload: Record<string, unknown> = {};
+    if (data.deviceName !== undefined) payload.device_name = data.deviceName;
+    if (data.siteId !== undefined) payload.site_id = data.siteId;
+    if (data.remark !== undefined) payload.remark = data.remark;
+    if (data.address !== undefined) payload.address = data.address;
+    if (Object.keys(payload).length === 0) return;
+    await http.put(`/devices/${id}/info`, payload);
   },
 
   async delete(ids: string[]): Promise<BatchOperationResult> {

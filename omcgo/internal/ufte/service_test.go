@@ -98,6 +98,7 @@ func TestBuiltInTaskTypes_CoversRequiredTemplates(t *testing.T) {
 		"ENB_IMG_UPGRADE":     {},
 		"ENB_FPGA_UPGRADE":    {},
 		"GNB_IMG_UPGRADE":     {},
+		"UPS_AP_UPGRADE":      {},
 		"VERSION_ROLLBACK":    {},
 		"RUNTIME_LOG_COLLECT": {},
 		"FAULT_LOG_COLLECT":   {},

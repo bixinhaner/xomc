@@ -1,8 +1,19 @@
+import type { SystemLicense } from '@core/services/api/systemLicenseApi';
+import { filterDeviceStandardOptionsByLicense } from '@core/utils/licenseFeatures';
+
 export const BASE_STATION_TYPE_OPTIONS = [
 	{ label: 'eNB (LTE)', value: 'eNB' },
 	{ label: 'gNB (NR)', value: 'gNB' },
 	{ label: 'GSM', value: 'GSM' },
+	{ label: 'UPS', value: 'UPS' },
 ] as const;
+
+export function getBaseStationTypeOptions(
+	license?: SystemLicense | null,
+	isLicenseLoading = false,
+): Array<{ label: string; value: string }> {
+	return filterDeviceStandardOptionsByLicense(BASE_STATION_TYPE_OPTIONS, license, isLicenseLoading);
+}
 
 const BASE_STATION_TYPE_LABELS: Record<string, string> = {
 	eNB: 'eNB (LTE)',
@@ -14,6 +25,8 @@ const BASE_STATION_TYPE_LABELS: Record<string, string> = {
 	'5G NR': 'gNB (NR)',
 	GSM: 'GSM',
 	gsm: 'GSM',
+	UPS: 'UPS',
+	ups: 'UPS',
 };
 
 export function formatBaseStationTypeLabel(value?: string | null): string {

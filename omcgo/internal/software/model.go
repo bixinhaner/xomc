@@ -79,7 +79,8 @@ const (
 	FailureTCFault FailureCode = "TC_FAULT" // device — CPE returned TransferComplete with fault
 
 	// Stage: install/reboot
-	Failure5GInstall FailureCode = "UPGRADE_5G_FAILED" // device — 5G UpgradeStatus = 2 or 3
+	Failure5GInstall       FailureCode = "UPGRADE_5G_FAILED" // device — 5G UpgradeStatus = 2 or 3
+	FailureVersionMismatch FailureCode = "VERSION_MISMATCH"  // device — reported version differs from target after reboot
 
 	// Stage: general
 	FailureTaskTimeout   FailureCode = "TASK_TIMEOUT"       // timeout — reaper marked stale task
@@ -308,9 +309,13 @@ type BatchUpgradeRequest struct {
 	TaskName         string      `json:"task_name" binding:"required"`
 	TaskType         TaskType    `json:"task_type"`
 	DownloadFileType string      `json:"download_file_type,omitempty"`
-	IsKeepConfig     bool        `json:"is_keep_config"`
-	CreateUser       string      `json:"-"`
-	CreateSuspended  bool        `json:"create_suspended"`
+	// ProductClassHint is used by UFTE when firmware metadata does not carry a
+	// concrete product_class. It keeps read-side task classification aligned
+	// with the selected task template/product scope.
+	ProductClassHint string `json:"product_class_hint,omitempty"`
+	IsKeepConfig     bool   `json:"is_keep_config"`
+	CreateUser       string `json:"-"`
+	CreateSuspended  bool   `json:"create_suspended"`
 	// ScheduledAt 指定执行时间。非 nil 且晚于当前时间 → 定时模式（CreateSuspended 被忽略）。
 	// 时间已过 / 为 nil → 按 CreateSuspended 走老语义。
 	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`

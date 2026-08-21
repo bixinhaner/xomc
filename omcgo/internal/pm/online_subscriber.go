@@ -311,6 +311,12 @@ func (s *OnlineSubscriber) handleOnline(ctx context.Context, evt event.Event) er
 			zap.String("event_id", evt.ID), zap.Error(err))
 		return nil // payload 损坏，重试无意义
 	}
+	if device.IsUPSProductClass(payload.ProductClass) {
+		s.logger.Info("skip PM upload setup for UPS device",
+			zap.String("device_sn", payload.SerialNumber),
+			zap.String("product_class", payload.ProductClass))
+		return nil
+	}
 	return s.enqueuePMSetup(ctx, payload.SerialNumber, payload.DeviceID.String(), false)
 }
 
@@ -320,11 +326,18 @@ func (s *OnlineSubscriber) handleRegistered(ctx context.Context, evt event.Event
 	var payload struct {
 		SerialNumber string `json:"serial_number"`
 		DeviceID     string `json:"device_id"`
+		ProductClass string `json:"product_class"`
 		Created      bool   `json:"created"`
 	}
 	if err := evt.DecodePayload(&payload); err != nil {
 		s.logger.Warn("decode device.registered payload failed",
 			zap.String("event_id", evt.ID), zap.Error(err))
+		return nil
+	}
+	if device.IsUPSProductClass(payload.ProductClass) {
+		s.logger.Info("skip PM upload setup for registered UPS device",
+			zap.String("device_sn", payload.SerialNumber),
+			zap.String("product_class", payload.ProductClass))
 		return nil
 	}
 	return s.enqueuePMSetup(ctx, payload.SerialNumber, payload.DeviceID, payload.Created)
@@ -387,6 +400,12 @@ func (s *OnlineSubscriber) compensatePMUploadURLToHTTPS(
 	if dev == nil || strings.TrimSpace(dev.SerialNumber) == "" {
 		s.logger.Debug("skip PM HTTPS compensation: device not found or missing serial number",
 			zap.String("device_id", deviceID.String()))
+		return nil
+	}
+	if device.IsUPSProductClass(dev.ProductClass) {
+		s.logger.Info("skip PM HTTPS compensation for UPS device",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("product_class", dev.ProductClass))
 		return nil
 	}
 

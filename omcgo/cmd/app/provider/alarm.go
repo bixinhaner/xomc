@@ -30,13 +30,14 @@ func initAlarmModule(c *Container) error {
 	alarmEngine.SetMetrics(alarm.NewAlarmMetrics(c.MetricsReg))
 
 	// 告警同步服务
-	alarmSyncService := alarm.NewAlarmSyncService(c.TaskSvc, c.Redis, c.EventBus, logger)
+	alarmDeviceRepo := device.NewPgDeviceRepository(c.PgPool)
+	alarmSyncService := alarm.NewAlarmSyncService(c.TaskSvc, c.Redis, c.EventBus, logger).
+		WithDeviceReader(alarmDeviceRepo)
 	if err := alarmSyncService.Subscribe(); err != nil {
 		logger.Warn("subscribe alarm sync service", zap.NamedError("err", err))
 	}
 
 	// 告警同步处理器
-	alarmDeviceRepo := device.NewPgDeviceRepository(c.PgPool)
 	alarmSyncProcessor := alarm.NewAlarmSyncProcessor(alarmEngine, alarmPgStore, alarmSyncService, c.EventBus, logger).WithDeviceReader(alarmDeviceRepo)
 	if c.ProductRegistry != nil {
 		alarmSyncProcessor = alarmSyncProcessor.WithProductResolver(&alarmdef.ProductRegistryAdapter{Registry: c.ProductRegistry})

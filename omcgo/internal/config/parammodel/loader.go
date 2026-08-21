@@ -3,6 +3,7 @@ package parammodel
 import (
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -96,9 +97,10 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 		return rep, fmt.Errorf("resolve param-model files: %w", err)
 	}
 
+	loadedModels := make(map[string]struct{}, len(files))
 	for _, absPath := range files {
 		rep.FilesScanned++
-		rows, err := l.loadParamModelFile(ctx, absPath)
+		rows, modelName, err := l.loadParamModelFile(ctx, absPath)
 		if err != nil {
 			rep.AddError(filepath.Base(absPath), "parse-or-persist", err)
 			rep.FilesSkipped++
@@ -106,6 +108,9 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 				zap.String("file", absPath),
 				zap.Error(err))
 			continue
+		}
+		if modelName != "" {
+			loadedModels[modelName] = struct{}{}
 		}
 		rep.FilesLoaded++
 		rep.RowsAffected += rows
@@ -126,21 +131,26 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	if rep.HasErrors() {
 		return rep, rep.FirstError()
 	}
+	pruned, err := l.pruneRetiredBuiltinParamModels(ctx, loadedModels)
+	if err != nil {
+		return rep, err
+	}
+	rep.RowsAffected += int(pruned)
 	return rep, nil
 }
 
 // loadParamModelFile 单文件加载：upsert param_models + 重写 param_mappings。
-func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, error) {
+func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return 0, fmt.Errorf("read %s: %w", path, err)
+		return 0, "", fmt.Errorf("read %s: %w", path, err)
 	}
 	var doc xmlParameterModel
 	if err := xml.Unmarshal(raw, &doc); err != nil {
-		return 0, fmt.Errorf("xml unmarshal %s: %w", path, err)
+		return 0, "", fmt.Errorf("xml unmarshal %s: %w", path, err)
 	}
 	if doc.ParamModel == "" {
-		return 0, fmt.Errorf("paramModel attribute empty in %s", path)
+		return 0, "", fmt.Errorf("paramModel attribute empty in %s", path)
 	}
 
 	// loaded_from 写 "param-mappings/<file>" 相对 base 的 slash 路径。
@@ -155,7 +165,7 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 
 	tx, err := l.pool.Begin(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("begin tx: %w", err)
+		return 0, "", fmt.Errorf("begin tx: %w", err)
 	}
 	defer reliability.RollbackTx(ctx, tx, l.logger, "loadParamModelFile")
 
@@ -170,7 +180,7 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 	RETURNING id`
 	var modelID string
 	if err := tx.QueryRow(ctx, upsertModel, doc.ParamModel, totalEntries, totalObjects, totalParams, loadedFrom).Scan(&modelID); err != nil {
-		return 0, fmt.Errorf("upsert param_models %q: %w", doc.ParamModel, err)
+		return 0, "", fmt.Errorf("upsert param_models %q: %w", doc.ParamModel, err)
 	}
 
 	// 重写 param_mappings：先按 model 删旧 builtin 行，再批量插入。
@@ -178,7 +188,7 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 	// 实现"重新加载 XML 时不覆盖自定义数据"。custom 与 builtin 同 private_path 时,
 	// batchInsertMappings 的 ON CONFLICT DO NOTHING 让 builtin 跳过 → custom 胜出。
 	if _, err := tx.Exec(ctx, "DELETE FROM param_mappings WHERE param_model_id = $1 AND source = 'builtin'", modelID); err != nil {
-		return 0, fmt.Errorf("clear param_mappings for %q: %w", doc.ParamModel, err)
+		return 0, "", fmt.Errorf("clear param_mappings for %q: %w", doc.ParamModel, err)
 	}
 
 	// 2026-05-29 防御:同 XML 文件内 private_path 重复(撞新约束
@@ -196,14 +206,14 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 	rows := 0
 	if len(dedupObjects) > 0 {
 		if n, err := batchInsertMappings(ctx, tx, modelID, dedupObjects, "object"); err != nil {
-			return 0, err
+			return 0, "", err
 		} else {
 			rows += n
 		}
 	}
 	if len(dedupParams) > 0 {
 		if n, err := batchInsertMappings(ctx, tx, modelID, dedupParams, "parameter"); err != nil {
-			return 0, err
+			return 0, "", err
 		} else {
 			rows += n
 		}
@@ -225,7 +235,7 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 	WHERE pm.id = $1
 	RETURNING pm.total_entries, pm.total_objects, pm.total_params`
 	if err := tx.QueryRow(ctx, recountModel, modelID).Scan(&totalEntries, &totalObjects, &totalParams); err != nil {
-		return 0, fmt.Errorf("recount param_model %q: %w", doc.ParamModel, err)
+		return 0, "", fmt.Errorf("recount param_model %q: %w", doc.ParamModel, err)
 	}
 
 	// §1.9 对账：param_mappings 已被本事务整体替换，需同步 discovered_param_mappings。
@@ -245,7 +255,7 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("commit tx: %w", err)
+		return 0, "", fmt.Errorf("commit tx: %w", err)
 	}
 
 	rows++ // count the param_models row
@@ -254,7 +264,70 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 		zap.Int("objects", totalObjects),
 		zap.Int("params", totalParams),
 		zap.String("file", loadedFrom))
-	return rows, nil
+	return rows, doc.ParamModel, nil
+}
+
+func (l *Loader) pruneRetiredBuiltinParamModels(ctx context.Context, loadedModels map[string]struct{}) (int64, error) {
+	var total int64
+	for _, name := range []string{"UPS"} {
+		if _, loaded := loadedModels[name]; loaded {
+			continue
+		}
+		pruned, err := l.pruneRetiredBuiltinParamModel(ctx, name)
+		if err != nil {
+			return total, err
+		}
+		total += pruned
+	}
+	return total, nil
+}
+
+func (l *Loader) pruneRetiredBuiltinParamModel(ctx context.Context, name string) (int64, error) {
+	expectedLoadedFrom := l.cfg.Directory + "/" + name + ".xml"
+
+	var id uuid.UUID
+	var loadedFrom string
+	err := l.pool.QueryRow(ctx,
+		`SELECT id, COALESCE(loaded_from, '') FROM param_models WHERE name = $1`,
+		name,
+	).Scan(&id, &loadedFrom)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("lookup retired param_model %q: %w", name, err)
+	}
+	if loadedFrom != expectedLoadedFrom || IsCustom(l.base, loadedFrom) {
+		return 0, nil
+	}
+
+	tx, err := l.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin retired param_model prune: %w", err)
+	}
+	defer reliability.RollbackTx(ctx, tx, l.logger, "pruneRetiredBuiltinParamModel")
+
+	if _, err := tx.Exec(ctx, `
+UPDATE devices
+   SET param_model_id = NULL
+ WHERE param_model_id = $1
+   AND COALESCE(product_class, '') LIKE 'UPS%'`, id); err != nil {
+		return 0, fmt.Errorf("clear retired UPS device param_model_id: %w", err)
+	}
+
+	tag, err := tx.Exec(ctx, `DELETE FROM param_models WHERE id = $1`, id)
+	if err != nil {
+		return 0, fmt.Errorf("delete retired param_model %q: %w", name, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit retired param_model prune: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		l.logger.Info("retired builtin param-model pruned",
+			zap.String("param_model", name),
+			zap.String("loaded_from", loadedFrom))
+	}
+	return tag.RowsAffected(), nil
 }
 
 // reconcileDiscoveredForModel 实现设计 §1.9 对账：

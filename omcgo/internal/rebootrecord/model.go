@@ -42,7 +42,7 @@ type RebootRecord struct {
 	IsAbnormal          bool      `json:"is_abnormal"`
 	DeviceSN            string    `json:"device_sn"`
 	DeviceName          string    `json:"device_name,omitempty"`
-	DeviceType          string    `json:"device_type,omitempty"` // eNB / gNB
+	DeviceType          string    `json:"device_type,omitempty"` // eNB / gNB / GSM / UPS
 	OperateIP           string    `json:"operate_ip,omitempty"`
 	SoftwareVersion     string    `json:"software_version,omitempty"`
 	Reason              string    `json:"reason,omitempty"`        // 普通: event_reason；异常: fault_reason(HaltMainReason)
@@ -84,6 +84,7 @@ func (f Filter) Limit() int {
 type DeviceRebootStat struct {
 	DeviceSN      string     `json:"device_sn"`
 	DeviceName    string     `json:"device_name,omitempty"`
+	DeviceType    string     `json:"device_type,omitempty"`
 	TotalCount    int64      `json:"total_count"`
 	AbnormalCount int64      `json:"abnormal_count"`
 	LatestAt      *time.Time `json:"latest_at,omitempty"`

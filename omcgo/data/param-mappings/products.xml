@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<products totalProducts="17" totalPatterns="61" generatedAt="2026-08-19">
+<products totalProducts="18" totalPatterns="62" generatedAt="2026-08-19">
   <!-- ============ 1. BLQ 产品 ============ -->
   <product name="BLQ" vendor="Baicells" tech="4G" radioModes="SC">
     <description>Baicells BLQ</description>
@@ -246,6 +246,18 @@
     <alarm neType="IMSCORE" />
     <patterns>
       <pattern globalOrder="61">^ImsCore$</pattern>
+    </patterns>
+  </product>
+  <!-- ============ 18. UPS 产品（电源设备，ProductClass 以 UPS 开头） ============ -->
+  <product name="UPS" vendor="Baicells" tech="UPS" radioModes="">
+    <description>UPS power device; ProductClass starts with UPS</description>
+    <paramModel>UPS</paramModel>
+    <enableFileType11>false</enableFileType11>
+    <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />
+    <indicator deviceType="" platform="" />
+    <alarm neType="UPS" />
+    <patterns>
+      <pattern globalOrder="62">^UPS.*</pattern>
     </patterns>
   </product>
 </products>

@@ -58,6 +58,8 @@ type alarmInfoEvent struct {
 
 var alarmInfoFieldRE = regexp.MustCompile(`^(?:Device|InternetGatewayDevice)\.Services\.FAPService\.\d+\.FAPControl\.[^.]+\.AlarmInfo\.(\d+)\.(.+)$`)
 
+const additionalInfoEquipmentInfo = "equipment_info"
+
 // AlarmReceiver subscribes to device alarm events and processes them.
 //
 // T-0098 P2-10：在调用 engine.Process 前对 alarm.AlarmIdentifier 做"识别 → fallback
@@ -134,7 +136,9 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 		if err := r.processAlarmPayload(ctx, payload); err != nil {
 			return err
 		}
-		publishAlarmSyncRequest(ctx, r.eventBus, r.logger, payload.DeviceSN)
+		if shouldRequestAlarmSyncForPayload(payload) {
+			publishAlarmSyncRequest(ctx, r.eventBus, r.logger, payload.DeviceSN)
+		}
 		return nil
 	}
 
@@ -157,8 +161,50 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 			return err
 		}
 	}
-	publishAlarmSyncRequest(ctx, r.eventBus, r.logger, informPayload.DeviceID.SerialNumber)
+	if shouldRequestAlarmSyncForInform(informPayload, payloads) {
+		publishAlarmSyncRequest(ctx, r.eventBus, r.logger, informPayload.DeviceID.SerialNumber)
+	}
 	return nil
+}
+
+func shouldRequestAlarmSyncForPayload(payload AlarmPayload) bool {
+	return !isUPSProductClass(payload.AlarmSource)
+}
+
+func shouldRequestAlarmSyncForInform(payload informAlarmEventPayload, normalized []AlarmPayload) bool {
+	if isUPSProductClass(payload.DeviceID.ProductClass) {
+		return false
+	}
+	for _, item := range normalized {
+		if !shouldRequestAlarmSyncForPayload(item) {
+			return false
+		}
+	}
+	return true
+}
+
+func isUPSProductClass(productClass string) bool {
+	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(productClass)), "UPS")
+}
+
+func alarmTechnologyFromProductClass(productClass string) string {
+	if isUPSProductClass(productClass) {
+		return "UPS"
+	}
+	return ""
+}
+
+func alarmTechnologyFromDevice(device *model.Device) string {
+	if device == nil {
+		return ""
+	}
+	if tech := alarmTechnologyFromProductClass(device.ProductClass); tech != "" {
+		return tech
+	}
+	if device.Technology != "" {
+		return string(device.Technology)
+	}
+	return ""
 }
 
 func (r *AlarmReceiver) processAlarmPayload(ctx context.Context, payload AlarmPayload) error {
@@ -199,6 +245,9 @@ func (r *AlarmReceiver) processAlarmPayload(ctx context.Context, payload AlarmPa
 		Severity:        model.AlarmSeverity(payload.Severity),
 		RaisedAt:        payload.RaisedAt,
 		AdditionalInfo:  payload.Additional,
+	}
+	if alarm.Technology == nil {
+		alarm.Technology = strPtr(alarmTechnologyFromProductClass(payload.AlarmSource))
 	}
 	probableCause := firstNonEmpty(payload.Additional["probable_cause"], payload.Description, payload.AlarmIdentifier)
 	alarm.ProbableCause = strPtr(probableCause)
@@ -313,12 +362,13 @@ func currentAlarmPayloads(device *model.Device, alarms []TR069Alarm, _ time.Time
 		if alarm.ManagedObjectInstance != "" {
 			additional["managed_object_instance"] = alarm.ManagedObjectInstance
 		}
+		addUPSEquipmentInfo(device, additional)
 		result = append(result, AlarmPayload{
 			DeviceID:        device.ID.String(),
 			DeviceSN:        device.SerialNumber,
 			DeviceName:      device.DeviceName,
 			Carrier:         string(device.Carrier),
-			Technology:      string(device.Technology),
+			Technology:      alarmTechnologyFromDevice(device),
 			AlarmIdentifier: alarm.AlarmIdentifier,
 			AlarmType:       firstNonEmpty(strings.TrimSpace(alarm.EventType), "alarm"),
 			AlarmSource:     device.ProductClass,
@@ -347,12 +397,13 @@ func alarmInfoPayloads(device *model.Device, alarms []alarmInfoEvent, _ time.Tim
 		if alarm.NotificationType != "" {
 			additional["notification_type"] = alarm.NotificationType
 		}
+		addUPSEquipmentInfo(device, additional)
 		result = append(result, AlarmPayload{
 			DeviceID:        device.ID.String(),
 			DeviceSN:        device.SerialNumber,
 			DeviceName:      device.DeviceName,
 			Carrier:         string(device.Carrier),
-			Technology:      string(device.Technology),
+			Technology:      alarmTechnologyFromDevice(device),
 			AlarmIdentifier: alarm.AlarmIdentifier,
 			AlarmType:       firstNonEmpty(strings.TrimSpace(alarm.EventType), "alarm"),
 			AlarmSource:     device.ProductClass,
@@ -384,13 +435,14 @@ func expeditedEventPayloads(device *model.Device, alarms []ExpeditedEvent, _ tim
 		if alarm.NotificationType != "" {
 			additional["notification_type"] = alarm.NotificationType
 		}
+		addUPSEquipmentInfo(device, additional)
 
 		result = append(result, AlarmPayload{
 			DeviceID:        device.ID.String(),
 			DeviceSN:        device.SerialNumber,
 			DeviceName:      device.DeviceName,
 			Carrier:         string(device.Carrier),
-			Technology:      string(device.Technology),
+			Technology:      alarmTechnologyFromDevice(device),
 			AlarmIdentifier: alarm.AlarmIdentifier,
 			AlarmType:       firstNonEmpty(strings.TrimSpace(alarm.EventType), "alarm"),
 			AlarmSource:     device.ProductClass,
@@ -472,6 +524,15 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func addUPSEquipmentInfo(device *model.Device, additional map[string]string) {
+	if device == nil || additional == nil || !isUPSProductClass(device.ProductClass) {
+		return
+	}
+	if sn := strings.TrimSpace(device.SerialNumber); sn != "" {
+		additional[additionalInfoEquipmentInfo] = "SN=" + sn
+	}
+}
+
 func (r *AlarmReceiver) backfillDeviceFields(ctx context.Context, alarm *model.Alarm) {
 	if r.deviceReader == nil || alarm.Technology != nil || alarm.DeviceSN == "" {
 		return
@@ -483,12 +544,11 @@ func (r *AlarmReceiver) backfillDeviceFields(ctx context.Context, alarm *model.A
 	if err != nil || device == nil {
 		device, err = r.deviceReader.GetBySerialNumber(ctx, alarm.DeviceSN)
 	}
-	if err != nil || device == nil || device.Technology == "" {
+	if err != nil || device == nil {
 		return
 	}
 
-	technology := string(device.Technology)
-	alarm.Technology = &technology
+	alarm.Technology = strPtr(alarmTechnologyFromDevice(device))
 }
 
 // applyFallback 执行 §3.5 fallback 决策。

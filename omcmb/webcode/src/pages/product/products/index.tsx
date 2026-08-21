@@ -22,7 +22,9 @@ import {
   useDeleteProduct,
   useMatchOrder,
 } from '@core/hooks/api/useProducts';
+import { useSystemLicense } from '@core/hooks/api/useSystemLicense';
 import type { Product, ProductListFilter } from '@core/types/product';
+import { filterDeviceScopedItemsByLicense } from '@core/utils/licenseFeatures';
 import ProductDrawer from './ProductDrawer';
 import MatchTester from './MatchTester';
 import { useT } from '@/hooks/useT';
@@ -48,13 +50,17 @@ export default function ProductsPage() {
   const [pageSize, setPageSize] = useState(PRODUCT_TABLE_DEFAULT_PAGE_SIZE);
   const { data, isLoading } = useProductList(filter);
   const { data: matchOrderData } = useMatchOrder();
+  const { data: systemLicense, isLoading: systemLicenseLoading } = useSystemLicense();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
   const delMut = useDeleteProduct();
 
-  const items = useMemo(() => data?.items || [], [data]);
+  const items = useMemo(() => {
+    const source = data?.items || [];
+    return filterDeviceScopedItemsByLicense(source, systemLicense, systemLicenseLoading);
+  }, [data, systemLicense, systemLicenseLoading]);
 
   const patternStats = useMemo(() => {
     const stats = new Map<string, PatternStats>();
@@ -99,7 +105,10 @@ export default function ProductsPage() {
       title: t('product.products.tech'),
       dataIndex: 'tech',
       width: 90,
-      render: (v: string) => <Tag>{v.toUpperCase()}</Tag>,
+      render: (v: string) => {
+        const value = (v || '').trim();
+        return value ? <Tag>{value.toUpperCase()}</Tag> : <Text type="secondary">—</Text>;
+      },
     },
     {
       title: t('product.products.paramModel'),

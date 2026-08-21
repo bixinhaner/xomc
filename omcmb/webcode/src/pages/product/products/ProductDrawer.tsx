@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Drawer,
   Form,
@@ -28,7 +28,12 @@ import {
 // #241：三个下拉(参数模型/KPI平台/告警neType)改字典数据源绑定(T-0182),由字典机制统一刷新,
 // 不再各下拉各搞一套 query key。与设备列表 network_type/product_class 同范式。
 import { useDictionary } from '@core/hooks/api/useSystem';
+import { useSystemLicense } from '@core/hooks/api/useSystemLicense';
 import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
+import {
+  filterDeviceStandardOptionsByLicense,
+  isDeviceStandardVisibleByLicense,
+} from '@core/utils/licenseFeatures';
 import type {
   Product,
   ProductPattern,
@@ -72,7 +77,7 @@ const FALLBACK_TECH_OPTIONS = [
 
 // 2026-06-03 用户决策:取消"指标设备类型"的修改/新增 —— 由制式(tech)派生,不再单独编辑。
 // lte→enb / nr→gnb / gsm→gsm(两者一一对应,原本冗余)。
-const TECH_TO_DEVTYPE: Record<string, string> = { lte: 'enb', nr: 'gnb', gsm: 'gsm' };
+const TECH_TO_DEVTYPE: Record<string, string> = { lte: 'enb', nr: 'gnb', gsm: 'gsm', ups: '' };
 
 // 上传策略 / 属性覆盖默认值：原"上传策略"页签已下线，新增时套用默认；
 // 编辑时沿用产品已有值（避免保存时把不可见字段清零）。
@@ -100,7 +105,24 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
   const { data: kpiPlatformDict } = useDictionary('kpi_platform_enb');
   const { data: alarmNeTypeDict } = useDictionary('alarm_ne_type');
   const { options: technologyOptions, isLoading: technologyOptionsLoading } = useTechnologyDictionary();
-  const techOptions = technologyOptions.length > 0 ? technologyOptions : FALLBACK_TECH_OPTIONS;
+  const { data: systemLicense, isLoading: systemLicenseLoading } = useSystemLicense();
+  const showUPSOptions = isDeviceStandardVisibleByLicense(systemLicense, systemLicenseLoading, 'UPS');
+  const techOptions = useMemo(() => {
+    const base = (technologyOptions.length > 0 ? technologyOptions : FALLBACK_TECH_OPTIONS)
+      .map((opt) => ({ label: opt.label, value: opt.value }));
+    if (showUPSOptions && !base.some((opt) => opt.value.toLowerCase() === 'ups')) {
+      base.push({ label: 'UPS', value: 'ups' });
+    }
+    return filterDeviceStandardOptionsByLicense(base, systemLicense, systemLicenseLoading);
+  }, [systemLicense, systemLicenseLoading, technologyOptions, showUPSOptions]);
+  const paramModelOptions = useMemo(
+    () => filterDeviceStandardOptionsByLicense(toDictOptions(paramModelDict), systemLicense, systemLicenseLoading),
+    [paramModelDict, systemLicense, systemLicenseLoading],
+  );
+  const alarmNeTypeOptions = useMemo(
+    () => filterDeviceStandardOptionsByLicense(toDictOptions(alarmNeTypeDict), systemLicense, systemLicenseLoading),
+    [alarmNeTypeDict, systemLicense, systemLicenseLoading],
+  );
 
   // 指标设备类型由制式派生(不再单独编辑);ENB(lte) 才需要选指标平台
   const tech = Form.useWatch('tech', form);
@@ -366,7 +388,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                   >
                     <Select
                       placeholder={t('product.products.paramModelPh')}
-                      options={toDictOptions(paramModelDict)}
+                      options={paramModelOptions}
                       showSearch
                       optionFilterProp="label"
                       notFoundContent={paramModelDict ? t('product.product.drawer.notFoundParamModels') : t('common.loading')}
@@ -390,7 +412,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                   <Form.Item name="alarmNeType" label={t('product.products.alarmNeType')} rules={[{ required: true }]}>
                     <Select
                       placeholder={t('product.products.alarmNeTypePh')}
-                      options={toDictOptions(alarmNeTypeDict)}
+                      options={alarmNeTypeOptions}
                       showSearch
                       optionFilterProp="label"
                       notFoundContent={alarmNeTypeDict ? t('product.product.drawer.notFoundAlarms') : t('common.loading')}

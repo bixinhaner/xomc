@@ -566,6 +566,38 @@ func TestDeviceService_RegisterFromInform_LicenseCapacityExceeded(t *testing.T) 
 	assert.Equal(t, "eNB", enforcer.capacityType)
 }
 
+func TestDeviceService_RegisterFromInform_UPSUsesUPSLicenseCapacity(t *testing.T) {
+	createCalled := false
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(ctx context.Context, sn string) (*model.Device, error) {
+			return nil, nil
+		},
+		createFn: func(ctx context.Context, device *model.Device) error {
+			createCalled = true
+			return nil
+		},
+	}
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	svc.SetProductMatcher(&fixedNETypeMatcher{neType: "UPS"})
+	enforcer := &mockLicenseEnforcer{}
+	svc.SetLicenseEnforcer(enforcer)
+
+	inform := sampleInform("SN-UPS-LIC")
+	inform.DeviceId.ProductClass = "UPS_M3_BMU"
+	inform.ParameterList = []tr069.ParameterValueStruct{
+		{Name: "InternetGatewayDevice.DeviceInfo.SoftwareVersion", Value: "UPS-AP-V1.0.0"},
+		{Name: "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress", Value: "192.168.2.10"},
+	}
+
+	registration, err := svc.RegisterFromInform(context.Background(), inform, model.CarrierCMCC)
+	require.NoError(t, err)
+	require.NotNil(t, registration)
+	assert.True(t, createCalled)
+	assert.Equal(t, "device.inform.register", enforcer.expiryOp)
+	assert.Equal(t, 1, enforcer.capacityArg)
+	assert.Equal(t, "UPS", enforcer.capacityType)
+}
+
 func TestDeviceService_RegisterFromInform_LicenseCapacity_ProductNotRegistered(t *testing.T) {
 	// issue #316：productClass 未登记产品（resolveNEType 失败）→ 注册被拒。
 	createCalled := false

@@ -77,10 +77,11 @@ import (
 type startupOnlineDeviceLister struct{ pool *pgxpool.Pool }
 
 func (l startupOnlineDeviceLister) ListOnlineDevices(ctx context.Context, afterID uuid.UUID, pageSize int) ([]*model.Device, error) {
-	queryBuilder := storage.Psql.Select("id", "serial_number").
+	queryBuilder := storage.Psql.Select("id", "serial_number", "COALESCE(product_class, '')").
 		From("devices").
 		Where("deleted_at IS NULL").
 		Where(sq.Eq{"is_online": true}).
+		Where("COALESCE(product_class, '') NOT LIKE 'UPS%'").
 		OrderBy("id").
 		Limit(uint64(pageSize))
 	if afterID != uuid.Nil {
@@ -98,7 +99,7 @@ func (l startupOnlineDeviceLister) ListOnlineDevices(ctx context.Context, afterI
 	devices := make([]*model.Device, 0, pageSize)
 	for rows.Next() {
 		dev := &model.Device{}
-		if err := rows.Scan(&dev.ID, &dev.SerialNumber); err != nil {
+		if err := rows.Scan(&dev.ID, &dev.SerialNumber, &dev.ProductClass); err != nil {
 			return nil, fmt.Errorf("scan online device startup page: %w", err)
 		}
 		devices = append(devices, dev)
@@ -2520,6 +2521,9 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	systemLicenseSvc.SetUsageRepo(licenseUsageRepo)
 	systemLicenseSvc.SetCapacityOffliner(c.DeviceService)
 	c.miscDeps.systemLicenseSvc = systemLicenseSvc // P7-B: middleware 需要 feature check 能力
+	if c.miscDeps.ufteService != nil {
+		c.miscDeps.ufteService.SetLicenseFeatureChecker(systemLicenseSvc)
+	}
 	featureMappingPath := filepath.Join(c.Cfg.DictLoader.XMLBaseDir, "license-feature-mapping.json")
 	if mapping, mappingErr := license.LoadLegacyFeatureMapping(featureMappingPath); mappingErr != nil {
 		logger.Warn("License feature mapping unavailable", zap.String("path", featureMappingPath), zap.Error(mappingErr))

@@ -37,7 +37,7 @@ var allowedSortColumnsWithInfo = map[string]string{
 	"model":           "d.model_name",
 	"manufacturer":    "d.manufacturer",
 	"last_inform_at":  "d.last_inform_at",
-	"device_name":     "di.device_name",
+	"device_name":     "COALESCE(udi.device_name, di.device_name)",
 	"rf_status":       "di.rf_status",
 	"cell_status":     "di.cell_status",
 	"bandwidth":       "di.bandwidth",
@@ -49,6 +49,12 @@ var allowedSortColumnsWithInfo = map[string]string{
 	"alarm_severity": "aa.top_sev",
 	"license_status": "di.license_status",
 }
+
+const (
+	upsProductClassSQL     = "COALESCE(d.product_class, '') LIKE 'UPS%'"
+	radioDeviceInfoJoinSQL = "device_info di ON di.device_id = d.id AND COALESCE(d.product_class, '') NOT LIKE 'UPS%'"
+	upsDeviceInfoJoinSQL   = "device_ups_info udi ON udi.device_id = d.id AND " + upsProductClassSQL
+)
 
 // PgDeviceInfoRepository implements DeviceInfoRepository using PostgreSQL.
 type PgDeviceInfoRepository struct {
@@ -303,10 +309,11 @@ func deviceListSearchFields() []string {
 	return []string{
 		"d.serial_number",
 		"d.site_name",
+		"COALESCE(udi.site_id, d.site_id)",
 		"d.manufacturer",
 		"d.model_name",
-		"di.device_name",
-		"di.address",
+		"COALESCE(udi.device_name, di.device_name)",
+		"COALESCE(udi.address, di.address)",
 		"host(d.ip_address)",
 		"di.mac",
 		"di.pci",
@@ -321,7 +328,8 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 	selectCols := deviceWithInfoSelectColumns()
 	builder := storage.Psql.Select(selectCols...).
 		From("devices d").
-		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin(radioDeviceInfoJoinSQL).
+		LeftJoin(upsDeviceInfoJoinSQL).
 		LeftJoin("device_location_observations dlo ON dlo.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
@@ -329,7 +337,8 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		Where(sq.Eq{"d.deleted_at": nil})
 	countBuilder := deviceListCountSelect().
 		From("devices d").
-		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin(radioDeviceInfoJoinSQL).
+		LeftJoin(upsDeviceInfoJoinSQL).
 		LeftJoin("device_location_observations dlo ON dlo.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		Where(sq.Eq{"d.deleted_at": nil})
@@ -388,6 +397,8 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		builder = builder.Where(sq.Eq{"d.technology": filter.Technologies})
 		countBuilder = countBuilder.Where(sq.Eq{"d.technology": filter.Technologies})
 	}
+	builder = applyDeviceListDeviceTypeFilter(builder, filter.DeviceType)
+	countBuilder = applyDeviceListDeviceTypeFilter(countBuilder, filter.DeviceType)
 	// T-0162: filter.Status 老字段过渡兼容——翻译为 lifecycle_state + is_online
 	if filter.Status != nil {
 		lifecycle, isOnline := DeriveLifecycleFromStatus(*filter.Status)
@@ -573,7 +584,8 @@ func (r *PgDeviceInfoRepository) GetByIDWithInfo(ctx context.Context, deviceID u
 	query, args, err := storage.Psql.
 		Select(deviceWithInfoSelectColumns()...).
 		From("devices d").
-		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin(radioDeviceInfoJoinSQL).
+		LeftJoin(upsDeviceInfoJoinSQL).
 		LeftJoin("device_location_observations dlo ON dlo.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
@@ -638,7 +650,8 @@ func (r *PgDeviceInfoRepository) ComputeListStats(ctx context.Context, filter De
 		deviceListStatsCurrentUECountExpr,
 	).
 		From("devices d").
-		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin(radioDeviceInfoJoinSQL).
+		LeftJoin(upsDeviceInfoJoinSQL).
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
 		Where(sq.Eq{"d.deleted_at": nil})
@@ -706,6 +719,7 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 	if len(filter.Technologies) > 0 {
 		b = b.Where(sq.Eq{"d.technology": filter.Technologies})
 	}
+	b = applyDeviceListDeviceTypeFilter(b, filter.DeviceType)
 	if filter.Status != nil {
 		lifecycle, isOnline := DeriveLifecycleFromStatus(*filter.Status)
 		b = b.Where(sq.Eq{"d.lifecycle_state": lifecycle})
@@ -869,6 +883,11 @@ func deviceWithInfoSelectColumns() []string {
 	// "离线" 在 T-0162 解耦后定义为 d.is_online=FALSE（仅 commissioned 状态下才有
 	// "离线时长"概念；registered/provisioning 等还没入网的状态不计算"离线时长"）。
 	offlineCond := `d.lifecycle_state = 'commissioned' AND d.is_online = FALSE`
+	firstOnlineExpr := `CASE WHEN ` + upsProductClassSQL + ` THEN udi.first_online_time ELSE di.first_online_time END`
+	lastOnlineExpr := `CASE WHEN ` + upsProductClassSQL + ` THEN udi.last_online_time ELSE di.last_online_time END`
+	lastOfflineExpr := `CASE WHEN ` + upsProductClassSQL + ` THEN udi.last_offline_time ELSE di.last_offline_time END`
+	runTimeExpr := `CASE WHEN ` + upsProductClassSQL + ` THEN udi.run_time ELSE di.run_time END`
+	cumulativeOnlineExpr := `CASE WHEN ` + upsProductClassSQL + ` THEN udi.cumulative_online_duration ELSE di.cumulative_online_duration END`
 	return []string{
 		// devices columns (aliased with d.)
 		"d.id", "d.serial_number", "d.oui", "d.product_class", "d.manufacturer", "d.model_name",
@@ -879,7 +898,7 @@ func deviceWithInfoSelectColumns() []string {
 		"d.nat_detected", "d.udp_connection_request_address",
 		"d.last_inform_at", "d.last_inform_events",
 		"d.last_boot_at", "d.boot_count",
-		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
+		"d.inform_interval", "d.site_name", "COALESCE(udi.site_id, d.site_id) AS site_id", "d.latitude", "d.longitude",
 		"d.location_source_mode",
 		"dlo.latitude AS reported_latitude", "dlo.longitude AS reported_longitude",
 		"dlo.gps_height AS reported_gps_height", "dlo.observed_at AS reported_observed_at",
@@ -892,8 +911,11 @@ func deviceWithInfoSelectColumns() []string {
 		"dg.id as group_id",
 		"dg.name as group_name",
 		"COALESCE(dgm.source_type, 'auto') as source_type",
-		// device_info columns
-		"di.device_name", "di.address", "di.remark", "di.project_status", "di.height",
+		// device info columns. UPS reads only from device_ups_info; radio devices keep using device_info.
+		`CASE WHEN ` + upsProductClassSQL + ` THEN udi.device_name ELSE di.device_name END AS device_name`,
+		`CASE WHEN ` + upsProductClassSQL + ` THEN udi.address ELSE di.address END AS address`,
+		`CASE WHEN ` + upsProductClassSQL + ` THEN udi.remark ELSE di.remark END AS remark`,
+		"di.project_status", "di.height",
 		"di.eci", "di.pci", "di.cell_id", "di.freq_point", "di.bandwidth", "di.transmit_power", "di.plmn",
 		"di.rf_status", "di.cell_status", "di.op_state", "di.mme_status", "di.sync_status", "di.kpi_status",
 		"di.num_of_cells", "di.gps_status", "COALESCE(di.ue_count, 0)",
@@ -914,8 +936,11 @@ func deviceWithInfoSelectColumns() []string {
 		END AS alarm_severity`,
 		"di.license_status",
 		"di.mac", "di.hardware_version",
-		"di.first_online_time", "di.last_online_time", "di.last_offline_time", "di.run_time",
-		"di.cumulative_online_duration", // T-0173: OMC 视角累计在线时长
+		firstOnlineExpr + " AS first_online_time",
+		lastOnlineExpr + " AS last_online_time",
+		lastOfflineExpr + " AS last_offline_time",
+		runTimeExpr + " AS run_time",
+		cumulativeOnlineExpr + " AS cumulative_online_duration", // T-0173: OMC 视角累计在线时长
 		// Phase 2/3 (设计文档 §4.2 Layer E)：device_info 扩展列
 		"di.tac", "di.lac", "di.band", "di.ul_earfcn",
 		"di.subframe_assignment", "di.special_subframe", "di.root_index",
@@ -941,36 +966,36 @@ func deviceWithInfoSelectColumns() []string {
 		//   - 离线后 → 上次在线区间长度（last_offline_time - last_online_time）
 		//   - last_online_time IS NULL → NULL（设备从未上线）
 		`CASE
-			WHEN di.last_online_time IS NULL THEN NULL
-			WHEN d.is_online THEN EXTRACT(EPOCH FROM (NOW() - di.last_online_time))::bigint
-			WHEN di.last_offline_time IS NOT NULL AND di.last_offline_time > di.last_online_time
-				THEN EXTRACT(EPOCH FROM (di.last_offline_time - di.last_online_time))::bigint
+			WHEN (` + lastOnlineExpr + `) IS NULL THEN NULL
+			WHEN d.is_online THEN EXTRACT(EPOCH FROM (NOW() - (` + lastOnlineExpr + `)))::bigint
+			WHEN (` + lastOfflineExpr + `) IS NOT NULL AND (` + lastOfflineExpr + `) > (` + lastOnlineExpr + `)
+				THEN EXTRACT(EPOCH FROM ((` + lastOfflineExpr + `) - (` + lastOnlineExpr + `)))::bigint
 			ELSE NULL
 		END AS online_duration`,
 		// 离线时长计算（SQL层面）：T-0162 用 lifecycle+is_online 判定
 		`CASE
-			WHEN ` + offlineCond + ` AND di.last_offline_time IS NOT NULL
-			THEN EXTRACT(EPOCH FROM (NOW() - di.last_offline_time))::bigint
+			WHEN ` + offlineCond + ` AND (` + lastOfflineExpr + `) IS NOT NULL
+			THEN EXTRACT(EPOCH FROM (NOW() - (` + lastOfflineExpr + `)))::bigint
 			ELSE NULL
 		END AS offline_seconds`,
 		`CASE
-			WHEN ` + offlineCond + ` AND di.last_offline_time IS NOT NULL
-			THEN FLOOR(EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) / 86400)::bigint
+			WHEN ` + offlineCond + ` AND (` + lastOfflineExpr + `) IS NOT NULL
+			THEN FLOOR(EXTRACT(EPOCH FROM (NOW() - (` + lastOfflineExpr + `))) / 86400)::bigint
 			ELSE NULL
 		END AS offline_days`,
 		`CASE
-			WHEN ` + offlineCond + ` AND di.last_offline_time IS NOT NULL
-			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) % 86400) / 3600)::bigint
+			WHEN ` + offlineCond + ` AND (` + lastOfflineExpr + `) IS NOT NULL
+			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - (` + lastOfflineExpr + `))) % 86400) / 3600)::bigint
 			ELSE NULL
 		END AS offline_hours`,
 		`CASE
-			WHEN ` + offlineCond + ` AND di.last_offline_time IS NOT NULL
-			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) % 3600) / 60)::bigint
+			WHEN ` + offlineCond + ` AND (` + lastOfflineExpr + `) IS NOT NULL
+			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - (` + lastOfflineExpr + `))) % 3600) / 60)::bigint
 			ELSE NULL
 		END AS offline_minutes`,
 		// #361: 该设备未 cleared 活动告警数（来自 alarms_active 聚合子查询 aa）。
 		// 无活动告警时 LEFT JOIN 命中空 → NULL → 前端归 0。
-		`EXISTS (
+		`CASE WHEN ` + upsProductClassSQL + ` THEN FALSE ELSE (EXISTS (
 			SELECT 1
 			FROM parameter_sync_requests psr
 			WHERE psr.device_id = d.id
@@ -980,8 +1005,18 @@ func deviceWithInfoSelectColumns() []string {
 			FROM parameter_sync_runs psrun
 			WHERE psrun.device_id = d.id
 			  AND psrun.status IN ('planning', 'enqueuing', 'waiting_device', 'executing', 'processing', 'cancelling')
-		) AS param_sync_running`,
+		)) END AS param_sync_running`,
 		"aa.active_alarm_count",
+		`CASE
+			WHEN ` + upsProductClassSQL + ` THEN 'UPS'
+			ELSE 'BASE_STATION'
+		END AS device_type`,
+		"udi.external_ip", "udi.total_voltage", "udi.total_temperature", "udi.total_current",
+		"udi.software_version", "udi.hardware_version", "udi.manufacturer", "udi.manufacturer_oui",
+		"udi.run_time", "udi.bms_charging",
+		"udi.ac_power", "udi.ac_voltage", "udi.dc_voltage", "udi.dc_current", "udi.board_temperature",
+		"udi.sfp_state", "udi.port0_state", "udi.port1_state", "udi.port2_state", "udi.port3_state",
+		"udi.average_soc", "udi.pack_counts", "udi.last_inform_at",
 	}
 }
 
@@ -1149,6 +1184,30 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		paramSyncRunning bool
 		// #361: 活动告警数（alarms_active 聚合，LEFT JOIN 未命中→NULL）
 		activeAlarmCount *int
+		deviceType       string
+		upsExternalIP    *string
+		upsTotalVoltage  *string
+		upsTotalTemp     *string
+		upsTotalCurrent  *string
+		upsSoftware      *string
+		upsHardware      *string
+		upsManufacturer  *string
+		upsOUI           *string
+		upsUpTimeSeconds *int64
+		upsBMSCharging   *string
+		upsACPower       *string
+		upsACVoltage     *string
+		upsDCVoltage     *string
+		upsDCCurrent     *string
+		upsBoardTemp     *string
+		upsSFPState      *string
+		upsPort0State    *string
+		upsPort1State    *string
+		upsPort2State    *string
+		upsPort3State    *string
+		upsAverageSOC    *int
+		upsPackCounts    *int
+		upsLastInformAt  *time.Time
 	)
 
 	err := rows.Scan(
@@ -1198,6 +1257,13 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&paramSyncRunning,
 		// #361: 活动告警数（select 列末尾 aa.active_alarm_count）
 		&activeAlarmCount,
+		&deviceType,
+		&upsExternalIP, &upsTotalVoltage, &upsTotalTemp, &upsTotalCurrent,
+		&upsSoftware, &upsHardware, &upsManufacturer, &upsOUI,
+		&upsUpTimeSeconds, &upsBMSCharging,
+		&upsACPower, &upsACVoltage, &upsDCVoltage, &upsDCCurrent, &upsBoardTemp,
+		&upsSFPState, &upsPort0State, &upsPort1State, &upsPort2State, &upsPort3State,
+		&upsAverageSOC, &upsPackCounts, &upsLastInformAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scan device with info: %w", err)
@@ -1309,6 +1375,37 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.OfflineHours = offlineHours
 	d.OfflineMinutes = offlineMinutes
 	d.ParamSyncRunning = paramSyncRunning
+	d.DeviceType = deviceType
+	if d.DeviceType == "" {
+		d.DeviceType = deviceListDeviceTypeFromProductClass(d.ProductClass)
+	}
+	if d.DeviceType == DeviceListDeviceTypeUPS {
+		d.UPSSummary = &UPSRuntimeSummary{
+			ExternalIP:       upsExternalIP,
+			TotalVoltage:     upsTotalVoltage,
+			TotalTemperature: upsTotalTemp,
+			TotalCurrent:     upsTotalCurrent,
+			SoftwareVersion:  upsSoftware,
+			HardwareVersion:  upsHardware,
+			Manufacturer:     upsManufacturer,
+			ManufacturerOUI:  upsOUI,
+			UpTimeSeconds:    upsUpTimeSeconds,
+			BMSCharging:      upsBMSCharging,
+			ACPower:          upsACPower,
+			ACVoltage:        upsACVoltage,
+			DCVoltage:        upsDCVoltage,
+			DCCurrent:        upsDCCurrent,
+			BoardTemperature: upsBoardTemp,
+			SFPState:         upsSFPState,
+			Port0State:       upsPort0State,
+			Port1State:       upsPort1State,
+			Port2State:       upsPort2State,
+			Port3State:       upsPort3State,
+			AverageSOC:       upsAverageSOC,
+			PackCounts:       upsPackCounts,
+			LastInformAt:     upsLastInformAt,
+		}
+	}
 	acceptedLocation := locationFromDeviceCoordinates(d.Latitude, d.Longitude, nil)
 	var reportedLocation *ReportedLocation
 	if reportedLatitude != nil && reportedLongitude != nil && reportedObservedAt != nil && reportedVersion != nil && reportedSourcePath != nil {

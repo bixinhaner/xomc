@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterModel paramModel="UPS" totalEntries="59">
+    <objects>
+        <object name="InternetGatewayDevice.DeviceInfo." standardPath="InternetGatewayDevice.DeviceInfo." access="READ_ONLY" changeApplies="Immediate"/>
+        <object name="InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1." standardPath="InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1." access="READ_ONLY" changeApplies="Immediate"/>
+        <object name="InternetGatewayDevice.ChargerInfo." standardPath="InternetGatewayDevice.ChargerInfo." access="READ_ONLY" changeApplies="Immediate"/>
+        <object name="InternetGatewayDevice.BMSInfo." standardPath="InternetGatewayDevice.BMSInfo." access="READ_ONLY" changeApplies="Immediate"/>
+        <object name="InternetGatewayDevice.BMSInfo.{i}." standardPath="InternetGatewayDevice.BMSInfo.{i}." access="READ_ONLY" changeApplies="Immediate"/>
+        <object name="InternetGatewayDevice.FaultMgmt.CurrentAlarm." standardPath="InternetGatewayDevice.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
+        <object name="InternetGatewayDevice.FaultMgmt.ExpeditedEvent." standardPath="InternetGatewayDevice.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
+    </objects>
+    <parameters>
+        <param name="InternetGatewayDevice.DeviceInfo.Manufacturer" standardPath="InternetGatewayDevice.DeviceInfo.Manufacturer" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.DeviceInfo.ManufacturerOUI" standardPath="InternetGatewayDevice.DeviceInfo.ManufacturerOUI" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.DeviceInfo.SerialNumber" standardPath="InternetGatewayDevice.DeviceInfo.SerialNumber" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.DeviceInfo.HardwareVersion" standardPath="InternetGatewayDevice.DeviceInfo.HardwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.DeviceInfo.SoftwareVersion" standardPath="InternetGatewayDevice.DeviceInfo.SoftwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.DeviceInfo.UpTime" standardPath="InternetGatewayDevice.DeviceInfo.UpTime" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.DeviceInfo.ProductClass" standardPath="InternetGatewayDevice.DeviceInfo.ProductClass" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress" standardPath="InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+
+        <param name="InternetGatewayDevice.ChargerInfo.ACPower" standardPath="InternetGatewayDevice.ChargerInfo.ACPower" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="ON,OFF" enumLabels="ON,OFF"/>
+        <param name="InternetGatewayDevice.ChargerInfo.ACVoltage" standardPath="InternetGatewayDevice.ChargerInfo.ACVoltage" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.ChargerInfo.DCVoltage" standardPath="InternetGatewayDevice.ChargerInfo.DCVoltage" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.ChargerInfo.DCCurrent" standardPath="InternetGatewayDevice.ChargerInfo.DCCurrent" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.ChargerInfo.BoardTemperature" standardPath="InternetGatewayDevice.ChargerInfo.BoardTemperature" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.ChargerInfo.SFPState" standardPath="InternetGatewayDevice.ChargerInfo.SFPState" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="PLUGIN,DISCONNECT,FAULT" enumLabels="PLUGIN,DISCONNECT,FAULT"/>
+        <param name="InternetGatewayDevice.ChargerInfo.PORT0State" standardPath="InternetGatewayDevice.ChargerInfo.PORT0State" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="UP,DOWN,FAULT" enumLabels="UP,DOWN,FAULT"/>
+        <param name="InternetGatewayDevice.ChargerInfo.PORT1State" standardPath="InternetGatewayDevice.ChargerInfo.PORT1State" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="UP,DOWN,FAULT" enumLabels="UP,DOWN,FAULT"/>
+        <param name="InternetGatewayDevice.ChargerInfo.PORT2State" standardPath="InternetGatewayDevice.ChargerInfo.PORT2State" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="UP,DOWN,FAULT" enumLabels="UP,DOWN,FAULT"/>
+        <param name="InternetGatewayDevice.ChargerInfo.PORT3State" standardPath="InternetGatewayDevice.ChargerInfo.PORT3State" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="UP,DOWN,FAULT" enumLabels="UP,DOWN,FAULT"/>
+        <param name="InternetGatewayDevice.ChargerInfo.AverageSOC" standardPath="InternetGatewayDevice.ChargerInfo.AverageSOC" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="100"/>
+        <param name="InternetGatewayDevice.ChargerInfo.PackCounts" standardPath="InternetGatewayDevice.ChargerInfo.PackCounts" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+
+        <param name="InternetGatewayDevice.BMSInfo.Voltage" standardPath="InternetGatewayDevice.BMSInfo.Voltage" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.BMSInfo.Temperature" standardPath="InternetGatewayDevice.BMSInfo.Temperature" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.BMSInfo.Current" standardPath="InternetGatewayDevice.BMSInfo.Current" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.BMSInfo.Charging" standardPath="InternetGatewayDevice.BMSInfo.Charging" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="CHARGING,DISCHARGING,STANDBY" enumLabels="CHARGING,DISCHARGING,STANDBY"/>
+        <param name="InternetGatewayDevice.BMSInfo.{i}.SOC" standardPath="InternetGatewayDevice.BMSInfo.{i}.SOC" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="100"/>
+        <param name="InternetGatewayDevice.BMSInfo.{i}.Voltage" standardPath="InternetGatewayDevice.BMSInfo.{i}.Voltage" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.BMSInfo.{i}.Temperature" standardPath="InternetGatewayDevice.BMSInfo.{i}.Temperature" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.BMSInfo.{i}.Current" standardPath="InternetGatewayDevice.BMSInfo.{i}.Current" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.BMSInfo.{i}.Status" standardPath="InternetGatewayDevice.BMSInfo.{i}.Status" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="NORMAL,FAULT" enumLabels="NORMAL,FAULT"/>
+        <param name="InternetGatewayDevice.BMSInfo.{i}.RecycleCount" standardPath="InternetGatewayDevice.BMSInfo.{i}.RecycleCount" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.BMSInfo.{i}.Charging" standardPath="InternetGatewayDevice.BMSInfo.{i}.Charging" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="CHARGING,DISCHARGING,STANDBY" enumLabels="CHARGING,DISCHARGING,STANDBY"/>
+        <param name="InternetGatewayDevice.BMSInfo.{i}.Model" standardPath="InternetGatewayDevice.BMSInfo.{i}.Model" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.BMSInfo.{i}.SoftwareVersion" standardPath="InternetGatewayDevice.BMSInfo.{i}.SoftwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.BMSInfo.{i}.SerialNumber" standardPath="InternetGatewayDevice.BMSInfo.{i}.SerialNumber" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+
+        <param name="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.AdditionalInformation" standardPath="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.AdditionalInformation" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256"/>
+        <param name="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.AdditionalText" standardPath="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.AdditionalText" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256"/>
+        <param name="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.AlarmIdentifier" standardPath="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.AlarmIdentifier" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
+        <param name="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.AlarmRaisedTime" standardPath="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.AlarmRaisedTime" access="READ_ONLY" type="DATE_TIME" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.EventType" standardPath="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.EventType" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
+        <param name="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.ManagedObjectInstance" standardPath="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.ManagedObjectInstance" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="512"/>
+        <param name="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.PerceivedSeverity" standardPath="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.PerceivedSeverity" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.ProbableCause" standardPath="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.ProbableCause" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
+        <param name="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.SpecificProblem" standardPath="InternetGatewayDevice.FaultMgmt.CurrentAlarm.{i}.SpecificProblem" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="128"/>
+        <param name="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.AdditionalInformation" standardPath="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.AdditionalInformation" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256"/>
+        <param name="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.AdditionalText" standardPath="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.AdditionalText" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256"/>
+        <param name="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.AlarmIdentifier" standardPath="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.AlarmIdentifier" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
+        <param name="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.EventTime" standardPath="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.EventTime" access="READ_ONLY" type="DATE_TIME" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.EventType" standardPath="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.EventType" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
+        <param name="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.ManagedObjectInstance" standardPath="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.ManagedObjectInstance" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="512"/>
+        <param name="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.NotificationType" standardPath="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.NotificationType" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.PerceivedSeverity" standardPath="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.PerceivedSeverity" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.ProbableCause" standardPath="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.ProbableCause" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
+        <param name="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.SpecificProblem" standardPath="InternetGatewayDevice.FaultMgmt.ExpeditedEvent.{i}.SpecificProblem" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="128"/>
+    </parameters>
+</parameterModel>

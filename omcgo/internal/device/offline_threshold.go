@@ -18,10 +18,12 @@ type OfflineThresholdLookup func(ctx context.Context, category, key string) (val
 // 离线阈值配置位置与键名（与前端 DeviceSettings.tsx 表单字段名一致）。
 //   - category=device, key=enbTimeout → 基站类阈值（秒）
 //   - category=device, key=cpeTimeout → CPE 类阈值（秒）
+//   - category=device, key=upsTimeout → UPS 阈值（秒）
 const (
 	offlineConfigCategory = "device"
 	offlineConfigKeyENB   = "enbTimeout"
 	offlineConfigKeyCPE   = "cpeTimeout"
+	offlineConfigKeyUPS   = "upsTimeout"
 	// offlineConfigKeyZsetConfirm 控制是否用 acs:online 在线索引做离线「免 NATS」二次确认
 	// （issue #397 根治片）。缺失 / 非 false → 默认开（索引已接线时）。
 	offlineConfigKeyZsetConfirm = "offlineZsetConfirm"
@@ -44,12 +46,14 @@ func isCPEClass(productClass string) bool {
 const (
 	defaultENBOfflineSec = 600
 	defaultCPEOfflineSec = 600
+	defaultUPSOfflineSec = 300
 )
 
 // OfflineThresholds 是一轮扫描读到的两类离线阈值（秒）。
 type OfflineThresholds struct {
 	ENBSec int // 基站类阈值（秒）
 	CPESec int // CPE 类阈值（秒）
+	UPSSec int // UPS 阈值（秒）
 }
 
 // resolveOfflineThresholds 用注入的 lookup 读取两类阈值。
@@ -59,6 +63,7 @@ type OfflineThresholds struct {
 func resolveOfflineThresholds(ctx context.Context, lookup OfflineThresholdLookup) OfflineThresholds {
 	enb := defaultENBOfflineSec
 	cpe := defaultCPEOfflineSec
+	ups := defaultUPSOfflineSec
 	if lookup != nil {
 		if v, ok := lookup(ctx, offlineConfigCategory, offlineConfigKeyENB); ok {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -70,8 +75,13 @@ func resolveOfflineThresholds(ctx context.Context, lookup OfflineThresholdLookup
 				cpe = n
 			}
 		}
+		if v, ok := lookup(ctx, offlineConfigCategory, offlineConfigKeyUPS); ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				ups = n
+			}
+		}
 	}
-	return OfflineThresholds{ENBSec: enb, CPESec: cpe}
+	return OfflineThresholds{ENBSec: enb, CPESec: cpe, UPSSec: ups}
 }
 
 // scanIntervalFor 计算扫描周期 = min(两类阈值中较小者的一半, 60s)。
@@ -82,6 +92,9 @@ func scanIntervalFor(th OfflineThresholds) time.Duration {
 	minSec := th.ENBSec
 	if th.CPESec < minSec {
 		minSec = th.CPESec
+	}
+	if th.UPSSec > 0 && th.UPSSec < minSec {
+		minSec = th.UPSSec
 	}
 	if minSec <= 0 {
 		minSec = defaultENBOfflineSec
