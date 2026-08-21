@@ -11530,16 +11530,16 @@ WITH si_group AS (
     LIMIT 1
 ), desired_commands(command_code, command_name_zh, command_name_en, logical_name_zh, logical_name_en, operation_type, rpc_method, target_object) AS (
     VALUES
-        ('ADD 5G_CELL', '新增 5G邻区', 'Add 5G Neighbor Cell', '5G邻区', '5G Neighbor Cell', 'ADD', 'AddObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.5GCell.'),
-        ('RMV 5G_CELL', '删除 5G邻区', 'Remove 5G Neighbor Cell', '5G邻区', '5G Neighbor Cell', 'RMV', 'DeleteObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.5GCell.'),
-        ('ADD INTER_RAT_CELL_NR', '新增 NR异系统邻区', 'Add NR Inter-RAT Neighbor Cell', 'NR异系统邻区', 'NR Inter-RAT Neighbor Cell', 'ADD', 'AddObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.'),
-        ('RMV INTER_RAT_CELL_NR', '删除 NR异系统邻区', 'Remove NR Inter-RAT Neighbor Cell', 'NR异系统邻区', 'NR Inter-RAT Neighbor Cell', 'RMV', 'DeleteObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.'),
-        ('ADD INTER_RAT_CELL_UMTS', '新增 UMTS异系统邻区', 'Add UMTS Inter-RAT Neighbor Cell', 'UMTS异系统邻区', 'UMTS Inter-RAT Neighbor Cell', 'ADD', 'AddObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.'),
-        ('RMV INTER_RAT_CELL_UMTS', '删除 UMTS异系统邻区', 'Remove UMTS Inter-RAT Neighbor Cell', 'UMTS异系统邻区', 'UMTS Inter-RAT Neighbor Cell', 'RMV', 'DeleteObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.'),
-        ('ADD INTER_RAT_CELL_GSM', '新增 GSM异系统邻区', 'Add GSM Inter-RAT Neighbor Cell', 'GSM异系统邻区', 'GSM Inter-RAT Neighbor Cell', 'ADD', 'AddObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.'),
-        ('RMV INTER_RAT_CELL_GSM', '删除 GSM异系统邻区', 'Remove GSM Inter-RAT Neighbor Cell', 'GSM异系统邻区', 'GSM Inter-RAT Neighbor Cell', 'RMV', 'DeleteObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.'),
-        ('ADD LTE_CELL', '新增 LTE同系统邻区', 'Add LTE Neighbor Cell', 'LTE同系统邻区', 'LTE Neighbor Cell', 'ADD', 'AddObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.LTECell.'),
-        ('RMV LTE_CELL', '删除 LTE同系统邻区', 'Remove LTE Neighbor Cell', 'LTE同系统邻区', 'LTE Neighbor Cell', 'RMV', 'DeleteObject', 'Device.Services.FAPService.CellConfig.LTE.RAN.NeighborList.LTECell.')
+        ('ADD 5G_CELL', '新增 5G邻区', 'Add 5G Neighbor Cell', '5G邻区', '5G Neighbor Cell', 'ADD', 'AddObject', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.'),
+        ('RMV 5G_CELL', '删除 5G邻区', 'Remove 5G Neighbor Cell', '5G邻区', '5G Neighbor Cell', 'RMV', 'DeleteObject', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.'),
+        ('ADD INTER_RAT_CELL_NR', '新增 NR异系统邻区', 'Add NR Inter-RAT Neighbor Cell', 'NR异系统邻区', 'NR Inter-RAT Neighbor Cell', 'ADD', 'AddObject', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.'),
+        ('RMV INTER_RAT_CELL_NR', '删除 NR异系统邻区', 'Remove NR Inter-RAT Neighbor Cell', 'NR异系统邻区', 'NR Inter-RAT Neighbor Cell', 'RMV', 'DeleteObject', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.'),
+        ('ADD INTER_RAT_CELL_UMTS', '新增 UMTS异系统邻区', 'Add UMTS Inter-RAT Neighbor Cell', 'UMTS异系统邻区', 'UMTS Inter-RAT Neighbor Cell', 'ADD', 'AddObject', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.'),
+        ('RMV INTER_RAT_CELL_UMTS', '删除 UMTS异系统邻区', 'Remove UMTS Inter-RAT Neighbor Cell', 'UMTS异系统邻区', 'UMTS Inter-RAT Neighbor Cell', 'RMV', 'DeleteObject', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.'),
+        ('ADD INTER_RAT_CELL_GSM', '新增 GSM异系统邻区', 'Add GSM Inter-RAT Neighbor Cell', 'GSM异系统邻区', 'GSM Inter-RAT Neighbor Cell', 'ADD', 'AddObject', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.'),
+        ('RMV INTER_RAT_CELL_GSM', '删除 GSM异系统邻区', 'Remove GSM Inter-RAT Neighbor Cell', 'GSM异系统邻区', 'GSM Inter-RAT Neighbor Cell', 'RMV', 'DeleteObject', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.'),
+        ('ADD LTE_CELL', '新增 LTE同系统邻区', 'Add LTE Neighbor Cell', 'LTE同系统邻区', 'LTE Neighbor Cell', 'ADD', 'AddObject', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.'),
+        ('RMV LTE_CELL', '删除 LTE同系统邻区', 'Remove LTE Neighbor Cell', 'LTE同系统邻区', 'LTE Neighbor Cell', 'RMV', 'DeleteObject', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.')
 )
 INSERT INTO public.mml_commands (
     command_name, command_code, category, description, rpc_method, target_paths,
@@ -12245,9 +12245,26 @@ SET target_paths = r.paths,
 FROM refreshed r
 WHERE c.id = r.id;
 
--- Object deletion commands should not expose parameter sub-fields. DeleteObject
--- only consumes target_object plus the selected instance index; keep the object
--- path in target_paths/tree_node_refs for filtering and display.
+-- ADD commands must only expose fields under the object instance they create.
+UPDATE public.mml_command_sub_fields sf
+SET deprecated_at = COALESCE(sf.deprecated_at, NOW()),
+    updated_at = NOW()
+FROM public.mml_commands c,
+     public.standard_params sp
+WHERE c.id = sf.command_id
+  AND sp.id = sf.standard_path_id
+  AND c.operation_type = 'ADD'
+  AND c.deprecated_at IS NULL
+  AND sf.deprecated_at IS NULL
+  AND COALESCE(c.target_object, '') <> ''
+  AND (
+      sp.standard_path !~ '\{i\}\.[^.]+$'
+      OR regexp_count(sp.standard_path, '\{i\}') <> regexp_count(c.target_object, '\{i\}') + 1
+      OR regexp_replace(sp.standard_path, '\{i\}\.', '', 'g')
+          NOT LIKE regexp_replace(c.target_object, '\{i\}\.', '', 'g') || '%'
+  );
+
+-- Object commands should expose the object itself in target_paths/tree_node_refs.
 UPDATE public.mml_command_sub_fields sf
 SET deprecated_at = COALESCE(sf.deprecated_at, NOW()),
     updated_at = NOW()
@@ -12262,7 +12279,7 @@ UPDATE public.mml_commands c
 SET target_paths = jsonb_build_array(c.target_object),
     tree_node_refs = jsonb_build_array(c.target_object),
     updated_at = NOW()
-WHERE c.operation_type = 'RMV'
+WHERE c.operation_type IN ('ADD', 'RMV')
   AND c.deprecated_at IS NULL
   AND COALESCE(c.target_object, '') <> '';
 
@@ -17088,27 +17105,187 @@ SET mml_code = EXCLUDED.mml_code,
     deprecated_at = NULL,
     updated_at = NOW();
 
-WITH refreshed AS (
-    SELECT c.id,
-           COALESCE(
-               jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path)
-                   FILTER (WHERE sp.standard_path IS NOT NULL),
-               '[]'::jsonb
-           ) AS paths
-    FROM public.mml_commands c
-    LEFT JOIN public.mml_command_sub_fields sf
-      ON sf.command_id = c.id AND sf.deprecated_at IS NULL
-    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
-    WHERE c.operation_type = 'ADD'
-      AND c.deprecated_at IS NULL
-    GROUP BY c.id
-)
+-- LTE_S1U lives under FAPService.{i}.CellConfig in active product models.
 UPDATE public.mml_commands c
-SET target_paths = r.paths,
-    tree_node_refs = r.paths,
+SET target_object = 'Device.Services.FAPService.{i}.CellConfig.LTE.S1U.',
+    tree_node_refs = jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.LTE.S1U.'),
     updated_at = NOW()
-FROM refreshed r
-WHERE c.id = r.id;
+WHERE c.command_code IN ('ADD LTE_S1U', 'RMV LTE_S1U')
+  AND c.deprecated_at IS NULL;
+
+UPDATE public.mml_commands c
+SET target_paths = jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.LTE.S1U.{i}.FarIpSubnetworkList',
+                                     'Device.Services.FAPService.{i}.CellConfig.LTE.S1U.{i}.LocIpAddrList'),
+    tree_node_refs = jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.LTE.S1U.{i}.FarIpSubnetworkList',
+                                       'Device.Services.FAPService.{i}.CellConfig.LTE.S1U.{i}.LocIpAddrList'),
+    updated_at = NOW()
+WHERE c.command_code = 'LST LTE_S1U'
+  AND c.deprecated_at IS NULL;
+
+WITH s1u_paths(old_path, new_path) AS (
+    VALUES
+        ('Device.Services.FAPControl.LTE.S1U.{i}.FarIpSubnetworkList', 'Device.Services.FAPService.{i}.CellConfig.LTE.S1U.{i}.FarIpSubnetworkList'),
+        ('Device.Services.FAPControl.LTE.S1U.{i}.LocIpAddrList', 'Device.Services.FAPService.{i}.CellConfig.LTE.S1U.{i}.LocIpAddrList')
+)
+UPDATE public.mml_command_sub_fields sf
+SET standard_path_id = new_sp.id,
+    updated_at = NOW()
+FROM public.mml_commands c
+JOIN s1u_paths p ON true
+JOIN public.standard_params old_sp ON old_sp.standard_path = p.old_path
+JOIN public.standard_params new_sp ON new_sp.standard_path = p.new_path
+WHERE sf.command_id = c.id
+  AND sf.standard_path_id = old_sp.id
+  AND c.command_code = 'LST LTE_S1U'
+  AND c.deprecated_at IS NULL
+  AND sf.deprecated_at IS NULL;
+
+-- Numeric ranges imported as STRING with negative bounds are numeric fields,
+-- not string lengths.
+UPDATE public.standard_params
+SET data_type = 'INT',
+    updated_at = NOW()
+WHERE upper(COALESCE(data_type, '')) = 'STRING'
+  AND entry_type = 'parameter'
+  AND (min_value < 0 OR max_value < 0);
+
+UPDATE public.param_mappings
+SET data_type = 'INT',
+    updated_at = NOW()
+WHERE upper(COALESCE(data_type, '')) = 'STRING'
+  AND entry_type = 'parameter'
+  AND is_active = true
+  AND (min_value < 0 OR max_value < 0);
+
+-- ADD/RMV visibility depends on explicit instance object mappings. Derive the
+-- immediate "{i}." object from supported leaf parameters for active object
+-- command targets.
+WITH add_targets AS (
+    SELECT DISTINCT regexp_replace(target_object, '\.$', '.{i}.') AS object_path
+    FROM public.mml_commands
+    WHERE operation_type IN ('ADD', 'RMV')
+      AND deprecated_at IS NULL
+      AND COALESCE(target_object, '') <> ''
+), leaf_objects AS (
+    SELECT
+        regexp_replace(m.standard_path, '^(.*\{i\})\.[^.]+$', '\1.') AS standard_path,
+        CASE WHEN bool_or(m.access = 'READ_WRITE') THEN 'READ_WRITE' ELSE 'READ_ONLY' END AS access
+    FROM public.param_mappings m
+    JOIN add_targets t
+      ON t.object_path = regexp_replace(m.standard_path, '^(.*\{i\})\.[^.]+$', '\1.')
+    WHERE m.entry_type = 'parameter'
+      AND m.is_active = true
+      AND m.is_supported = true
+      AND m.standard_path ~ '\{i\}\.[^.]+$'
+    GROUP BY regexp_replace(m.standard_path, '^(.*\{i\})\.[^.]+$', '\1.')
+)
+INSERT INTO public.standard_params (
+    standard_path, entry_type, access, data_type, change_applies, description
+)
+SELECT standard_path, 'object', access, NULL, 'Immediate', 'Derived MML AddObject instance'
+FROM leaf_objects
+ON CONFLICT (standard_path) DO UPDATE
+SET entry_type = 'object',
+    access = CASE WHEN public.standard_params.access = 'READ_WRITE' OR EXCLUDED.access = 'READ_WRITE' THEN 'READ_WRITE' ELSE EXCLUDED.access END,
+    data_type = NULL,
+    change_applies = COALESCE(public.standard_params.change_applies, EXCLUDED.change_applies),
+    updated_at = NOW();
+
+WITH add_targets AS (
+    SELECT DISTINCT regexp_replace(target_object, '\.$', '.{i}.') AS object_path
+    FROM public.mml_commands
+    WHERE operation_type IN ('ADD', 'RMV')
+      AND deprecated_at IS NULL
+      AND COALESCE(target_object, '') <> ''
+), leaf_objects AS (
+    SELECT
+        m.param_model_id,
+        min(regexp_replace(m.standard_path, '^(.*\{i\})\.[^.]+$', '\1.')) AS standard_path,
+        regexp_replace(m.private_path, '^(.*\{i\})\.[^.]+$', '\1.') AS private_path,
+        CASE WHEN bool_or(m.access = 'READ_WRITE') THEN 'READ_WRITE' ELSE 'READ_ONLY' END AS access
+    FROM public.param_mappings m
+    JOIN add_targets t
+      ON t.object_path = regexp_replace(m.standard_path, '^(.*\{i\})\.[^.]+$', '\1.')
+    WHERE m.entry_type = 'parameter'
+      AND m.is_active = true
+      AND m.is_supported = true
+      AND m.standard_path ~ '\{i\}\.[^.]+$'
+      AND m.private_path ~ '\{i\}\.[^.]+$'
+    GROUP BY m.param_model_id,
+        regexp_replace(m.private_path, '^(.*\{i\})\.[^.]+$', '\1.')
+)
+INSERT INTO public.param_mappings (
+    param_model_id, standard_path, private_path, entry_type, access,
+    change_applies, is_storable, is_active, is_supported, source
+)
+SELECT param_model_id, standard_path, private_path, 'object', access,
+       'Immediate', true, true, true, 'builtin'
+FROM leaf_objects
+ON CONFLICT (param_model_id, private_path) DO UPDATE
+SET standard_path = EXCLUDED.standard_path,
+    entry_type = 'object',
+    access = CASE WHEN public.param_mappings.access = 'READ_WRITE' OR EXCLUDED.access = 'READ_WRITE' THEN 'READ_WRITE' ELSE EXCLUDED.access END,
+    data_type = NULL,
+    change_applies = COALESCE(public.param_mappings.change_applies, EXCLUDED.change_applies),
+    min_value = NULL,
+    max_value = NULL,
+    is_active = true,
+    is_supported = true,
+    source = 'builtin',
+    updated_at = NOW();
+
+-- ADD commands must only expose fields under the object instance they create.
+UPDATE public.mml_command_sub_fields sf
+SET deprecated_at = COALESCE(sf.deprecated_at, NOW()),
+    updated_at = NOW()
+FROM public.mml_commands c,
+     public.standard_params sp
+WHERE c.id = sf.command_id
+  AND sp.id = sf.standard_path_id
+  AND c.operation_type = 'ADD'
+  AND c.deprecated_at IS NULL
+  AND sf.deprecated_at IS NULL
+  AND COALESCE(c.target_object, '') <> ''
+  AND (
+      sp.standard_path !~ '\{i\}\.[^.]+$'
+      OR regexp_count(sp.standard_path, '\{i\}') <> regexp_count(c.target_object, '\{i\}') + 1
+      OR regexp_replace(sp.standard_path, '\{i\}\.', '', 'g')
+          NOT LIKE regexp_replace(c.target_object, '\{i\}\.', '', 'g') || '%'
+  );
+
+UPDATE public.mml_command_sub_fields sf
+SET deprecated_at = COALESCE(sf.deprecated_at, NOW()),
+    updated_at = NOW()
+FROM public.mml_commands c
+WHERE c.id = sf.command_id
+  AND c.operation_type = 'RMV'
+  AND c.deprecated_at IS NULL
+  AND sf.deprecated_at IS NULL
+  AND COALESCE(c.target_object, '') <> '';
+
+UPDATE public.mml_commands c
+SET target_paths = jsonb_build_array(c.target_object),
+    tree_node_refs = jsonb_build_array(c.target_object),
+    updated_at = NOW()
+WHERE c.operation_type IN ('ADD', 'RMV')
+  AND c.deprecated_at IS NULL
+  AND COALESCE(c.target_object, '') <> '';
+
+WITH stats AS (
+    SELECT param_model_id,
+           COUNT(*) FILTER (WHERE is_active) AS total_entries,
+           COUNT(*) FILTER (WHERE is_active AND entry_type = 'object') AS total_objects,
+           COUNT(*) FILTER (WHERE is_active AND entry_type = 'parameter') AS total_params
+    FROM public.param_mappings
+    GROUP BY param_model_id
+)
+UPDATE public.param_models pm
+SET total_entries = stats.total_entries,
+    total_objects = stats.total_objects,
+    total_params = stats.total_params,
+    updated_at = NOW()
+FROM stats
+WHERE pm.id = stats.param_model_id;
 
 COMMIT;
 

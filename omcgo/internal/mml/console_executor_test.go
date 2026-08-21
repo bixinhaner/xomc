@@ -471,6 +471,12 @@ func TestSubstituteInstanceSelectorsForADDCompound(t *testing.T) {
 			want:      "Device.Services.FAPService.1.PLMNList.{NEW}.PLMNID",
 		},
 		{
+			name:      "terminal object placeholder .{i} is counted as new instance",
+			path:      "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}",
+			selectors: map[string]string{"iα": "1"},
+			want:      "Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell.{NEW}",
+		},
+		{
 			name: "2 selectors + 3 .{i}. → 前 2 个替换值，最后 1 个 {NEW}",
 			path: "Device.X.{i}.Y.{i}.Z.{i}.Foo",
 			selectors: map[string]string{

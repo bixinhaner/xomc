@@ -8,7 +8,8 @@
         <object standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier." access="READ_WRITE" changeApplies="Immediate"/>
         <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell." access="READ_WRITE" changeApplies="Immediate"/>
-        <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM." access="READ_ONLY" changeApplies="Immediate"/>
+        <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM." access="READ_WRITE" changeApplies="Immediate"/>
+        <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS." access="READ_ONLY" changeApplies="Immediate"/>
         <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell." access="READ_WRITE" changeApplies="Immediate"/>
         <object standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier." access="READ_WRITE" changeApplies="Immediate"/>

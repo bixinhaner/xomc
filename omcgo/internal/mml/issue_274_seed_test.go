@@ -41,6 +41,18 @@ func TestIssue274SeedRepairsOtherMultiInstanceCommands(t *testing.T) {
 	assert.Contains(t, block, "('GnbIdLength', 'U_INT')")
 	assert.Contains(t, block, "('QOFFSET', 'INT')")
 	assert.Contains(t, block, "UPDATE public.param_mappings pm")
+	assert.Contains(t, block, "GSM Inter-RAT neighbors are AddObject/DeleteObject collections just like LTE")
+	assert.Contains(t, block, "'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.', 'object', 'READ_WRITE'")
+	assert.Contains(t, block, "gsm_leaf_models")
+	assert.Contains(t, block, "Numeric ranges imported as STRING with negative bounds are numeric fields")
+	assert.Contains(t, block, "upper(COALESCE(data_type, '')) = 'STRING'")
+	assert.Contains(t, block, "AND (min_value < 0 OR max_value < 0)")
+	assert.Contains(t, block, "SET data_type = 'INT'")
+	assert.Contains(t, block, "ADD/RMV visibility depends on explicit instance object mappings")
+	assert.Contains(t, block, "regexp_replace(target_object, '\\.$', '.{i}.')")
+	assert.Contains(t, block, "Derived MML AddObject instance")
+	assert.Contains(t, block, "('ADD LTE_S1U', 'Device.Services.FAPService.{i}.CellConfig.LTE.S1U.')")
+	assert.Contains(t, block, "LTE_S1U was cataloged under the old FAPControl path")
 	assert.NotContains(t, block, "('PLMNID', 'U_INT')")
 }
 
@@ -188,7 +200,7 @@ func TestKeepalivedVrrpMgmtCommandsExcludeVirtualIpListSubObject(t *testing.T) {
 	}
 }
 
-func TestObjectDeleteCommandsDoNotExposeSubFields(t *testing.T) {
+func TestObjectCommandsUseObjectPathForVisibility(t *testing.T) {
 	paths := []string{
 		"../../migrations/seed/000001_init_seed.sql",
 		"../../scripts/mml_apply_config_updates_20260721.sql",
@@ -199,11 +211,15 @@ func TestObjectDeleteCommandsDoNotExposeSubFields(t *testing.T) {
 			require.NoError(t, err)
 			sql := string(contents)
 
-			assert.Contains(t, sql, "-- Object deletion commands should not expose parameter sub-fields.")
+			assert.Contains(t, sql, "-- ADD commands must only expose fields under the object instance they create.")
+			assert.Contains(t, sql, "c.operation_type = 'ADD'")
+			assert.Contains(t, sql, "regexp_count(sp.standard_path, '\\{i\\}') <> regexp_count(c.target_object, '\\{i\\}') + 1")
+			assert.Contains(t, sql, "-- Object commands should expose the object itself in target_paths/tree_node_refs.")
 			assert.Contains(t, sql, "c.operation_type = 'RMV'")
 			assert.Contains(t, sql, "sf.deprecated_at IS NULL")
 			assert.Contains(t, sql, "SET target_paths = jsonb_build_array(c.target_object)")
 			assert.Contains(t, sql, "tree_node_refs = jsonb_build_array(c.target_object)")
+			assert.Contains(t, sql, "WHERE c.operation_type IN ('ADD', 'RMV')")
 		})
 	}
 }
