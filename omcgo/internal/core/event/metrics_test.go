@@ -61,13 +61,16 @@ func TestEventBusMetricsObserveCommandConsumerQueueStats(t *testing.T) {
 	sampledAt := time.Date(2026, time.August, 21, 10, 0, 0, 0, time.UTC)
 
 	m.observeQueueStats(SubjectCommandGetParamsResponse, "device-rpc-gpv", QueueStats{
-		Pending:          5,
-		AckPending:       1,
-		Redelivered:      2,
-		OldestPendingAge: 30 * time.Second,
-		LastSequence:     99,
-		AckSequence:      88,
-		SampledAt:        sampledAt,
+		Pending:             5,
+		AckPending:          1,
+		Redelivered:         2,
+		OldestPendingAge:    30 * time.Second,
+		LastSequence:        99,
+		AckSequence:         88,
+		DeliverySequence:    12,
+		AckConsumerSequence: 9,
+		AckGap:              3,
+		SampledAt:           sampledAt,
 	})
 	m.observeConsumerQueueSampleFailure(SubjectCommandGetParamsResponse, "device-rpc-gpv")
 
@@ -77,7 +80,10 @@ func TestEventBusMetricsObserveCommandConsumerQueueStats(t *testing.T) {
 	assert.Equal(t, float64(2), testutil.ToFloat64(m.ConsumerRedelivered.WithLabelValues(labels...)))
 	assert.Equal(t, float64(30), testutil.ToFloat64(m.ConsumerOldestAgeSeconds.WithLabelValues(labels...)))
 	assert.Equal(t, float64(99), testutil.ToFloat64(m.ConsumerLastSequence.WithLabelValues(labels...)))
+	assert.Equal(t, float64(12), testutil.ToFloat64(m.ConsumerDeliverySequence.WithLabelValues(labels...)))
 	assert.Equal(t, float64(88), testutil.ToFloat64(m.ConsumerAckSequence.WithLabelValues(labels...)))
+	assert.Equal(t, float64(9), testutil.ToFloat64(m.ConsumerAckConsumerSequence.WithLabelValues(labels...)))
+	assert.Equal(t, float64(3), testutil.ToFloat64(m.ConsumerAckGap.WithLabelValues(labels...)))
 	assert.Equal(t, float64(sampledAt.Unix()), testutil.ToFloat64(m.ConsumerSampleTimestampSeconds.WithLabelValues(labels...)))
 	assert.Equal(t, float64(1), testutil.ToFloat64(m.ConsumerSampleFailures.WithLabelValues(labels...)))
 }
@@ -100,7 +106,10 @@ func TestEventBusMetricsRegistersPMQueueMetricContract(t *testing.T) {
 		"omc_eventbus_consumer_redelivered",
 		"omc_eventbus_consumer_oldest_age_seconds",
 		"omc_eventbus_consumer_last_sequence",
+		"omc_eventbus_consumer_delivery_sequence",
 		"omc_eventbus_consumer_ack_sequence",
+		"omc_eventbus_consumer_ack_consumer_sequence",
+		"omc_eventbus_consumer_ack_gap",
 		"omc_eventbus_consumer_sample_timestamp_seconds",
 		"omc_eventbus_consumer_sample_failures_total",
 		"omc_pm_queue_pending",
@@ -127,6 +136,7 @@ func TestNewEventBusMetrics_Registered(t *testing.T) {
 	m.incAckFailure("pm.file.received", "pm-workers", "ack", "other")
 	m.observeHandlerDuration("pm.file.received", "pm-workers", time.Millisecond)
 	m.observeLocalQueueDepth("pm.file.received", "pm-workers", 1)
+	m.observeQueueStats(SubjectCommandGetParamsResponse, "device-rpc-gpv", QueueStats{SampledAt: time.Now()})
 	families, err := reg.Gather()
 	require.NoError(t, err)
 	names := map[string]bool{}
@@ -137,6 +147,7 @@ func TestNewEventBusMetrics_Registered(t *testing.T) {
 	assert.True(t, names["omc_eventbus_ack_failures_total"], "ack failure counter should be registered")
 	assert.True(t, names["omc_eventbus_handler_duration_seconds"], "handler duration histogram should be registered")
 	assert.True(t, names["omc_eventbus_local_queue_depth"], "local queue gauge should be registered")
+	assert.True(t, names["omc_eventbus_consumer_ack_gap"], "consumer ack gap gauge should be registered")
 }
 
 func TestEventBusMetrics_Inc_ByOutcome(t *testing.T) {
@@ -157,14 +168,14 @@ func TestEventBusMetrics_IncAckFailure_ByActionAndClass(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewEventBusMetrics(reg)
 
-	m.incAckFailure("device.command.get_params.response", "device-rpc-gpv", "ack", "other")
-	m.incAckFailure("device.command.get_params.response", "device-rpc-gpv", "ack", "other")
-	m.incAckFailure("device.command.get_params.response", "device-rpc-gpv", "in_progress", "deadline")
+	m.incAckFailure(SubjectCommandGetParamsResponse, "device-rpc-gpv", "ack", "other")
+	m.incAckFailure(SubjectCommandGetParamsResponse, "device-rpc-gpv", "ack", "other")
+	m.incAckFailure(SubjectCommandGetParamsResponse, "device-rpc-gpv", "in_progress", "deadline")
 
 	assert.Equal(t, float64(2),
-		testutil.ToFloat64(m.AckFailures.WithLabelValues("device.command.get_params.response", "device-rpc-gpv", "ack", "other")))
+		testutil.ToFloat64(m.AckFailures.WithLabelValues(SubjectCommandGetParamsResponse, "device-rpc-gpv", "ack", "other")))
 	assert.Equal(t, float64(1),
-		testutil.ToFloat64(m.AckFailures.WithLabelValues("device.command.get_params.response", "device-rpc-gpv", "in_progress", "deadline")))
+		testutil.ToFloat64(m.AckFailures.WithLabelValues(SubjectCommandGetParamsResponse, "device-rpc-gpv", "in_progress", "deadline")))
 }
 
 func TestEventBusMetrics_ContractUsesOnlyLowCardinalityLabels(t *testing.T) {
@@ -174,7 +185,7 @@ func TestEventBusMetrics_ContractUsesOnlyLowCardinalityLabels(t *testing.T) {
 	m.observeQueueStats("acs:taskq:DEVICE-SN-001", "redis:key:acs:taskq:DEVICE-SN-001", QueueStats{SampledAt: time.Now()})
 	m.observeQueueStats(SubjectPMFileReceived, pmQueueStatsDurable, QueueStats{SampledAt: time.Now()})
 	m.observeQueueSampleFailure(SubjectPMFileReceived, pmQueueStatsDurable)
-	m.incAckFailure("device.command.get_params.response", "device-rpc-gpv", "ack", "other")
+	m.incAckFailure(SubjectCommandGetParamsResponse, "device-rpc-gpv", "ack", "other")
 
 	families, err := reg.Gather()
 	require.NoError(t, err)

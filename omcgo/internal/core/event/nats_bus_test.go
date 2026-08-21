@@ -146,6 +146,7 @@ func TestNATSEventBusQueueStats(t *testing.T) {
 				assert.Equal(t, uint64(11), stats.AckSequence)
 				assert.Equal(t, uint64(18), stats.DeliverySequence)
 				assert.Equal(t, uint64(9), stats.AckConsumerSequence)
+				assert.Equal(t, uint64(9), stats.AckGap)
 			},
 		},
 		{
@@ -184,6 +185,7 @@ func TestNATSEventBusQueueStats(t *testing.T) {
 				assert.Zero(t, stats.Pending)
 				assert.Equal(t, 1, stats.AckPending)
 				assert.InDelta(t, 2*time.Minute, stats.OldestPendingAge, float64(250*time.Millisecond))
+				assert.Zero(t, stats.AckGap)
 			},
 		},
 		{
@@ -224,6 +226,12 @@ func TestNATSEventBusQueueStats(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAckGap(t *testing.T) {
+	assert.Equal(t, uint64(0), ackGap(3, 3))
+	assert.Equal(t, uint64(0), ackGap(2, 3))
+	assert.Equal(t, uint64(5), ackGap(8, 3))
 }
 
 func TestNATSEventBusQueueStatsMissingConsumer(t *testing.T) {

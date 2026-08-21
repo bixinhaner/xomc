@@ -181,6 +181,8 @@ func newObservedKeyedDispatcher(
 		durable:     durable,
 		metrics:     metrics,
 	}
+	d.metrics.initConsumerObservation(subject, durable)
+	d.observeDepth()
 	return d
 }
 
@@ -355,6 +357,7 @@ type QueueStats struct {
 	OldestPendingAge    time.Duration
 	LastSequence        uint64
 	AckSequence         uint64
+	AckGap              uint64
 	DeliverySequence    uint64
 	AckConsumerSequence uint64
 	SampledAt           time.Time
@@ -458,6 +461,7 @@ func (b *NATSEventBus) QueueStats(ctx context.Context, subject, durable string) 
 		Redelivered:         consumer.NumRedelivered,
 		LastSequence:        streamInfo.State.LastSeq,
 		AckSequence:         consumer.AckFloor.Stream,
+		AckGap:              ackGap(consumer.Delivered.Consumer, consumer.AckFloor.Consumer),
 		DeliverySequence:    consumer.Delivered.Consumer,
 		AckConsumerSequence: consumer.AckFloor.Consumer,
 		SampledAt:           sampledAt,
@@ -470,6 +474,13 @@ func (b *NATSEventBus) QueueStats(ctx context.Context, subject, durable string) 
 	}
 
 	return stats, nil
+}
+
+func ackGap(delivered, acked uint64) uint64 {
+	if delivered <= acked {
+		return 0
+	}
+	return delivered - acked
 }
 
 // oldestRelevantPendingStart returns a safe lower bound for a single
@@ -616,6 +627,7 @@ func (b *NATSEventBus) Publish(ctx context.Context, subject string, evt Event) e
 }
 
 func (b *NATSEventBus) Subscribe(subject string, handler EventHandler) (Subscription, error) {
+	b.metrics.initConsumerObservation(subject, "")
 	sub, err := b.js.Subscribe(subject, b.wrapHandler(handler, maxDeliveries),
 		nats.DeliverAll(),
 		nats.AckExplicit(),
@@ -639,6 +651,7 @@ func (b *NATSEventBus) QueueSubscribe(subject string, queue string, handler Even
 	if err != nil {
 		return nil, err
 	}
+	b.metrics.initConsumerObservation(subject, queue)
 
 	sub, err := b.js.QueueSubscribe(subject, queue, b.wrapHandlerWithDurable(handler, tuning.MaxDeliver, queue),
 		nats.Bind(stream, queue),
@@ -917,6 +930,7 @@ func (b *NATSEventBus) PullSubscribe(subject string, queue string, handler Event
 	if err := b.ensureBoundPullConsumer(stream, subject, durable, tuning, durableDeliveryPlan(info, 0)); err != nil {
 		return nil, err
 	}
+	b.metrics.initConsumerObservation(subject, durable)
 	options := []nats.SubOpt{
 		nats.Bind(stream, durable),
 		nats.AckExplicit(),

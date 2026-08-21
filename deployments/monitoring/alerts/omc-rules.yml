@@ -670,6 +670,8 @@ groups:
           and on (subject, durable)
           omc_eventbus_consumer_oldest_age_seconds{subject="command.get_parameters.response"} > 300
           and on (subject, durable)
+          omc_eventbus_consumer_ack_gap{subject="command.get_parameters.response"} > 0
+          and on (subject, durable)
           changes(omc_eventbus_consumer_ack_sequence{subject="command.get_parameters.response"}[10m]) == 0
         for: 10m
         labels:
@@ -679,9 +681,32 @@ groups:
         annotations:
           summary: "COMMAND/GPV durable ack floor 停滞"
           description: |
-            durable consumer 存在未确认消息，最老消息超过 5 分钟，且 ack floor 10 分钟未推进。
-            Impact: GPV 响应可能积压并触发重投，单设备慢处理可能拖累参数同步。
+            durable consumer 存在未确认消息，最老消息超过 5 分钟，投递进度领先连续 AckFloor，
+            且 ack floor 10 分钟未推进。
+            Impact: GPV 响应可能积压并触发重投；早到慢消息会让全 durable AckFloor 出现 gap。
             Action: 联查 handler 耗时、本地队列深度、redelivery、ACK 失败和对应 durable 的 NATS ConsumerInfo。
+
+      - alert: OMCCommandConsumerAckRateLagging
+        expr: |
+          omc_eventbus_consumer_ack_pending{subject="command.get_parameters.response"} > 0
+          and on (subject, durable)
+          delta(omc_eventbus_consumer_delivery_sequence{subject="command.get_parameters.response"}[10m]) > 0
+          and on (subject, durable)
+          delta(omc_eventbus_consumer_delivery_sequence{subject="command.get_parameters.response"}[10m])
+            >
+          delta(omc_eventbus_consumer_ack_consumer_sequence{subject="command.get_parameters.response"}[10m])
+        for: 5m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: command
+        annotations:
+          summary: "COMMAND/GPV durable ACK 速率落后于投递速率"
+          description: |
+            durable consumer 仍有未确认消息，且最近 10 分钟 delivered consumer sequence
+            的增长快于 ack floor consumer sequence 的增长。
+            Impact: ACK 处理已经追不上投递，持续后会形成积压、ack gap 或 redelivery。
+            Action: 联查 handler 耗时、本地队列深度、ack gap、redelivery 与 ACK 失败。
 
       - alert: OMCCommandConsumerRedeliveryHigh
         expr: omc_eventbus_consumer_redelivered{subject="command.get_parameters.response"} > 0

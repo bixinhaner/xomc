@@ -15,6 +15,7 @@ import (
 //   - *_pending、*_ack_pending、*_redelivered 是 gauge，单位为消息数，空队列明确暴露 0。
 //   - *_oldest_age_seconds 是 gauge，单位为秒；无积压时为 0。
 //   - *_sequence 是 gauge，单位为 JetStream sequence；采集失败保留上次值。
+//   - *_ack_gap 是 gauge，单位为 consumer sequence 差值；>0 表示已投递进度领先连续 AckFloor。
 //   - *_sample_timestamp_seconds 是 gauge，单位为 Unix 秒；采集失败不更新。
 //   - *_sample_failures_total 是 counter；采集失败时递增，不能用 0 伪造成功。
 //
@@ -37,7 +38,10 @@ type EventBusMetrics struct {
 	ConsumerRedelivered            *prometheus.GaugeVec
 	ConsumerOldestAgeSeconds       *prometheus.GaugeVec
 	ConsumerLastSequence           *prometheus.GaugeVec
+	ConsumerDeliverySequence       *prometheus.GaugeVec
 	ConsumerAckSequence            *prometheus.GaugeVec
+	ConsumerAckConsumerSequence    *prometheus.GaugeVec
+	ConsumerAckGap                 *prometheus.GaugeVec
 	ConsumerSampleTimestampSeconds *prometheus.GaugeVec
 	ConsumerSampleFailures         *prometheus.CounterVec
 
@@ -78,7 +82,10 @@ func NewEventBusMetrics(reg prometheus.Registerer) *EventBusMetrics {
 		ConsumerRedelivered:            newQueueGauge("omc_eventbus_consumer_redelivered", "JetStream messages currently marked for redelivery by observable durable consumer."),
 		ConsumerOldestAgeSeconds:       newQueueGauge("omc_eventbus_consumer_oldest_age_seconds", "Age in seconds of the oldest retained message for an observable durable consumer."),
 		ConsumerLastSequence:           newQueueGauge("omc_eventbus_consumer_last_sequence", "Latest stream sequence retained for an observable durable consumer."),
+		ConsumerDeliverySequence:       newQueueGauge("omc_eventbus_consumer_delivery_sequence", "Delivered consumer sequence for an observable durable consumer."),
 		ConsumerAckSequence:            newQueueGauge("omc_eventbus_consumer_ack_sequence", "Acknowledgement floor stream sequence for an observable durable consumer."),
+		ConsumerAckConsumerSequence:    newQueueGauge("omc_eventbus_consumer_ack_consumer_sequence", "Acknowledgement floor consumer sequence for an observable durable consumer."),
+		ConsumerAckGap:                 newQueueGauge("omc_eventbus_consumer_ack_gap", "Delivered consumer sequence minus acknowledgement floor consumer sequence for an observable durable consumer."),
 		ConsumerSampleTimestampSeconds: newQueueGauge("omc_eventbus_consumer_sample_timestamp_seconds", "Unix timestamp of the last successful observable durable consumer sample."),
 		ConsumerSampleFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "omc_eventbus_consumer_sample_failures_total",
@@ -108,7 +115,10 @@ func NewEventBusMetrics(reg prometheus.Registerer) *EventBusMetrics {
 			m.ConsumerRedelivered,
 			m.ConsumerOldestAgeSeconds,
 			m.ConsumerLastSequence,
+			m.ConsumerDeliverySequence,
 			m.ConsumerAckSequence,
+			m.ConsumerAckConsumerSequence,
+			m.ConsumerAckGap,
 			m.ConsumerSampleTimestampSeconds,
 			m.ConsumerSampleFailures,
 			m.QueuePending,
@@ -146,12 +156,28 @@ const (
 	deliveryOutcomeDropped    = "dropped"
 )
 
+var (
+	ackFailureActions = []string{"ack", "nak", "term", "in_progress"}
+	ackFailureClasses = []string{"context_canceled", "deadline", "connection_closed", "other"}
+)
+
 // inc 是 EventBusMetrics 的 nil 安全自增入口：metrics 未注入时（单进程 / 单测）静默 no-op。
 func (m *EventBusMetrics) inc(subject, outcome string) {
 	if m == nil {
 		return
 	}
 	m.DeliveryTotal.WithLabelValues(subject, outcome).Inc()
+}
+
+func (m *EventBusMetrics) initConsumerObservation(subject, durable string) {
+	if m == nil || subject == "" {
+		return
+	}
+	for _, action := range ackFailureActions {
+		for _, errorClass := range ackFailureClasses {
+			m.AckFailures.WithLabelValues(subject, durable, action, errorClass).Add(0)
+		}
+	}
 }
 
 func (m *EventBusMetrics) incAckFailure(subject, durable, action, errorClass string) {
@@ -196,7 +222,10 @@ func (m *EventBusMetrics) observeQueueStats(subject, durable string, stats Queue
 		m.ConsumerRedelivered.WithLabelValues(labels...).Set(float64(stats.Redelivered))
 		m.ConsumerOldestAgeSeconds.WithLabelValues(labels...).Set(stats.OldestPendingAge.Seconds())
 		m.ConsumerLastSequence.WithLabelValues(labels...).Set(float64(stats.LastSequence))
+		m.ConsumerDeliverySequence.WithLabelValues(labels...).Set(float64(stats.DeliverySequence))
 		m.ConsumerAckSequence.WithLabelValues(labels...).Set(float64(stats.AckSequence))
+		m.ConsumerAckConsumerSequence.WithLabelValues(labels...).Set(float64(stats.AckConsumerSequence))
+		m.ConsumerAckGap.WithLabelValues(labels...).Set(float64(stats.AckGap))
 		m.ConsumerSampleTimestampSeconds.WithLabelValues(labels...).Set(float64(stats.SampledAt.UnixNano()) / float64(time.Second))
 	}
 	// These are PM-only metric names. Do not let the generic QueueStats API turn
