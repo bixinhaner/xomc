@@ -49,6 +49,9 @@ func (f *fakeNBDeviceService) GetDeviceWithInfo(ctx context.Context, id uuid.UUI
 }
 
 func (f *fakeNBDeviceService) GetDeviceParameters(ctx context.Context, id uuid.UUID) ([]model.DeviceParameter, error) {
+	if f.paramsFn == nil {
+		return nil, nil
+	}
 	return f.paramsFn(ctx, id)
 }
 
@@ -247,6 +250,48 @@ func TestLegacyFacadeDeviceQueryUsesCurrentDeviceService(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "SN001")
 }
 
+func TestLegacyFacadeDeviceQueryReturnsFrequencyAliasesAndRows(t *testing.T) {
+	deviceID := uuid.New()
+	deviceSvc := &fakeNBDeviceService{
+		listFn: func(_ context.Context, filter device.DeviceFilter) (*model.ListResponse[device.DeviceWithInfo], error) {
+			return model.NewListResponse([]device.DeviceWithInfo{{
+				Device: model.Device{ID: deviceID, SerialNumber: "SN001", Technology: model.TechLTE, ProductClass: "FAP/BAIBLQ/SC"},
+			}}, 1, 1, 20), nil
+		},
+		paramsFn: func(_ context.Context, id uuid.UUID) ([]model.DeviceParameter, error) {
+			require.Equal(t, deviceID, id)
+			return []model.DeviceParameter{
+				{ParameterPath: "Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.EARFCNDL", ParameterValue: "39751"},
+				{ParameterPath: "Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.EARFCNUL", ParameterValue: "19751"},
+			}, nil
+		},
+	}
+
+	router := setupDeviceFacadeRouter(deviceSvc, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/northbound/v1/device/query", bytes.NewBufferString(`{"sn":"SN001","technology":"LTE","page":1,"rows":20}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var envelope struct {
+		Data struct {
+			Items     []map[string]any `json:"items"`
+			Rows      []map[string]any `json:"rows"`
+			TotalRows int64            `json:"totalRows"`
+			PageNo    int              `json:"pageNo"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	require.Equal(t, int64(1), envelope.Data.TotalRows)
+	require.Equal(t, 1, envelope.Data.PageNo)
+	require.Len(t, envelope.Data.Items, 1)
+	require.Len(t, envelope.Data.Rows, 1)
+	require.Equal(t, "39751", envelope.Data.Items[0]["freq_point"])
+	require.Equal(t, "39751", envelope.Data.Items[0]["freq_pointno_dl"])
+	require.Equal(t, "19751", envelope.Data.Items[0]["freq_pointno_ul"])
+}
+
 func TestDeviceFacadeSetParametersReturnsLegacyJobFields(t *testing.T) {
 	deviceID := uuid.New()
 	deviceSvc := &fakeNBDeviceService{
@@ -382,6 +427,65 @@ func TestLegacyFacadeRegistrationCreateUsesCurrentService(t *testing.T) {
 
 	require.Equal(t, http.StatusCreated, rec.Code)
 	require.Contains(t, rec.Body.String(), `"serial_number":"SN001"`)
+}
+
+func TestLegacyFacadeRegistrationListClampsOutOfRangePageAndReturnsRows(t *testing.T) {
+	groupID := uuid.New()
+	calls := 0
+	regSvc := &fakeNBRegistrationService{
+		listFn: func(_ context.Context, filter device.RegistrationFilter) (*model.ListResponse[device.DeviceRegistration], error) {
+			calls++
+			switch calls {
+			case 1:
+				require.Equal(t, 2, filter.Page)
+				require.Equal(t, 50, filter.PageSize)
+				return &model.ListResponse[device.DeviceRegistration]{
+					Items:      nil,
+					Total:      2,
+					Page:       2,
+					PageSize:   50,
+					TotalPages: 1,
+				}, nil
+			case 2:
+				require.Equal(t, 1, filter.Page)
+				return model.NewListResponse([]device.DeviceRegistration{
+					{ID: uuid.New(), SerialNumber: "SN001", GroupID: &groupID, Carrier: model.CarrierCode("dxp")},
+					{ID: uuid.New(), SerialNumber: "SN002", GroupID: &groupID, Carrier: model.CarrierCode("dxp")},
+				}, 2, 1, 50), nil
+			default:
+				t.Fatalf("unexpected registration list call %d", calls)
+			}
+			return nil, nil
+		},
+	}
+
+	router := setupDeviceFacadeRouterWithExtras(nil, nil, regSvc, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/northbound/v1/device/register/page", bytes.NewBufferString(`{"page":2,"rows":50,"carrier":"dxp"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 2, calls)
+	var envelope struct {
+		Data struct {
+			Items     []device.DeviceRegistration `json:"items"`
+			Rows      []device.DeviceRegistration `json:"rows"`
+			Total     int64                       `json:"total"`
+			TotalRows int64                       `json:"totalRows"`
+			Page      int                         `json:"page"`
+			PageNo    int                         `json:"pageNo"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	require.Equal(t, int64(2), envelope.Data.Total)
+	require.Equal(t, int64(2), envelope.Data.TotalRows)
+	require.Equal(t, 1, envelope.Data.Page)
+	require.Equal(t, 1, envelope.Data.PageNo)
+	require.Len(t, envelope.Data.Items, 2)
+	require.Len(t, envelope.Data.Rows, 2)
+	require.Equal(t, "SN001", envelope.Data.Items[0].SerialNumber)
+	require.Equal(t, "SN002", envelope.Data.Rows[1].SerialNumber)
 }
 
 func TestLegacyFacadeGroupAddDevicesAcceptsSNS(t *testing.T) {

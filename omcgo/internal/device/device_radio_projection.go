@@ -19,6 +19,33 @@ type radioFrequencyProjection struct {
 	reason     string
 }
 
+// RadioFrequencyProjection exposes the device-list DL/UL frequency projection
+// to compatibility facades that need the same physical-cell semantics.
+type RadioFrequencyProjection struct {
+	DLValue    string
+	ULValue    string
+	DLObserved bool
+	ULObserved bool
+	Complete   bool
+	Reason     string
+}
+
+func ProjectRadioFrequencyValues(
+	params map[string]string,
+	tech model.Technology,
+	productClass string,
+) RadioFrequencyProjection {
+	projected := projectRadioFrequencyFields(params, tech, productClass)
+	return RadioFrequencyProjection{
+		DLValue:    projected.dlValue,
+		ULValue:    projected.ulValue,
+		DLObserved: projected.dlObserved,
+		ULObserved: projected.ulObserved,
+		Complete:   projected.complete,
+		Reason:     projected.reason,
+	}
+}
+
 var (
 	lteRFDLEARFCNPattern = regexp.MustCompile(
 		`^Device\.Services\.FAPService\.(\d+)\.CellConfig\.LTE\.RAN\.RF\.EARFCNDL$`,
@@ -148,6 +175,11 @@ func projectFrequencyValues(
 	}
 
 	if countKnown {
+		if expectedCount == 1 {
+			if singleValue, ok := singleObservedFrequencyValue(values); ok {
+				return singleValue, true, ""
+			}
+		}
 		projected := make([]string, 0, expectedCount)
 		for index := 1; index <= expectedCount; index++ {
 			cellValue := values[index]
@@ -175,6 +207,21 @@ func projectFrequencyValues(
 		projected = append(projected, values[index])
 	}
 	return strings.Join(projected, ","), true, ""
+}
+
+func singleObservedFrequencyValue(values map[int]string) (string, bool) {
+	value := ""
+	for _, rawValue := range values {
+		cellValue := strings.TrimSpace(rawValue)
+		if cellValue == "" {
+			continue
+		}
+		if value != "" {
+			return "", false
+		}
+		value = cellValue
+	}
+	return value, value != ""
 }
 
 func nonEmptyStrings(values ...string) []string {

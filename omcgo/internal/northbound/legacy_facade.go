@@ -116,10 +116,13 @@ func (r *Router) legacyDeviceQuery(c *gin.Context) {
 		failNorthboundFacade(c, err)
 		return
 	}
-	for i := range result.Items {
-		legacyNormalizeDeviceInfoForNorthbound(&result.Items[i])
+	if result != nil {
+		for i := range result.Items {
+			r.refreshLegacyDeviceRadioFrequencyFromParameters(c, &result.Items[i])
+			legacyNormalizeDeviceInfoForNorthbound(&result.Items[i])
+		}
 	}
-	response.OK(c, result)
+	response.OK(c, legacyListPayload(result))
 }
 
 func (r *Router) legacyCreateRegistration(c *gin.Context) {
@@ -210,7 +213,15 @@ func (r *Router) legacyListRegistrations(c *gin.Context) {
 		failNorthboundFacade(c, err)
 		return
 	}
-	response.OK(c, result)
+	if result != nil && result.Total > 0 && result.TotalPages > 0 && len(result.Items) == 0 && result.Page > result.TotalPages {
+		filter.Page = result.TotalPages
+		result, err = r.regService.List(c.Request.Context(), filter)
+		if err != nil {
+			failNorthboundFacade(c, err)
+			return
+		}
+	}
+	response.OK(c, legacyListPayload(result))
 }
 
 func (r *Router) legacyDeleteRegistration(c *gin.Context) {
@@ -411,6 +422,33 @@ func (r *Router) refreshLegacyDeviceInfoFromParameters(c *gin.Context, info *dev
 		status := legacyCalcLicenseStatus(values)
 		info.LicenseStatus = &status
 	}
+	legacyApplyRadioFrequencyProjection(info, device.ProjectRadioFrequencyValues(values, info.Technology, info.ProductClass))
+}
+
+func (r *Router) refreshLegacyDeviceRadioFrequencyFromParameters(c *gin.Context, info *device.DeviceWithInfo) {
+	if info == nil || r.deviceService == nil {
+		return
+	}
+	params, err := r.deviceService.GetDeviceParameters(c.Request.Context(), info.ID)
+	if err != nil {
+		return
+	}
+	legacyApplyRadioFrequencyProjection(
+		info,
+		device.ProjectRadioFrequencyValues(legacyDeviceParameterValues(params), info.Technology, info.ProductClass),
+	)
+}
+
+func legacyApplyRadioFrequencyProjection(info *device.DeviceWithInfo, projected device.RadioFrequencyProjection) {
+	if info == nil {
+		return
+	}
+	if projected.DLObserved && strings.TrimSpace(projected.DLValue) != "" {
+		info.FreqPoint = stringValuePtr(projected.DLValue)
+	}
+	if projected.ULObserved && strings.TrimSpace(projected.ULValue) != "" {
+		info.ULEarfcn = stringValuePtr(projected.ULValue)
+	}
 }
 
 func legacyNormalizeDeviceInfoForNorthbound(info *device.DeviceWithInfo) {
@@ -423,6 +461,45 @@ func legacyNormalizeDeviceInfoForNorthbound(info *device.DeviceWithInfo) {
 		info.OnlineDuration = int64Ptr(total)
 		info.CumulativeOnlineDuration = int64Ptr(total)
 	}
+	info.FreqPointNoDL = info.FreqPoint
+	info.FreqPointNoUL = info.ULEarfcn
+}
+
+func legacyListPayload[T any](result *model.ListResponse[T]) gin.H {
+	items := []T{}
+	if result == nil {
+		return gin.H{
+			"items":       items,
+			"rows":        items,
+			"total":       int64(0),
+			"totalRows":   int64(0),
+			"page":        1,
+			"pageNo":      1,
+			"page_size":   20,
+			"pageSize":    20,
+			"total_pages": 0,
+			"totalPages":  0,
+		}
+	}
+	if result.Items != nil {
+		items = result.Items
+	}
+	payload := gin.H{
+		"items":       items,
+		"rows":        items,
+		"total":       result.Total,
+		"totalRows":   result.Total,
+		"page":        result.Page,
+		"pageNo":      result.Page,
+		"page_size":   result.PageSize,
+		"pageSize":    result.PageSize,
+		"total_pages": result.TotalPages,
+		"totalPages":  result.TotalPages,
+	}
+	if result.Stats != nil {
+		payload["stats"] = result.Stats
+	}
+	return payload
 }
 
 func legacyAccumulatedOnlineDuration(info *device.DeviceWithInfo) (int64, bool) {
@@ -583,6 +660,10 @@ func legacyLicenseCapacityActive(state string, remain int, hasRemain bool) bool 
 }
 
 func int64Ptr(value int64) *int64 {
+	return &value
+}
+
+func stringValuePtr(value string) *string {
 	return &value
 }
 

@@ -74,6 +74,10 @@ type DeviceWithInfo struct {
 	// FreqPoint 频点号
 	FreqPoint *string `json:"freq_point"`
 
+	// FreqPointNoDL/FreqPointNoUL 是北向老网管字段别名，仅由 northbound legacy facade 填充。
+	FreqPointNoDL *string `json:"freq_pointno_dl,omitempty"`
+	FreqPointNoUL *string `json:"freq_pointno_ul,omitempty"`
+
 	// Bandwidth 载波带宽 (MHz)
 	Bandwidth *float64 `json:"bandwidth"`
 
