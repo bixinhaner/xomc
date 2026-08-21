@@ -435,13 +435,12 @@ func (p *BatchInformProcessor) publishTransitionEvents(ctx context.Context, u *i
 	if p.transitionPublisher == nil || u == nil || u.device == nil {
 		return
 	}
-	if u.device.Status == model.DeviceActive && u.device.IsOnline {
-		p.transitionPublisher.ClearDisconnectedAlarmOnOnline(ctx, u.device)
-	}
-
 	newVersion := u.device.FirmwareVersion
 	firmwareChanged := u.oldVersion != "" && newVersion != "" && u.oldVersion != newVersion
 	becameOnline := u.oldStatus == model.DeviceOffline && u.device.Status == model.DeviceActive
+	if becameOnline {
+		p.transitionPublisher.ClearDisconnectedAlarmOnOnline(ctx, u.device)
+	}
 
 	switch {
 	case firmwareChanged:
