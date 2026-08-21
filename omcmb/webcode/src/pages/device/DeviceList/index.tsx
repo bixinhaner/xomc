@@ -1501,7 +1501,7 @@ export default function DeviceList() {
             if (actionKey === 'batch-reboot') {
               try {
                 await batchReboot.mutateAsync(ids.map(String));
-                void message.success(t('common.commandSent'));
+                void message.success(t('device.rebootQueued'));
               } catch {
                 void message.error(t('common.operationFailed'));
               }
