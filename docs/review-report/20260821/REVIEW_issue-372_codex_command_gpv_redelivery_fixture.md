@@ -32,5 +32,7 @@
 - `GOCACHE=/Users/shangyingbin/tmp/go-build-cache go test -count=1 ./internal/core/event`
 - `GOCACHE=/Users/shangyingbin/tmp/go-build-cache go build ./...`
 - `GOCACHE=/Users/shangyingbin/tmp/go-build-cache go test ./...`
+- `GPV_NATS_TEST_URL=nats://127.0.0.1:4222 TEST_PG_URL='postgres://omcgo:omcgo123@127.0.0.1:5432/omcgo?sslmode=disable' GOCACHE=/Users/shangyingbin/tmp/go-build-cache go test -count=1 ./internal/core/event -run 'TestCommandGPVQueueStatsShowsAckGapWhileAckRateLagsAndSettles' -v`
+- `GPV_NATS_TEST_URL=nats://127.0.0.1:4222 TEST_PG_URL='postgres://omcgo:omcgo123@127.0.0.1:5432/omcgo?sslmode=disable' GOCACHE=/Users/shangyingbin/tmp/go-build-cache go test -count=1 ./internal/paramsync -run 'TestResultConsumerRealNATSRedeliveryAfterCommitDoesNotDuplicateBusinessProjection' -v`
 
 备注：第一次 `go test ./...` 中 `TestResultProcessingDoesNotBackfillLegacyTaskOutbox` 出现一次 `conn closed`，该用例单独重跑通过；第二次全仓测试通过。
