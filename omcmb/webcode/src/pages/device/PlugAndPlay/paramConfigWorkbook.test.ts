@@ -253,6 +253,48 @@ describe('parameter config workbook', () => {
       .toEqual(['Unmapped A', 'Unmapped B']);
   });
 
+  it('orders edited downloaded columns by the current template when product metadata is available', () => {
+    const metadata = {
+      deviceType: 'gNB' as const,
+      quickSettingsGroups: [{
+        id: 'gnb-cell', titleZh: '小区', titleEn: 'Cell', multiInstance: false,
+        objectPath: 'Device.Services.FAPService.1.CellConfig.NR.RAN.',
+        params: [
+          { name: 'PCI', titleZh: 'PCI', titleEn: 'PCI', leaf: 'PCI' },
+          { name: 'SSBFrequency', titleZh: 'SSB频点', titleEn: 'SSB Frequency', leaf: 'SSBFrequency' },
+          { name: 'NRARFCNDL', titleZh: '下行频点', titleEn: 'NRARFCNDL', leaf: 'NRARFCNDL' },
+        ],
+      }],
+    };
+    const templateHeaders = XLSX.utils.sheet_to_json<unknown[]>(
+      createParamConfigTemplateWorkbook('gNB', metadata).Sheets.CELL,
+      { header: 1, defval: '' },
+    )[0] as string[];
+    const workbook = createParamConfigWorkbook([{
+      deviceType: 'gNB',
+      serialNumber: 'SN-ORDER-001',
+      sheetParameters: {
+        CELL: [{
+          NRARFCNDL: 635334,
+          'Custom Column': 'kept',
+          PCI: 23,
+          'Serial Number': 'SN-ORDER-001',
+          'SSB Frequency': 504990,
+        }],
+      },
+      workbookMappings: [
+        { displayName: 'PCI', sheet: 'CELL', header: 'PCI', trPath: 'Device.Services.FAPService.1.CellConfig.NR.RAN.PCI', source: 'system' },
+        { displayName: 'SSB Frequency', sheet: 'CELL', header: 'SSB Frequency', trPath: 'Device.Services.FAPService.1.CellConfig.NR.RAN.SSBFrequency', source: 'system' },
+        { displayName: 'NRARFCNDL', sheet: 'CELL', header: 'NRARFCNDL', trPath: 'Device.Services.FAPService.1.CellConfig.NR.RAN.NRARFCNDL', source: 'system' },
+        { displayName: '自定义', sheet: 'CELL', header: 'Custom Column', trPath: 'Device.Custom.Value', source: 'custom' },
+      ],
+    }], metadata);
+
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.CELL, { header: 1, defval: '' });
+    expect(rows[0]).toEqual([...templateHeaders, 'Custom Column']);
+    expect(rows[1]).toEqual(['SN-ORDER-001', 1, 23, 504990, 635334, 'kept']);
+  });
+
   it('creates the GSM template from its current public parameters', () => {
     const workbook = createParamConfigTemplateWorkbook('GSM', {
       deviceType: 'GSM',

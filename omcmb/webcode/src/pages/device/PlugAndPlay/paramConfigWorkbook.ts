@@ -701,14 +701,61 @@ function appendPreservedParameterMappingSheet(
   XLSX.utils.book_append_sheet(workbook, worksheet, PARAM_MAPPING_SHEET);
 }
 
+function templateHeadersForSheet(
+  deviceType: ParamConfigDeviceType | undefined,
+  sheetName: string,
+  metadata?: ParamConfigWorkbookMetadata,
+): string[] {
+  if (!deviceType || !metadata?.quickSettingsGroups?.length) return [];
+  const requestedSheet = canonicalHeader(sheetName);
+  const dynamicFields = uniqueDynamicTemplateFields({ ...metadata, deviceType });
+  const dynamicSheetNames = Array.from(new Set(
+    dynamicFields
+      .filter((field) => canonicalHeader(field.sheet) === requestedSheet)
+      .map((field) => field.sheet),
+  ));
+  const dynamicHeaders = dynamicSheetNames.flatMap((dynamicSheetName) => {
+    const instanceHeader = primaryInstanceHeader(deviceType, dynamicSheetName, metadata?.productClass);
+    return [
+      'Serial Number',
+      ...(instanceHeader ? [instanceHeader] : []),
+      ...dynamicFields
+        .filter((field) => canonicalHeader(field.sheet) === requestedSheet)
+        .map((field) => field.header)
+        .filter((header) => !isInstanceControlHeader(header)),
+    ];
+  });
+  const staticSheets = getParamConfigTemplateSheets(deviceType) ?? {};
+  const staticHeaders = Object.entries(staticSheets)
+    .find(([templateSheetName]) => canonicalHeader(templateSheetName) === requestedSheet)?.[1] ?? [];
+  const seen = new Set<string>();
+  return [...dynamicHeaders, ...staticHeaders].filter((header) => {
+    const key = canonicalHeader(header);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function orderedImportedSheetRows(
   rows: Array<Record<string, unknown>>,
+  deviceType: ParamConfigDeviceType | undefined,
+  sheetName: string,
+  metadata?: ParamConfigWorkbookMetadata,
 ): { headers: string[]; rows: Array<Record<string, unknown>> } {
   const rawHeaders = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+  const templateOrder = new Map(templateHeadersForSheet(deviceType, sheetName, metadata)
+    .map((header, index) => [canonicalHeader(header), index]));
   const headers = rawHeaders.sort((left, right) => {
     const leftIsSerial = canonicalHeader(left) === 'SERIALNUMBER';
     const rightIsSerial = canonicalHeader(right) === 'SERIALNUMBER';
-    return leftIsSerial === rightIsSerial ? 0 : leftIsSerial ? -1 : 1;
+    if (leftIsSerial !== rightIsSerial) return leftIsSerial ? -1 : 1;
+    const leftOrder = templateOrder.get(canonicalHeader(left));
+    const rightOrder = templateOrder.get(canonicalHeader(right));
+    if (leftOrder !== undefined && rightOrder !== undefined) return leftOrder - rightOrder;
+    if (leftOrder !== undefined) return -1;
+    if (rightOrder !== undefined) return 1;
+    return 0;
   });
   return {
     headers,
@@ -757,9 +804,19 @@ function isMaterializedSystemWorkbookColumn(
     && canonicalHeader(header) === 'INTERFACENAME';
 }
 
+function configDeviceTypeForSheet(
+  configs: readonly ParamConfigSpreadsheetRow[],
+  sheetName: string,
+): ParamConfigDeviceType | undefined {
+  return configs.find((config) => (
+    config.deviceType
+      && Object.keys(config.sheetParameters ?? {}).some((name) => canonicalHeader(name) === canonicalHeader(sheetName))
+  ))?.deviceType;
+}
+
 export function createParamConfigWorkbook(
   configs: readonly ParamConfigSpreadsheetRow[],
-  metadata?: Pick<ParamConfigWorkbookMetadata, 'productClass'>,
+  metadata?: ParamConfigWorkbookMetadata,
 ): XLSX.WorkBook {
   const sourceSheetNames = Array.from(new Set(
     configs.flatMap((config) => Object.keys(config.sheetParameters ?? {})),
@@ -777,7 +834,12 @@ export function createParamConfigWorkbook(
         config.serialNumber,
       )));
       if (rows.length === 0) continue;
-      const normalized = orderedImportedSheetRows(rows);
+      const normalized = orderedImportedSheetRows(
+        rows,
+        configDeviceTypeForSheet(configs, sheetName),
+        sheetName,
+        metadata,
+      );
       const { headers } = normalized;
       const worksheet = XLSX.utils.aoa_to_sheet([
         headers,

@@ -137,7 +137,7 @@ describe('specified-device parameter editor', () => {
 
   it('offers a per-device download for the latest edited workbook', () => {
     expect(pageSource).toContain('handleDownloadParamConfig(record)');
-    expect(pageSource).toContain('createParamConfigWorkbook([record], { productClass })');
+    expect(pageSource).toContain('createParamConfigWorkbook([record], exportContext)');
     expect(pageSource).not.toContain('withTemplateSheetParameters(record)');
     expect(pageSource).toContain("{t('common.download')}");
   });

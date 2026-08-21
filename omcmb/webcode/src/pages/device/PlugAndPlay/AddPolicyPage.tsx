@@ -912,20 +912,21 @@ export default function AddPolicyPage() {
         paramModelApi.listMappings(paramModelName),
       ])
       : [{ groups: [] }, { items: [] }];
+    const exportContext = {
+      deviceType: record.deviceType as ParamConfigDeviceType,
+      productClass: radioInstanceProductIdentity,
+      quickSettingsGroups: quickSettings.groups,
+      paramMappings: mappings.items,
+      quickSettingFields: getParamConfigExportFields(record.deviceType as ParamConfigDeviceType),
+    };
     const safeSerialNumber = record.serialNumber.replace(/[\\/:*?"<>|]+/g, '_');
     await writeParamConfigWorkbookFile(
-      createParamConfigWorkbook([record], { productClass }),
+      createParamConfigWorkbook([record], exportContext),
       `${safeSerialNumber}-${t('provision.paramConfigExportFileSuffix')}.xlsx`,
-      {
-        deviceType: record.deviceType as ParamConfigDeviceType,
-        productClass: radioInstanceProductIdentity,
-        quickSettingsGroups: quickSettings.groups,
-        paramMappings: mappings.items,
-        quickSettingFields: getParamConfigExportFields(record.deviceType as ParamConfigDeviceType),
-      },
+      exportContext,
     );
     void message.success(t('provision.paramConfigExportSuccess', { count: 1 }));
-  }, [productClass, radioInstanceProductIdentity, selectedProduct?.paramModelName, t]);
+  }, [radioInstanceProductIdentity, selectedProduct?.paramModelName, t]);
 
   const handleDeleteParamConfig = useCallback(async (record: ParamConfig) => {
     const previous = paramConfigList;
@@ -1129,20 +1130,19 @@ export default function AddPolicyPage() {
         paramModelApi.listMappings(paramModelName),
       ])
       : [{ groups: [] }, { items: [] }];
-    const workbook = createParamConfigWorkbook(filteredParamConfigList, {
+    const exportContext = {
+      deviceType: activeParamDeviceType,
       productClass: radioInstanceProductIdentity,
-    });
+      quickSettingsGroups: quickSettings.groups,
+      paramMappings: mappings.items,
+      quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
+    };
+    const workbook = createParamConfigWorkbook(filteredParamConfigList, exportContext);
     const safeProductClass = (productClass || 'parameter-config').replace(/[\\/:*?"<>|]+/g, '_');
     await writeParamConfigWorkbookFile(
       workbook,
       `${safeProductClass}-${t('provision.paramConfigExportFileSuffix')}.xlsx`,
-      {
-        deviceType: activeParamDeviceType,
-        productClass: radioInstanceProductIdentity,
-        quickSettingsGroups: quickSettings.groups,
-        paramMappings: mappings.items,
-        quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
-      },
+      exportContext,
     );
     void message.success(t('provision.paramConfigExportSuccess', {
       count: filteredParamConfigList.length,
