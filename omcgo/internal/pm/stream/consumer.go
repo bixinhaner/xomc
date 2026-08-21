@@ -232,22 +232,31 @@ func (c *Consumer) processContributions(ctx context.Context, contributions []Con
 }
 
 type TimeoutScanner struct {
-	windows            finalizeWindowRepository
-	finalizeWindow     func(context.Context, WindowKey, CloseReason, uuid.UUID) error
-	publishReady       func(context.Context, time.Time, time.Duration, uint64) error
-	snapshot           *SnapshotStore
-	workerCount        int
-	grace              time.Duration
-	graceByGranularity map[Granularity]time.Duration
-	logger             *zap.Logger
-	metrics            *Metrics
-	claimLease         time.Duration
-	renewInterval      time.Duration
-	oldestDueInterval  time.Duration
-	selector           *finalizeClaimSelector
-	deviceVersionsFor  *TaskSnapshot
-	deviceVersionIDs   []uuid.UUID
-	replayDeviceHour   func(context.Context, WindowKey) (bool, error)
+	windows                finalizeWindowRepository
+	finalizeWindow         func(context.Context, WindowKey, CloseReason, uuid.UUID) error
+	publishReady           func(context.Context, time.Time, time.Duration, uint64) error
+	snapshot               *SnapshotStore
+	workerCount            int
+	grace                  time.Duration
+	graceByGranularity     map[Granularity]time.Duration
+	logger                 *zap.Logger
+	metrics                *Metrics
+	claimLease             time.Duration
+	renewInterval          time.Duration
+	oldestDueInterval      time.Duration
+	selector               *finalizeClaimSelector
+	deviceVersionsFor      *TaskSnapshot
+	deviceVersionIDs       []uuid.UUID
+	legacyReplayDeviceHour func(context.Context, WindowKey) (bool, error)
+	loadDeviceHour         func(
+		context.Context,
+		WindowKey,
+	) (*DeviceHourReplayBatch, error)
+	applyDeviceHour func(
+		context.Context,
+		WindowKey,
+		*DeviceHourReplayBatch,
+	) (DeviceHourReplayOutcome, error)
 }
 
 type finalizeWindowRepository interface {
@@ -340,9 +349,97 @@ func (s *finalizeClaimSelector) nextOrder(queue finalizeQueue) claimOrder {
 }
 
 type finalizeJob struct {
-	window WindowRecord
-	token  uuid.UUID
-	queue  finalizeQueue
+	window    WindowRecord
+	token     uuid.UUID
+	queue     finalizeQueue
+	replay    *deviceHourReplayCall
+	replayKey *deviceHourReplayKey
+}
+
+type deviceHourReplayKey struct {
+	entityKey string
+	startNS   int64
+	endNS     int64
+}
+
+type deviceHourReplayCall struct {
+	once  sync.Once
+	batch *DeviceHourReplayBatch
+	err   error
+}
+
+type deviceHourReplayCache struct {
+	limit   int
+	entries map[deviceHourReplayKey]*deviceHourReplayCall
+	pending map[deviceHourReplayKey]int
+	order   []deviceHourReplayKey
+}
+
+func newDeviceHourReplayCache(limit int) *deviceHourReplayCache {
+	if limit <= 0 {
+		limit = 1
+	}
+	return &deviceHourReplayCache{
+		limit: limit, entries: make(map[deviceHourReplayKey]*deviceHourReplayCall),
+		pending: make(map[deviceHourReplayKey]int),
+		order:   make([]deviceHourReplayKey, 0, limit),
+	}
+}
+
+func (c *deviceHourReplayCache) acquire(
+	key deviceHourReplayKey,
+) *deviceHourReplayCall {
+	call := c.entries[key]
+	if call == nil {
+		if len(c.entries) >= c.limit {
+			for candidateIndex, candidate := range c.order {
+				if c.pending[candidate] != 0 {
+					continue
+				}
+				delete(c.entries, candidate)
+				delete(c.pending, candidate)
+				c.order = append(c.order[:candidateIndex], c.order[candidateIndex+1:]...)
+				break
+			}
+		}
+		call = &deviceHourReplayCall{}
+		c.entries[key] = call
+		c.order = append(c.order, key)
+	}
+	c.pending[key]++
+	return call
+}
+
+func (c *deviceHourReplayCache) release(key deviceHourReplayKey) {
+	if c.pending[key] > 0 {
+		c.pending[key]--
+	}
+}
+
+func (c *deviceHourReplayCall) run(
+	ctx context.Context,
+	key WindowKey,
+	metrics *Metrics,
+	load func(
+		context.Context,
+		WindowKey,
+	) (*DeviceHourReplayBatch, error),
+) (*DeviceHourReplayBatch, error) {
+	c.once.Do(func() {
+		if metrics != nil {
+			metrics.DeviceHourReplayReadsTotal.Inc()
+		}
+		c.batch, c.err = load(ctx, key)
+		if metrics != nil {
+			if c.batch != nil {
+				metrics.DeviceHourReplayVersionsTotal.Add(float64(len(c.batch.Contributions)))
+			}
+			if c.err != nil {
+				metrics.DeviceHourReplayErrorsTotal.Inc()
+			}
+		}
+	})
+	return c.batch, c.err
 }
 
 type finalizeClaimAttempt struct {
@@ -360,9 +457,10 @@ type finalizeBatchClaim struct {
 }
 
 type finalizeResult struct {
-	key   WindowKey
-	queue finalizeQueue
-	err   error
+	key       WindowKey
+	queue     finalizeQueue
+	replayKey *deviceHourReplayKey
+	err       error
 }
 
 func NewTimeoutScanner(
@@ -410,7 +508,26 @@ func (s *TimeoutScanner) SetGranularityGrace(
 func (s *TimeoutScanner) SetIncompleteDeviceHourReplay(
 	replay func(context.Context, WindowKey) (bool, error),
 ) *TimeoutScanner {
-	s.replayDeviceHour = replay
+	s.legacyReplayDeviceHour = replay
+	s.loadDeviceHour = nil
+	s.applyDeviceHour = nil
+	return s
+}
+
+func (s *TimeoutScanner) SetIncompleteDeviceHourVersionReplay(
+	load func(
+		context.Context,
+		WindowKey,
+	) (*DeviceHourReplayBatch, error),
+	apply func(
+		context.Context,
+		WindowKey,
+		*DeviceHourReplayBatch,
+	) (DeviceHourReplayOutcome, error),
+) *TimeoutScanner {
+	s.legacyReplayDeviceHour = nil
+	s.loadDeviceHour = load
+	s.applyDeviceHour = apply
 	return s
 }
 
@@ -501,6 +618,11 @@ func (s *TimeoutScanner) runCycle(
 	}
 	inflight := 0
 	claimsSinceRefresh := 0
+	// Claim ordering keeps task versions for one device-hour adjacent. Retain a
+	// small bounded FIFO beyond the in-flight jobs so even one-worker scanners
+	// reuse the decoded source across sequential version claims. The entire
+	// cache is cycle-scoped and never grows with a 10k-device backlog.
+	deviceHourReplays := newDeviceHourReplayCache(finalizeClaimBatchSize)
 	var finalizeErrors []error
 	for {
 		openSlots := workerCount - inflight
@@ -541,8 +663,23 @@ func (s *TimeoutScanner) runCycle(
 			}
 			for index := range attempt.windows {
 				window := attempt.windows[index]
+				var replay *deviceHourReplayCall
+				var replayKey *deviceHourReplayKey
+				if queue == finalizeHourlyDevice && s.loadDeviceHour != nil &&
+					(window.ExpectedSlots <= 0 || window.ReceivedSlots < window.ExpectedSlots) {
+					key := deviceHourReplayKey{
+						entityKey: window.Key.EntityKey,
+						startNS:   window.Key.Start.UnixNano(),
+						endNS:     window.Key.End.UnixNano(),
+					}
+					replay = deviceHourReplays.acquire(key)
+					replayKey = &key
+				}
 				select {
-				case jobs <- finalizeJob{window: window, token: attempt.token, queue: queue}:
+				case jobs <- finalizeJob{
+					window: window, token: attempt.token, queue: queue,
+					replay: replay, replayKey: replayKey,
+				}:
 					inflight++
 					openSlots--
 					if s.metrics != nil {
@@ -570,6 +707,10 @@ func (s *TimeoutScanner) runCycle(
 		select {
 		case result := <-results:
 			inflight--
+			if result.replayKey != nil {
+				key := *result.replayKey
+				deviceHourReplays.release(key)
+			}
 			if result.err != nil {
 				finalizeErrors = append(finalizeErrors, result.err)
 				s.logger.Warn("PM aggregation finalize job failed; continuing healthy queues",
@@ -777,7 +918,7 @@ func (s *TimeoutScanner) hourlyDeviceVersionIDs() []uuid.UUID {
 	}
 	var ids []uuid.UUID
 	for versionID, version := range current.ByVersion {
-		if version != nil && version.Dimension == DimensionDevice {
+		if version != nil && version.DevicePipeline {
 			ids = append(ids, versionID)
 		}
 	}
@@ -810,11 +951,26 @@ func (s *TimeoutScanner) finalizeWorker(
 			renewDone <- renewErr
 		}()
 		var err error
-		if reason == CloseTimeout && job.queue == finalizeHourlyDevice &&
-			s.replayDeviceHour != nil {
+		if reason == CloseTimeout && job.queue == finalizeHourlyDevice {
 			var complete bool
-			complete, err = s.replayDeviceHour(finalizeCtx, window.Key)
-			if complete {
+			switch {
+			case job.replay != nil && s.loadDeviceHour != nil && s.applyDeviceHour != nil:
+				var batch *DeviceHourReplayBatch
+				batch, err = job.replay.run(
+					finalizeCtx, window.Key, s.metrics, s.loadDeviceHour,
+				)
+				if err == nil {
+					var outcome DeviceHourReplayOutcome
+					outcome, err = s.applyDeviceHour(finalizeCtx, window.Key, batch)
+					complete = outcome.Complete
+					if err != nil && s.metrics != nil {
+						s.metrics.DeviceHourReplayErrorsTotal.Inc()
+					}
+				}
+			case s.legacyReplayDeviceHour != nil:
+				complete, err = s.legacyReplayDeviceHour(finalizeCtx, window.Key)
+			}
+			if err == nil && complete {
 				reason = CloseComplete
 			}
 		}
@@ -845,7 +1001,9 @@ func (s *TimeoutScanner) finalizeWorker(
 		if s.metrics != nil {
 			s.metrics.FinalizeInflight.Dec()
 		}
-		results <- finalizeResult{key: window.Key, queue: job.queue, err: err}
+		results <- finalizeResult{
+			key: window.Key, queue: job.queue, replayKey: job.replayKey, err: err,
+		}
 	}
 }
 

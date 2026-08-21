@@ -58,6 +58,258 @@ func TestFinalizeSchedulerReplaysOnlyIncompleteDeviceHours(t *testing.T) {
 	}
 }
 
+func TestFinalizeSchedulerSharesOneDeviceHourReplayAcrossTaskVersions(t *testing.T) {
+	firstVersion, secondVersion := uuid.New(), uuid.New()
+	deviceID := uuid.MustParse("30f3d50f-e1c4-4c3a-89b1-ac9da9a51350")
+	start := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Hour)
+	windows := []WindowRecord{
+		{Key: WindowKey{
+			TaskID: uuid.New(), TaskVersionID: firstVersion, EntityKey: deviceID.String(),
+			Granularity: GranularityHourly, Start: start, End: start.Add(time.Hour),
+		}, ExpectedSlots: 4, ReceivedSlots: 3},
+		{Key: WindowKey{
+			TaskID: uuid.New(), TaskVersionID: secondVersion, EntityKey: deviceID.String(),
+			Granularity: GranularityHourly, Start: start, End: start.Add(time.Hour),
+		}, ExpectedSlots: 4, ReceivedSlots: 2},
+	}
+	repo := newMemoryFinalizeRepository(windows...)
+	reasons := make(map[uuid.UUID]CloseReason)
+	var reasonsMu sync.Mutex
+	scanner := newTestTimeoutScanner(repo, firstVersion, 1, func(
+		_ context.Context, key WindowKey, reason CloseReason, _ uuid.UUID,
+	) error {
+		reasonsMu.Lock()
+		defer reasonsMu.Unlock()
+		reasons[key.TaskVersionID] = reason
+		return nil
+	})
+	scanner.snapshot.Current().ByVersion[secondVersion] = &TaskVersionSnapshot{
+		VersionID: secondVersion, Dimension: DimensionDevice, DevicePipeline: true,
+	}
+	var reads atomic.Int64
+	applied := make(map[uuid.UUID]int)
+	scanner.SetIncompleteDeviceHourVersionReplay(func(
+		context.Context, WindowKey,
+	) (*DeviceHourReplayBatch, error) {
+		reads.Add(1)
+		return &DeviceHourReplayBatch{Contributions: map[uuid.UUID][]Contribution{
+			firstVersion:  {{Key: windows[0].Key}},
+			secondVersion: {{Key: windows[1].Key}},
+		}}, nil
+	}, func(
+		_ context.Context, key WindowKey, _ *DeviceHourReplayBatch,
+	) (DeviceHourReplayOutcome, error) {
+		applied[key.TaskVersionID]++
+		return DeviceHourReplayOutcome{
+			ReceivedSlots: 4, Complete: true, Matched: true,
+		}, nil
+	})
+
+	if err := scanner.runOnce(context.Background()); err != nil {
+		t.Fatalf("run shared device-hour replay scheduler: %v", err)
+	}
+	if got := reads.Load(); got != 1 {
+		t.Fatalf("durable device-hour reads = %d, want one shared read", got)
+	}
+	for _, versionID := range []uuid.UUID{firstVersion, secondVersion} {
+		if applied[versionID] != 1 {
+			t.Fatalf("version %s apply calls = %d, want one claimed apply", versionID, applied[versionID])
+		}
+		if reasons[versionID] != CloseComplete {
+			t.Fatalf("version %s close reason = %s, want complete", versionID, reasons[versionID])
+		}
+	}
+}
+
+func TestDeviceHourReplayCacheEvictsCompletedEntriesAtFixedBound(t *testing.T) {
+	cache := newDeviceHourReplayCache(4)
+	start := time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC)
+	for index := range 40 {
+		key := deviceHourReplayKey{
+			entityKey: fmt.Sprintf("device-%02d", index),
+			startNS:   start.UnixNano(), endNS: start.Add(time.Hour).UnixNano(),
+		}
+		cache.acquire(key)
+		cache.release(key)
+		if len(cache.entries) > 4 {
+			t.Fatalf("completed replay cache entries = %d, want <= 4", len(cache.entries))
+		}
+	}
+}
+
+func TestFinalizeSchedulerReusesReplayAcrossClaimBatches(t *testing.T) {
+	const devices = 40
+	start := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Hour)
+	var windows []WindowRecord
+	versionIDs := make([][2]uuid.UUID, 0, devices)
+	for range devices {
+		deviceID := uuid.NewString()
+		versions := [2]uuid.UUID{uuid.New(), uuid.New()}
+		versionIDs = append(versionIDs, versions)
+		for _, versionID := range versions {
+			windows = append(windows, WindowRecord{Key: WindowKey{
+				TaskID: uuid.New(), TaskVersionID: versionID, EntityKey: deviceID,
+				Granularity: GranularityHourly, Start: start, End: start.Add(time.Hour),
+			}, ExpectedSlots: 4, ReceivedSlots: 3})
+		}
+	}
+	repo := newMemoryFinalizeRepository(windows...)
+	scanner := newTestTimeoutScanner(repo, versionIDs[0][0], 1, func(
+		context.Context, WindowKey, CloseReason, uuid.UUID,
+	) error {
+		return nil
+	})
+	for _, versions := range versionIDs {
+		for _, versionID := range versions {
+			scanner.snapshot.Current().ByVersion[versionID] = &TaskVersionSnapshot{
+				VersionID: versionID, Dimension: DimensionDevice, DevicePipeline: true,
+			}
+		}
+	}
+	reads := make(map[string]int)
+	scanner.SetIncompleteDeviceHourVersionReplay(func(
+		_ context.Context, key WindowKey,
+	) (*DeviceHourReplayBatch, error) {
+		reads[key.EntityKey]++
+		return &DeviceHourReplayBatch{Contributions: map[uuid.UUID][]Contribution{
+			key.TaskVersionID: {{Key: key}},
+		}}, nil
+	}, func(
+		context.Context, WindowKey, *DeviceHourReplayBatch,
+	) (DeviceHourReplayOutcome, error) {
+		return DeviceHourReplayOutcome{ReceivedSlots: 4, Complete: true, Matched: true}, nil
+	})
+
+	if err := scanner.runOnce(context.Background()); err != nil {
+		t.Fatalf("run cross-batch replay scheduler: %v", err)
+	}
+	if len(reads) != devices {
+		t.Fatalf("device-hour replay reads tracked devices = %d, want %d", len(reads), devices)
+	}
+	for deviceID, count := range reads {
+		if count != 1 {
+			t.Fatalf("device %s replay reads = %d, want 1 across claim batches", deviceID, count)
+		}
+	}
+}
+
+func TestFinalizeSchedulerDoesNotAccumulateUnclaimedPreparedOrPublishedVersion(t *testing.T) {
+	claimedVersion, unclaimedVersion := uuid.New(), uuid.New()
+	deviceID := uuid.New()
+	start := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Hour)
+	claimed := WindowRecord{Key: WindowKey{
+		TaskID: uuid.New(), TaskVersionID: claimedVersion, EntityKey: deviceID.String(),
+		Granularity: GranularityHourly, Start: start, End: start.Add(time.Hour),
+	}, ExpectedSlots: 4, ReceivedSlots: 3}
+	unclaimedKey := claimed.Key
+	unclaimedKey.TaskID, unclaimedKey.TaskVersionID = uuid.New(), unclaimedVersion
+	for _, status := range []string{"prepared", "published"} {
+		t.Run(status, func(t *testing.T) {
+			unclaimed := WindowRecord{
+				Key: unclaimedKey, Status: status, ExpectedSlots: 4, ReceivedSlots: 4,
+			}
+			repo := newMemoryFinalizeRepository(claimed, unclaimed)
+			scanner := newTestTimeoutScanner(repo, claimedVersion, 1, func(
+				context.Context, WindowKey, CloseReason, uuid.UUID,
+			) error {
+				return nil
+			})
+			scanner.snapshot.Current().ByVersion[unclaimedVersion] = &TaskVersionSnapshot{
+				VersionID: unclaimedVersion, Dimension: DimensionDevice, DevicePipeline: true,
+			}
+			applied := make(map[uuid.UUID]int)
+			scanner.SetIncompleteDeviceHourVersionReplay(func(
+				context.Context, WindowKey,
+			) (*DeviceHourReplayBatch, error) {
+				return &DeviceHourReplayBatch{Contributions: map[uuid.UUID][]Contribution{
+					claimedVersion:   {{Key: claimed.Key}},
+					unclaimedVersion: {{Key: unclaimedKey}},
+				}}, nil
+			}, func(
+				_ context.Context, key WindowKey, _ *DeviceHourReplayBatch,
+			) (DeviceHourReplayOutcome, error) {
+				applied[key.TaskVersionID]++
+				return DeviceHourReplayOutcome{
+					ReceivedSlots: 4, Complete: true, Matched: true,
+				}, nil
+			})
+
+			if err := scanner.runOnce(context.Background()); err != nil {
+				t.Fatalf("run claimed-only device-hour replay: %v", err)
+			}
+			if applied[claimedVersion] != 1 {
+				t.Fatalf("claimed version apply calls = %d, want 1", applied[claimedVersion])
+			}
+			if applied[unclaimedVersion] != 0 {
+				t.Fatalf("%s unclaimed version apply calls = %d, want 0", status, applied[unclaimedVersion])
+			}
+		})
+	}
+}
+
+func TestFinalizeSchedulerKeepsSharedReplayOutcomesIndependentPerVersion(t *testing.T) {
+	firstVersion, secondVersion := uuid.New(), uuid.New()
+	deviceID := uuid.New()
+	start := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Hour)
+	windows := []WindowRecord{
+		{Key: WindowKey{TaskID: uuid.New(), TaskVersionID: firstVersion,
+			EntityKey: deviceID.String(), Granularity: GranularityHourly,
+			Start: start, End: start.Add(time.Hour)}, ExpectedSlots: 4, ReceivedSlots: 3},
+		{Key: WindowKey{TaskID: uuid.New(), TaskVersionID: secondVersion,
+			EntityKey: deviceID.String(), Granularity: GranularityHourly,
+			Start: start, End: start.Add(time.Hour)}, ExpectedSlots: 4, ReceivedSlots: 3},
+	}
+	repo := newMemoryFinalizeRepository(windows...)
+	finalized := make(map[uuid.UUID]CloseReason)
+	var finalizedMu sync.Mutex
+	scanner := newTestTimeoutScanner(repo, firstVersion, 2, func(
+		_ context.Context, key WindowKey, reason CloseReason, _ uuid.UUID,
+	) error {
+		finalizedMu.Lock()
+		defer finalizedMu.Unlock()
+		finalized[key.TaskVersionID] = reason
+		return nil
+	})
+	scanner.snapshot.Current().ByVersion[secondVersion] = &TaskVersionSnapshot{
+		VersionID: secondVersion, Dimension: DimensionDevice, DevicePipeline: true,
+	}
+	versionErr := errors.New("second version accumulator failed")
+	scanner.SetIncompleteDeviceHourVersionReplay(func(
+		context.Context, WindowKey,
+	) (*DeviceHourReplayBatch, error) {
+		return &DeviceHourReplayBatch{Contributions: map[uuid.UUID][]Contribution{
+			firstVersion:  {{Key: windows[0].Key}},
+			secondVersion: {{Key: windows[1].Key}},
+		}}, nil
+	}, func(
+		_ context.Context, key WindowKey, _ *DeviceHourReplayBatch,
+	) (DeviceHourReplayOutcome, error) {
+		if key.TaskVersionID == secondVersion {
+			return DeviceHourReplayOutcome{Matched: true}, versionErr
+		}
+		return DeviceHourReplayOutcome{
+			ReceivedSlots: 4, Complete: true, Matched: true,
+		}, nil
+	})
+
+	err := scanner.runOnce(context.Background())
+	if !errors.Is(err, versionErr) {
+		t.Fatalf("shared replay scheduler error = %v, want second-version failure", err)
+	}
+	if finalized[firstVersion] != CloseComplete {
+		t.Fatalf("healthy version close reason = %s, want complete", finalized[firstVersion])
+	}
+	if _, ok := finalized[secondVersion]; ok {
+		t.Fatalf("failed version was finalized: %v", finalized)
+	}
+	if state := repo.window(windows[0].Key); !state.done {
+		t.Fatal("healthy version claim was not completed")
+	}
+	if state := repo.window(windows[1].Key); state.record.Status != "failed" {
+		t.Fatalf("failed version claim status = %s, want failed", state.record.Status)
+	}
+}
+
 func TestFinalizeSchedulerKeepsTimeoutWhenDurableReplayCannotFillGap(t *testing.T) {
 	deviceVersion := uuid.New()
 	windows := finalizeTestWindows(deviceVersion, GranularityHourly, 1)
@@ -572,6 +824,37 @@ func TestFinalizeSchedulerRenewsShortLeaseDuringSlowFinalize(t *testing.T) {
 	}
 }
 
+func TestHourlyDeviceClaimSkipsDeviceRollupEvenWhenItSortsFirst(t *testing.T) {
+	rollupVersion := uuid.MustParse("00000000-0000-4000-8000-000000000001")
+	pipelineVersion := uuid.MustParse("ffffffff-ffff-4fff-8fff-ffffffffffff")
+	end := time.Now().UTC().Add(-time.Hour)
+	rollup := WindowRecord{Key: WindowKey{
+		TaskID: uuid.New(), TaskVersionID: rollupVersion, EntityKey: uuid.NewString(),
+		Granularity: GranularityHourly, Start: end.Add(-time.Hour), End: end,
+	}}
+	pipeline := rollup
+	pipeline.Key.TaskID = uuid.New()
+	pipeline.Key.TaskVersionID = pipelineVersion
+	pipeline.Key.EntityKey = uuid.NewString()
+	repo := newMemoryFinalizeRepository(rollup, pipeline)
+	scanner := newTestTimeoutScanner(repo, pipelineVersion, 1, func(
+		context.Context, WindowKey, CloseReason, uuid.UUID,
+	) error {
+		return nil
+	})
+	scanner.snapshot.Current().ByVersion[rollupVersion] = &TaskVersionSnapshot{
+		VersionID: rollupVersion, Dimension: DimensionDevice, DeviceRollup: true,
+	}
+
+	claim, err := scanner.claimNext(context.Background(), time.Now(), finalizeHourlyDevice)
+	if err != nil {
+		t.Fatalf("claim device pipeline hour: %v", err)
+	}
+	if claim.window == nil || claim.window.Key.TaskVersionID != pipelineVersion {
+		t.Fatalf("hourly device claim = %+v, want DevicePipeline version %s", claim.window, pipelineVersion)
+	}
+}
+
 type memoryFinalizeWindow struct {
 	record        WindowRecord
 	leaseOwner    uuid.UUID
@@ -625,6 +908,8 @@ func (r *memoryFinalizeRepository) claimDue(
 		for index := range r.windows {
 			window := &r.windows[index]
 			if window.done || window.record.Key.Granularity != granularity ||
+				(window.record.Status != "" && window.record.Status != "open" &&
+					window.record.Status != "failed") ||
 				window.record.Key.End.After(dueBefore) ||
 				(!window.leaseUntil.IsZero() && window.leaseUntil.After(now)) ||
 				window.nextAttemptAt.After(now) ||
@@ -839,7 +1124,9 @@ func newTestTimeoutScanner(
 	snapshot.value.Store(&TaskSnapshot{
 		LoadedAt: time.Now(),
 		ByVersion: map[uuid.UUID]*TaskVersionSnapshot{
-			deviceVersion: {VersionID: deviceVersion, Dimension: DimensionDevice},
+			deviceVersion: {
+				VersionID: deviceVersion, Dimension: DimensionDevice, DevicePipeline: true,
+			},
 		},
 	})
 	return &TimeoutScanner{

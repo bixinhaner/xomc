@@ -220,7 +220,10 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	).SetBatch(cfg.OutboxBatch).SetMetrics(streamMetrics)
 	scanner := pmstream.NewTimeoutScanner(windowRepo, finalizer, cfg.CloseGrace, logger).
 		SetGranularityGrace(cfg.DailyCloseGrace, cfg.WeeklyCloseGrace, cfg.MonthlyCloseGrace).
-		SetIncompleteDeviceHourReplay(recovery.ReplayDurableDeviceHour).
+		SetIncompleteDeviceHourVersionReplay(
+			recovery.LoadDurableDeviceHourVersions,
+			recovery.AccumulateDurableDeviceHourVersion,
+		).
 		SetMetrics(streamMetrics)
 	rebuilder := pmstream.NewRebuilder(
 		rebuildRepo, recovery, finalizer, store, rollupOutboxRepo, logger,

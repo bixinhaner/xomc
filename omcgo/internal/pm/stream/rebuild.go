@@ -1255,9 +1255,13 @@ func (r *Rebuilder) replaySources(ctx context.Context, key WindowKey, lock *Lock
 	// Synthetic device-pipeline hours originate directly from normalized raw
 	// PM events. Ordinary rule hours originate from stable device-hour rollups.
 	if rebuildUsesRawSources(key, snapshot) {
+		deviceID, err := uuid.Parse(key.EntityKey)
+		if err != nil {
+			return fmt.Errorf("parse PM raw rebuild device entity %q: %w", key.EntityKey, err)
+		}
 		matched := false
-		err := r.recovery.outbox.VisitPayloadsForPeriod(
-			ctx, key.Start, key.End,
+		err = r.recovery.outbox.VisitPayloadsForDevicePeriod(
+			ctx, deviceID, key.Start, key.End,
 			func(payload event.PMAggregationNormalizedPayload) error {
 				contributions, err := r.recovery.matcher.MatchGranularity(
 					payload, snapshot, GranularityHourly,

@@ -58,11 +58,11 @@ func InsertOutbox(
 	}
 	query, args, err := storage.Psql.Insert("pm_aggregation_outbox").
 		Columns(
-			"event_id", "source_file_id", "ingest_batch_id",
+			"event_id", "source_file_id", "ingest_batch_id", "device_id",
 			"event_window_start", "event_window_end", "payload", "barrier_eligible",
 		).
 		Values(
-			payload.EventID, payload.SourceFileID, payload.IngestBatchID,
+			payload.EventID, payload.SourceFileID, payload.IngestBatchID, payload.DeviceID,
 			payload.WindowStart, payload.WindowEnd, json.RawMessage(data), true,
 		).
 		ToSql()
@@ -73,8 +73,8 @@ func InsertOutbox(
 		return fmt.Errorf("insert PM aggregation outbox: %w", err)
 	}
 	replayQuery, replayArgs, err := storage.Psql.Insert("pm_aggregation_replay_sources").
-		Columns("event_window_start", "event_id", "payload", "created_at").
-		Values(payload.WindowStart, payload.EventID, json.RawMessage(data), time.Now().UTC()).
+		Columns("event_window_start", "event_id", "device_id", "payload", "created_at").
+		Values(payload.WindowStart, payload.EventID, payload.DeviceID, json.RawMessage(data), time.Now().UTC()).
 		Suffix("ON CONFLICT (event_window_start, event_id) DO NOTHING").
 		ToSql()
 	if err != nil {
@@ -202,28 +202,39 @@ func markOutboxFailed(ctx context.Context, tx pgx.Tx, eventID uuid.UUID, publish
 	return nil
 }
 
-func (r *OutboxRepository) VisitPayloadsForPeriod(
+func devicePeriodReplaySelect(
+	deviceID uuid.UUID,
+	start, end time.Time,
+) sq.SelectBuilder {
+	statement := sq.StatementBuilder.PlaceholderFormat(sq.Question)
+	filter := func(table string) sq.SelectBuilder {
+		return statement.Select("event_window_start", "event_id", "payload").
+			From(table).
+			Where(sq.Eq{"device_id": deviceID}).
+			Where(sq.GtOrEq{"event_window_start": start}).
+			Where(sq.Lt{"event_window_start": end})
+	}
+	legacy := filter("pm_aggregation_outbox").
+		Where(sq.Eq{"barrier_eligible": false})
+	return filter("pm_aggregation_replay_sources").
+		SuffixExpr(sq.Expr("UNION ALL ?", legacy)).
+		Suffix("ORDER BY event_window_start, event_id").
+		PlaceholderFormat(sq.Dollar)
+}
+
+func (r *OutboxRepository) VisitPayloadsForDevicePeriod(
 	ctx context.Context,
+	deviceID uuid.UUID,
 	start, end time.Time,
 	visit func(event.PMAggregationNormalizedPayload) error,
 ) error {
-	query := `
-SELECT payload
-FROM (
-    SELECT event_window_start, event_id, payload
-    FROM pm_aggregation_replay_sources
-    WHERE event_window_start >= $1 AND event_window_start < $2
-    UNION ALL
-    SELECT event_window_start, event_id, payload
-    FROM pm_aggregation_outbox
-    WHERE barrier_eligible = false
-      AND event_window_start >= $1 AND event_window_start < $2
-) replay
-ORDER BY event_window_start, event_id`
-	args := []any{start, end}
+	query, args, err := devicePeriodReplaySelect(deviceID, start, end).ToSql()
+	if err != nil {
+		return fmt.Errorf("build durable PM device-period replay query: %w", err)
+	}
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("query durable PM source events: %w", err)
+		return fmt.Errorf("query durable PM device-period source events: %w", err)
 	}
 	defer rows.Close()
 	return visitReplayPayloadRows(rows, visit)
@@ -234,8 +245,10 @@ func visitReplayPayloadRows(
 	visit func(event.PMAggregationNormalizedPayload) error,
 ) error {
 	for rows.Next() {
+		var windowStart time.Time
+		var eventID uuid.UUID
 		var raw []byte
-		if err := rows.Scan(&raw); err != nil {
+		if err := rows.Scan(&windowStart, &eventID, &raw); err != nil {
 			return fmt.Errorf("scan durable PM source event: %w", err)
 		}
 		var payload event.PMAggregationNormalizedPayload

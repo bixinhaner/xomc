@@ -36,6 +36,9 @@ func TestMetricsExposeStreamingHealthWithoutHighCardinalityLabels(t *testing.T) 
 	metrics.WindowsPreparedTotal.Inc()
 	metrics.WindowsPublishedTotal.Add(2)
 	metrics.PublicationDuration.Observe(0.02)
+	metrics.DeviceHourReplayReadsTotal.Inc()
+	metrics.DeviceHourReplayVersionsTotal.Add(2)
+	metrics.DeviceHourReplayErrorsTotal.Inc()
 
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.Ready))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.DuplicateEventsTotal))
@@ -53,6 +56,9 @@ func TestMetricsExposeStreamingHealthWithoutHighCardinalityLabels(t *testing.T) 
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.DailyVersionExpectedSlotsMismatchTotal))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.WindowsPreparedTotal))
 	require.Equal(t, float64(2), testutil.ToFloat64(metrics.WindowsPublishedTotal))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.DeviceHourReplayReadsTotal))
+	require.Equal(t, float64(2), testutil.ToFloat64(metrics.DeviceHourReplayVersionsTotal))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.DeviceHourReplayErrorsTotal))
 
 	families, err := registry.Gather()
 	require.NoError(t, err)
@@ -80,6 +86,9 @@ func TestMetricsExposeStreamingHealthWithoutHighCardinalityLabels(t *testing.T) 
 		"omc_pm_aggregation_windows_prepared_total",
 		"omc_pm_aggregation_windows_published_total",
 		"omc_pm_aggregation_publication_duration_seconds",
+		"omc_pm_aggregation_device_hour_replay_reads_total",
+		"omc_pm_aggregation_device_hour_replay_versions_total",
+		"omc_pm_aggregation_device_hour_replay_errors_total",
 	} {
 		require.Contains(t, names, name)
 	}

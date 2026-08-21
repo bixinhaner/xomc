@@ -51,6 +51,7 @@ COPY --from=builder /build/cmd/app/etc/config.dev.yaml /etc/omcgo/app.dev.yaml
 COPY --from=builder /build/cmd/app/etc/config.test.yaml /etc/omcgo/app.test.yaml
 COPY --from=builder /build/cmd/app/etc/config.prod.yaml /etc/omcgo/app.prod.yaml
 COPY --from=builder /build/migrations /etc/omcgo/migrations
+COPY deployments/release/bundle/deploy/tsdb-schema-reconcile.sql /etc/omcgo/tsdb-schema-reconcile.sql
 # datamodels/：mml-catalog/ 启动期由 catalogloader 加载；templates/ 预留。
 # 原 datamodels/seed/ 是 omcgo-seed JSON 种子链路，已下线；保留目录以兼容文档。
 COPY --from=builder /build/datamodels /etc/omcgo/datamodels

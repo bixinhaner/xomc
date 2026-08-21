@@ -26,6 +26,7 @@ func main() {
 	rootCmd.PersistentFlags().String("path", "migrations", "migrations directory path")
 	rootCmd.PersistentFlags().String("paths", "", "comma-separated migration directories (applied in order)")
 	rootCmd.PersistentFlags().String("table", "", "custom goose version table name (default: goose_db_version)")
+	rootCmd.PersistentFlags().String("reconcile", "", "optional idempotent schema reconciliation SQL executed after goose up")
 
 	rootCmd.AddCommand(
 		&cobra.Command{
@@ -173,6 +174,9 @@ func runMigrateUp(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
+		if err := applyReconcileFile(cmd, db); err != nil {
+			return err
+		}
 		version, err := goose.GetDBVersion(db)
 		if err != nil {
 			return fmt.Errorf("get version: %w", err)
@@ -196,12 +200,31 @@ func runMigrateUp(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("reconcile main baseline seed: %w", err)
 		}
 	}
+	if err := applyReconcileFile(cmd, db); err != nil {
+		return err
+	}
 
 	version, err := goose.GetDBVersion(db)
 	if err != nil {
 		return fmt.Errorf("get version: %w", err)
 	}
 	fmt.Printf("Migration complete. Version: %d\n", version)
+	return nil
+}
+
+func applyReconcileFile(cmd *cobra.Command, db *sql.DB) error {
+	path, _ := cmd.Flags().GetString("reconcile")
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read schema reconcile SQL %s: %w", path, err)
+	}
+	if _, err := db.ExecContext(context.Background(), string(contents)); err != nil {
+		return fmt.Errorf("apply schema reconcile SQL %s: %w", path, err)
+	}
+	fmt.Printf("Schema reconciliation complete: %s\n", path)
 	return nil
 }
 

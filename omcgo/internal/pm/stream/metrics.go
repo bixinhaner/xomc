@@ -34,6 +34,9 @@ type Metrics struct {
 	FinalizeInflight                       prometheus.Gauge
 	FinalizeOldestDueSeconds               prometheus.Gauge
 	FinalizeClaimConflictsTotal            prometheus.Counter
+	DeviceHourReplayReadsTotal             prometheus.Counter
+	DeviceHourReplayVersionsTotal          prometheus.Counter
+	DeviceHourReplayErrorsTotal            prometheus.Counter
 	DailyVersionExpectedSlotsMismatchTotal prometheus.Counter
 	ResultReplaceSeconds                   prometheus.Histogram
 	RedisSampledActiveWindows              *prometheus.GaugeVec
@@ -169,6 +172,18 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "omc_pm_aggregation_finalize_claim_conflicts_total",
 			Help: "Finalize claim attempts blocked by an unexpired lease.",
 		}),
+		DeviceHourReplayReadsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_device_hour_replay_reads_total",
+			Help: "Durable source reads performed for incomplete device-hour windows.",
+		}),
+		DeviceHourReplayVersionsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_device_hour_replay_versions_total",
+			Help: "Task versions served by shared durable device-hour source reads.",
+		}),
+		DeviceHourReplayErrorsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_device_hour_replay_errors_total",
+			Help: "Durable device-hour source reads or per-version replays that failed.",
+		}),
 		DailyVersionExpectedSlotsMismatchTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "omc_pm_aggregation_daily_version_expected_slots_mismatch_total",
 			Help: "Finalized rule daily windows whose version-calibrated expected slots differ from the natural daily period.",
@@ -261,6 +276,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.FinalizeInflight,
 		m.FinalizeOldestDueSeconds,
 		m.FinalizeClaimConflictsTotal,
+		m.DeviceHourReplayReadsTotal,
+		m.DeviceHourReplayVersionsTotal,
+		m.DeviceHourReplayErrorsTotal,
 		m.DailyVersionExpectedSlotsMismatchTotal,
 		m.ResultReplaceSeconds,
 		m.RedisSampledActiveWindows,

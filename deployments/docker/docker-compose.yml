@@ -347,7 +347,8 @@ services:
       GOOSE_TABLE: "goose_db_version_tsdb"
     entrypoint: ["omcgo-migrate"]
     command: ["--dsn", "postgres://omcgo:omcgo123@postgres-tsdb:5432/omcgo?sslmode=disable",
-              "--path", "/etc/omcgo/migrations/tsdb", "up"]
+              "--path", "/etc/omcgo/migrations/tsdb",
+              "--reconcile", "/etc/omcgo/tsdb-schema-reconcile.sql", "up"]
     volumes:
       - ../../omcgo/migrations:/etc/omcgo/migrations:ro
       - /etc/localtime:/etc/localtime:ro

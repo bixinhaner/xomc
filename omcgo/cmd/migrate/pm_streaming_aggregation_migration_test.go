@@ -12,6 +12,8 @@ import (
 func TestPMStreamingAggregationMigrationContract(t *testing.T) {
 	mainSQL := readMigration(t, filepath.Join("..", "..", "migrations", "000001_init_schema.sql"))
 	tsdbSQL := readMigration(t, filepath.Join("..", "..", "migrations", "tsdb", "000001_tsdb_schema.sql"))
+	composeSQL := readMigration(t, filepath.Join("..", "..", "..", "deployments", "docker", "docker-compose.yml"))
+	dockerfile := readMigration(t, filepath.Join("..", "..", "..", "deployments", "docker", "Dockerfile.app"))
 
 	for _, table := range []string{
 		"pm_aggregation_tasks",
@@ -54,12 +56,20 @@ func TestPMStreamingAggregationMigrationContract(t *testing.T) {
 		"CREATE INDEX idx_pm_windows_due_claim",
 		"CREATE INDEX idx_pm_windows_oldest_due",
 		"CREATE INDEX idx_pm_windows_version_audit",
+		"granularity, window_end, entity_key, task_version_id, window_start",
+		"ADD COLUMN device_id uuid",
+		"CREATE INDEX idx_pm_aggregation_outbox_device_period_replay",
+		"device_id, event_window_start, event_id",
+		"CREATE INDEX idx_pm_replay_sources_device_period",
+		"timescaledb.compress_segmentby = 'device_id'",
 	} {
 		require.Contains(t, tsdbSQL, fragment)
 	}
 	require.Contains(t, tsdbSQL, "DROP TABLE IF EXISTS public.pm_metrics_daily")
 	require.Contains(t, mainSQL, "DROP TABLE IF EXISTS public.pm_completion_watermarks")
 	require.NotContains(t, strings.ToUpper(tsdbSQL), "INSERT INTO PUBLIC.PM_AGGREGATION_RESULTS SELECT")
+	require.Contains(t, composeSQL, `"--reconcile", "/etc/omcgo/tsdb-schema-reconcile.sql"`)
+	require.Contains(t, dockerfile, "COPY deployments/release/bundle/deploy/tsdb-schema-reconcile.sql")
 }
 
 func TestPMBuiltinTaskRecoveryMigrationContract(t *testing.T) {

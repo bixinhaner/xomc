@@ -1494,25 +1494,33 @@ CREATE INDEX IF NOT EXISTS idx_pm_file_quarantines_created_at
 ALTER TABLE public.pm_aggregation_outbox
     ADD COLUMN event_window_start timestamptz,
     ADD COLUMN event_window_end timestamptz,
+    ADD COLUMN device_id uuid,
     ADD COLUMN consumed_at timestamptz,
     ADD COLUMN barrier_eligible boolean;
 
 UPDATE public.pm_aggregation_outbox
 SET event_window_start = (payload->>'window_start')::timestamptz,
-    event_window_end = (payload->>'window_end')::timestamptz
-WHERE event_window_start IS NULL;
+    event_window_end = (payload->>'window_end')::timestamptz,
+    device_id = (payload->>'device_id')::uuid
+WHERE event_window_start IS NULL
+   OR event_window_end IS NULL
+   OR device_id IS NULL;
 
 UPDATE public.pm_aggregation_outbox SET barrier_eligible = false;
 
 ALTER TABLE public.pm_aggregation_outbox
     ALTER COLUMN event_window_start SET NOT NULL,
     ALTER COLUMN event_window_end SET NOT NULL,
+    ALTER COLUMN device_id SET NOT NULL,
     ALTER COLUMN barrier_eligible SET DEFAULT false,
     ALTER COLUMN barrier_eligible SET NOT NULL;
 
 CREATE INDEX idx_pm_aggregation_outbox_consume_barrier
     ON public.pm_aggregation_outbox (event_window_start, created_at)
     WHERE consumed_at IS NULL AND barrier_eligible;
+CREATE INDEX idx_pm_aggregation_outbox_device_period_replay
+    ON public.pm_aggregation_outbox (device_id, event_window_start, event_id)
+    WHERE NOT barrier_eligible;
 
 ALTER TABLE public.pm_aggregation_rollup_outbox
     ADD COLUMN consumed_at timestamptz,
@@ -1621,7 +1629,7 @@ CREATE INDEX idx_pm_windows_recovery_cleanup_pending
 -- column in one partial index so PostgreSQL can scan it in either direction
 -- without sorting the full due hour again for every claimed batch.
 CREATE INDEX idx_pm_windows_due_claim_order
-    ON public.pm_aggregation_windows (granularity, window_end, task_version_id, entity_key, window_start)
+    ON public.pm_aggregation_windows (granularity, window_end, entity_key, task_version_id, window_start)
     INCLUDE (finalize_next_attempt_at, finalize_lease_until)
     WHERE status IN ('open', 'failed');
 
@@ -1692,10 +1700,20 @@ CREATE INDEX idx_pm_aggregation_rollup_consume_barrier
 CREATE TABLE public.pm_aggregation_replay_sources (
     event_window_start timestamptz NOT NULL,
     event_id uuid NOT NULL,
+    device_id uuid,
     payload jsonb NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (event_window_start, event_id)
 );
+
+UPDATE public.pm_aggregation_replay_sources
+SET device_id = (payload->>'device_id')::uuid
+WHERE device_id IS NULL;
+ALTER TABLE public.pm_aggregation_replay_sources
+    ALTER COLUMN device_id SET NOT NULL;
+
+CREATE INDEX idx_pm_replay_sources_device_period
+    ON public.pm_aggregation_replay_sources (device_id, event_window_start, event_id);
 
 SELECT create_hypertable(
     'public.pm_aggregation_replay_sources',
@@ -1706,6 +1724,7 @@ SELECT create_hypertable(
 
 ALTER TABLE public.pm_aggregation_replay_sources SET (
     timescaledb.compress,
+    timescaledb.compress_segmentby = 'device_id',
     timescaledb.compress_orderby = 'event_window_start, event_id'
 );
 SELECT add_compression_policy(
