@@ -67,7 +67,7 @@ describe('buildDeviceRows (逐 PATH 合并)', () => {
 
   // 注：成功 path 的读回值由 parseMmlDeviceTaskResult(GPV) 解析（需 DOM，已在 BUG-3 真机验证）；
   // 本单测聚焦 buildDeviceRows 的「合并」新逻辑：分组 / 失败标记 / 行状态 / pathTasks。
-  it('单设备多 path → 合并为一行，失败 path 标内部 sentinel、行状态 failed、pathTasks 逐 path', () => {
+  it('单设备多 path → 合并为一行，失败 path 标内部 sentinel、行状态 failed、pathTasks 逐 path，并展示真实失败原因', () => {
     const items: DeviceTaskResultItem[] = [
       item({
         success: true,
@@ -81,11 +81,42 @@ describe('buildDeviceRows (逐 PATH 合并)', () => {
     const r = rows[0];
     expect(r.cells[HW]).toBe(PATH_FAILED_CELL);
     expect(r.status).toBe('failed');
-    expect(r.faultCode).toBe(PARTIAL_PATH_FAILED_FALLBACK);
+    expect(r.faultCode).toBe('[Server] Invalid Parameter Names');
     expect(r.pathTasks).toHaveLength(2);
     expect(r.pathTasks?.map((p) => p.status)).toEqual(['success', 'failed']);
     expect(r.pathTasks?.[0].path).toBe(SW);
     expect(r.pathTasks?.[1].path).toBe(HW);
+  });
+
+  it('单设备多 path 的失败摘要优先显示设备返回的参数级错误', () => {
+    const faultPath = 'Device.Services.FAPService.1.CellConfig.1.NR.RAN.NeighborList.NRCell.2.CID';
+    const rows = buildDeviceRows([
+      item({ success: true, commandIndex: 0 }),
+      item({
+        success: false,
+        commandIndex: 1,
+        failReason: '[Client] Invalid arguments',
+        result: {
+          success: false,
+          rawOutput: '',
+          parsedData: {
+            method: 'SetParameterValues',
+            param_faults: [{
+              parameter_name: faultPath,
+              fault_code: 9007,
+              fault_string: 'NR_NEIGH_CELL_IDENTITY:NotValidValue: Neigh cell info already exists, do not add it again.',
+            }],
+          },
+          executionTime: 0,
+          timestamp: '',
+        },
+      }),
+    ], columns, false);
+
+    expect(rows[0].status).toBe('failed');
+    expect(rows[0].faultCode).toBe(
+      `${faultPath}: 9007 NR_NEIGH_CELL_IDENTITY:NotValidValue: Neigh cell info already exists, do not add it again.`,
+    );
   });
 
   it('全部 path 成功 → 行状态 success，无失败标记', () => {
