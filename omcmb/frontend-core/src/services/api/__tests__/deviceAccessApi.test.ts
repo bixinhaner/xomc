@@ -200,7 +200,47 @@ describe('deviceAccessApi', () => {
     expect((body as FormData).get('entry_type')).toBe('deny');
     expect((body as FormData).get('mode')).toBe('replace');
     expect((body as FormData).get('failure_policy')).toBe('strict');
-    expect(config).toEqual({ headers: { 'X-Operator-Code': 'cmcc', 'Idempotency-Key': 'key-1' } });
+    expect(config).toEqual({
+      headers: {
+        'X-Operator-Code': 'cmcc',
+        'Content-Type': 'multipart/form-data',
+        'Idempotency-Key': 'key-1',
+      },
+    });
+  });
+
+  it('previews a rule dimension import as multipart form data', async () => {
+    const file = new File(['TAC\n1001\n'], 'tac.csv', { type: 'text/csv' });
+    postMock.mockResolvedValue({ data: { batch: { id: 'batch-2' }, rows: [], entries: [], disable_count: 0 } });
+
+    await deviceAccessApi.previewRuleDimensionImport({
+      operatorCode: 'cmcc',
+      policyVersionId: 'policy-version-1',
+      ruleId: 'rule-1',
+      dimension: 'tac',
+      mode: 'append',
+      failurePolicy: 'valid_only',
+      file,
+      idempotencyKey: 'key-2',
+    });
+
+    const [path, body, config] = postMock.mock.calls[0];
+    expect(path).toBe('/device-access/imports/preview');
+    expect(body).toBeInstanceOf(FormData);
+    expect((body as FormData).get('file')).toBe(file);
+    expect((body as FormData).get('import_type')).toBe('rule_dimension');
+    expect((body as FormData).get('target_policy_version_id')).toBe('policy-version-1');
+    expect((body as FormData).get('target_rule_id')).toBe('rule-1');
+    expect((body as FormData).get('dimension')).toBe('tac');
+    expect((body as FormData).get('mode')).toBe('append');
+    expect((body as FormData).get('failure_policy')).toBe('valid_only');
+    expect(config).toEqual({
+      headers: {
+        'X-Operator-Code': 'cmcc',
+        'Content-Type': 'multipart/form-data',
+        'Idempotency-Key': 'key-2',
+      },
+    });
   });
 
   it('paginates the operator-scoped import history', async () => {
