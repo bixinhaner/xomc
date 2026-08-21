@@ -198,6 +198,24 @@ func TestNATSEventBusQueueStats(t *testing.T) {
 				assert.Zero(t, stats.OldestPendingAge)
 			},
 		},
+		{
+			name: "oldest pending age no responders keeps core queue stats",
+			consumer: &nats.ConsumerInfo{
+				NumAckPending: 2,
+				AckFloor:      nats.SequenceInfo{Consumer: 1, Stream: 1},
+				Delivered:     nats.SequenceInfo{Consumer: 3, Stream: 3},
+			},
+			stream:        &nats.StreamInfo{State: nats.StreamState{FirstSeq: 1, LastSeq: 3}},
+			nextErr:       nats.ErrNoResponders,
+			expectedStart: 2,
+			assert: func(t *testing.T, stats QueueStats) {
+				assert.Equal(t, 2, stats.AckPending)
+				assert.Equal(t, uint64(3), stats.LastSequence)
+				assert.Equal(t, uint64(1), stats.AckSequence)
+				assert.Equal(t, uint64(2), stats.AckGap)
+				assert.Zero(t, stats.OldestPendingAge)
+			},
+		},
 	}
 
 	for _, tt := range tests {

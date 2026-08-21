@@ -22,6 +22,8 @@ type ResultConsumer struct {
 	bus        event.EventBus
 	processor  ResultProcessor
 	sub        event.Subscription
+	subject    string
+	queue      string
 	shards     []chan resultWork
 	shardCount int
 	queueDepth int
@@ -39,9 +41,21 @@ type resultWork struct {
 func NewResultConsumer(bus event.EventBus, processor ResultProcessor) *ResultConsumer {
 	return &ResultConsumer{
 		bus: bus, processor: processor,
+		subject:    event.SubjectParamSyncTaskResult,
+		queue:      "param-sync-results",
 		shardCount: defaultResultConsumerShardCount,
 		queueDepth: defaultResultConsumerQueueDepth,
 	}
+}
+
+func (c *ResultConsumer) WithSubscription(subject, queue string) *ResultConsumer {
+	if subject != "" {
+		c.subject = subject
+	}
+	if queue != "" {
+		c.queue = queue
+	}
+	return c
 }
 
 func (c *ResultConsumer) WithWorkerConfig(shardCount, queueDepth int) *ResultConsumer {
@@ -64,7 +78,7 @@ func (c *ResultConsumer) Start() error {
 		return fmt.Errorf("parameter sync result consumer requires event bus and processor")
 	}
 	c.startWorkers(c.shardCount, c.queueDepth)
-	sub, err := c.bus.PullSubscribe(event.SubjectParamSyncTaskResult, "param-sync-results", c.Handle)
+	sub, err := c.bus.PullSubscribe(c.subject, c.queue, c.Handle)
 	if err != nil {
 		c.stopWorkers()
 		return fmt.Errorf("subscribe parameter sync task results: %w", err)

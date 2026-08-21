@@ -447,7 +447,7 @@ func (b *NATSEventBus) QueueStats(ctx context.Context, subject, durable string) 
 	var oldest *nats.RawStreamMsg
 	if startSequence := oldestRelevantPendingStart(consumer, streamInfo.State); startSequence > 0 {
 		oldest, err = reader.NextMessage(ctx, stream, startSequence, subject)
-		if err != nil && !errors.Is(err, nats.ErrMsgNotFound) {
+		if err != nil && !errors.Is(err, nats.ErrMsgNotFound) && !errors.Is(err, nats.ErrNoResponders) {
 			return QueueStats{}, fmt.Errorf("load oldest pending message for stream %q subject %q from sequence %d: %w", stream, subject, startSequence, err)
 		}
 	}
