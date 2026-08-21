@@ -274,8 +274,11 @@ func (r *PgTaskRepository) TransitionIfStatus(
 // sent, even when a stale copy is still present in Redis.
 func (r *PgTaskRepository) MarkSentIfPending(ctx context.Context, taskID, cwmpID string, sentAt time.Time) (bool, error) {
 	deviceSN, ok, err := r.LocateDeviceSNByID(ctx, taskID)
-	if err != nil || !ok {
+	if err != nil {
 		return false, err
+	}
+	if !ok {
+		return false, ErrTaskNotFound
 	}
 	return r.MarkSentIfPendingByDevice(ctx, deviceSN, taskID, cwmpID, sentAt)
 }
@@ -324,8 +327,11 @@ WHERE r.id=device_tasks.source_id
 // or releasing a newer send claim.
 func (r *PgTaskRepository) ReleaseSentClaimIfUnwritten(ctx context.Context, taskID, cwmpID string) (bool, error) {
 	deviceSN, ok, err := r.LocateDeviceSNByID(ctx, taskID)
-	if err != nil || !ok {
+	if err != nil {
 		return false, err
+	}
+	if !ok {
+		return false, ErrTaskNotFound
 	}
 	return r.ReleaseSentClaimIfUnwrittenByDevice(ctx, deviceSN, taskID, cwmpID)
 }
@@ -1433,6 +1439,10 @@ type PathTranslationMissStats struct {
 // AggregatePathTranslationMissBySourceID 聚合特定 source_id (mml_task.id) 下
 // 所有 device_tasks 的 has_path_translation_miss / path_translation_miss_count，
 // 用于 MML 任务详情聚合显示（Stage 3 — 整改方案 UI 警告标签）。
+//
+// 这是 MML 详情页的跨设备汇总视图，查询语义本身就是"同一来源任务下的全部设备"，
+// 不能携带单个 device_sn 做分区裁剪；执行面按任务 ID 读写、状态流转和 CWMP 下发
+// 仍必须走 device_task_locations 或显式 device_sn 的单分区路径。
 func (r *PgTaskRepository) AggregatePathTranslationMissBySourceID(
 	ctx context.Context, sourceID string,
 ) (PathTranslationMissStats, error) {
@@ -1477,6 +1487,9 @@ type DeviceTaskResultRow struct {
 
 // ListResultsBySourceID 返回某个 source_id（典型为 mml_task.id）下所有 device_tasks
 // 的执行结果，按 (command_index, device_index, created_at) 升序稳定排序。
+//
+// 这是分页的 MML 结果列表，业务上需要跨设备展示同一来源任务的全部结果；因此这里保留
+// source/source_id 查询，不作为高频执行面任务 ID 查询使用。
 //
 // total 取自全量 COUNT；items 分页。pageSize <= 0 时退化为 20，page <= 0 退化为 1。
 func (r *PgTaskRepository) ListResultsBySourceID(
@@ -1554,6 +1567,9 @@ type DeviceTaskSourceStats struct {
 
 // AggregateStatusBySourceID 统计某 (source, source_id) 下 device_tasks 的终态分布。
 // 终态 = completed / failed / expired；其余（pending 等）计入 Active。
+//
+// 这是来源任务完成判定的跨设备聚合，不属于按 task_id 处理单条任务的执行面路径；
+// 单条任务路径继续要求 device_sn 或 device_task_locations 定位后再访问分区表。
 func (r *PgTaskRepository) AggregateStatusBySourceID(
 	ctx context.Context, source TaskSource, sourceID string,
 ) (DeviceTaskSourceStats, error) {

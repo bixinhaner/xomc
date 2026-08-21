@@ -841,6 +841,11 @@ func TestPgRepo_Integration_Delete(t *testing.T) {
 
 	require.NoError(t, repo.Delete(ctx, tk.ID))
 
+	locatedSN, ok, err := repo.LocateDeviceSNByID(ctx, tk.ID)
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Empty(t, locatedSN)
+
 	got, err := repo.GetByID(ctx, tk.ID)
 	require.NoError(t, err)
 	assert.Nil(t, got)
