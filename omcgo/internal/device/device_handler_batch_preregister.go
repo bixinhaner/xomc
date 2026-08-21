@@ -23,6 +23,7 @@ import (
 //   - carrier 推断：优先使用 CSV 填写值；若为空则从 SN 前6位推断 OUI → CarrierRegistry
 //     推断失败 → error_code="carrier_required"，该行跳过，不阻断其他行
 //   - technology 默认 "lte"（如 CSV 未填）
+//   - product_class 可选；UPS 预登记填写 UPS* 后可在设备首次 Inform 前进入 UPS 设备类型口径
 
 // BatchPreRegisterRow 单行预登记请求。
 type BatchPreRegisterRow struct {
@@ -39,6 +40,9 @@ type BatchPreRegisterRow struct {
 	Technology model.Technology `json:"technology"`
 	// OUI 设备 OUI（可选）。为空时从 SN 前6位截取。
 	OUI string `json:"oui"`
+	// ProductClass 设备 TR-069 ProductClass（可选）。UPS 预登记可填写 UPS*，
+	// 真正上线后仍由 Inform 上报值覆盖。
+	ProductClass string `json:"product_class"`
 }
 
 // BatchPreRegisterRequest 批量预登记请求体。
@@ -174,6 +178,7 @@ func (h *Handler) BatchPreRegisterDevices(c *gin.Context) {
 		createReq := CreateDeviceRequest{
 			SerialNumber: sn,
 			OUI:          oui,
+			ProductClass: strings.TrimSpace(row.ProductClass),
 			Carrier:      carrier,
 			Technology:   technology,
 			DeviceName:   deviceName,

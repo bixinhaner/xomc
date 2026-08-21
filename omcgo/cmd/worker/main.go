@@ -456,13 +456,14 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	}
 
 	// Alarm Sync Service (creates GPV tasks to query device alarms)
-	alarmSyncService := alarm.NewAlarmSyncService(w.TaskService, w.Redis, w.EventBus, logger)
+	alarmDeviceRepo := device.NewPgDeviceRepository(w.PgPool)
+	alarmSyncService := alarm.NewAlarmSyncService(w.TaskService, w.Redis, w.EventBus, logger).
+		WithDeviceReader(alarmDeviceRepo)
 	if err := alarmSyncService.Subscribe(); err != nil {
 		logger.Warn("subscribe alarm sync service", zap.Error(err))
 	}
 
 	// Alarm Sync Processor (handles GPV responses, applies diff)
-	alarmDeviceRepo := device.NewPgDeviceRepository(w.PgPool)
 	alarmSyncProcessor := alarm.NewAlarmSyncProcessor(alarmEngine, alarmPgStore, alarmSyncService, w.EventBus, logger).WithDeviceReader(alarmDeviceRepo)
 	if err := alarmSyncProcessor.Start(context.Background()); err != nil {
 		logger.Warn("start alarm sync processor", zap.Error(err))

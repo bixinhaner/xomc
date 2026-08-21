@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -26,8 +27,9 @@ type RecoveryTaskReleaser interface {
 // the ACS fault handler can continue it in the current CWMP session instead of
 // waiting for the next periodic Inform.
 type GPVFaultRecoverer struct {
-	pool     *pgxpool.Pool
-	releaser RecoveryTaskReleaser
+	pool                        *pgxpool.Pool
+	releaser                    RecoveryTaskReleaser
+	outboxNextAttemptAtOverride *time.Time
 }
 
 func NewGPVFaultRecoverer(pool *pgxpool.Pool, releasers ...RecoveryTaskReleaser) *GPVFaultRecoverer {
@@ -93,9 +95,15 @@ func (r *GPVFaultRecoverer) Recover(ctx context.Context, original *task.Task, re
 	if err != nil {
 		return nil, fmt.Errorf("marshal parameter sync recovery task: %w", err)
 	}
-	query, args, err := storage.Psql.Insert("parameter_sync_outbox").
+	outboxInsert := storage.Psql.Insert("parameter_sync_outbox").
 		Columns("event_type", "aggregate_type", "aggregate_id", "dedupe_key", "payload").
-		Values("param_sync.task.enqueue", "task", uuid.MustParse(replacement.ID), "task:"+replacement.ID, payload).ToSql()
+		Values("param_sync.task.enqueue", "task", uuid.MustParse(replacement.ID), "task:"+replacement.ID, payload)
+	if r.outboxNextAttemptAtOverride != nil {
+		outboxInsert = storage.Psql.Insert("parameter_sync_outbox").
+			Columns("event_type", "aggregate_type", "aggregate_id", "dedupe_key", "payload", "next_attempt_at").
+			Values("param_sync.task.enqueue", "task", uuid.MustParse(replacement.ID), "task:"+replacement.ID, payload, *r.outboxNextAttemptAtOverride)
+	}
+	query, args, err := outboxInsert.ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build parameter sync recovery outbox: %w", err)
 	}

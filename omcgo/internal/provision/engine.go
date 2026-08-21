@@ -667,10 +667,6 @@ func (e *ProvisioningEngine) handleDeviceOnline(
 		}
 	}
 
-	if e.deviceOnlineSync == nil {
-		return fmt.Errorf("device.online durable parameter sync submitter unavailable")
-	}
-
 	// Token bucket 节流：60s 内重复 device.online 跳过。
 	// MEDIUM-19：SetNX 带短重试抹平 Redis 抖动；重试耗尽仍 fail-open（放行+打点）。
 	var throttleKey string
@@ -701,6 +697,18 @@ func (e *ProvisioningEngine) handleDeviceOnline(
 	// T-0176-PR-D 懒补 product 绑定（首次 Bootstrap 错过 / 历史孤儿设备恢复在线场景）。
 	// silent skip 任何 err，不阻塞 durable 参数同步主流程。
 	e.bindDeviceProductIfNeeded(ctx, dev)
+
+	if device.IsUPSProductClass(evt.ProductClass) || device.IsUPSProductClass(dev.ProductClass) {
+		e.logger.Info("device.online: UPS skips parameter sync",
+			zap.String("device_id", dev.ID.String()),
+			zap.String("serial_number", dev.SerialNumber),
+			zap.String("product_class", dev.ProductClass))
+		return nil
+	}
+
+	if e.deviceOnlineSync == nil {
+		return fmt.Errorf("device.online durable parameter sync submitter unavailable")
+	}
 
 	if err := e.startDeviceOnlineFullSync(
 		ctx,
@@ -833,6 +841,16 @@ func (e *ProvisioningEngine) handleFirmwareChanged(
 
 	// T-0176-PR-D 懒补 product 绑定（设备升级后 productClass 不变但历史 orphan 此刻有机会路由）。
 	e.bindDeviceProductIfNeeded(ctx, dev)
+
+	if device.IsUPSProductClass(evt.ProductClass) || device.IsUPSProductClass(dev.ProductClass) {
+		e.logger.Info("firmware.changed: UPS skips parameter sync and model upload",
+			zap.String("device_id", dev.ID.String()),
+			zap.String("serial_number", dev.SerialNumber),
+			zap.String("product_class", dev.ProductClass),
+			zap.String("old_version", evt.OldVersion),
+			zap.String("new_version", evt.NewVersion))
+		return nil
+	}
 
 	// 2. FirmwareChanged 与 device.online 二选一发布；升级 Inform 同时完成
 	// offline→active 时，仍需提交一次 durable 全量同步。
@@ -1528,7 +1546,7 @@ func (e *ProvisioningEngine) handleActivationSyncCompleted(ctx context.Context, 
 	if dev == nil {
 		return e.recordActivationCheckResult(ctx, pt, nil, fmt.Errorf("device not found after activation sync"))
 	}
-	if e.activationRefresher != nil {
+	if e.activationRefresher != nil && !strings.HasPrefix(strings.ToUpper(strings.TrimSpace(dev.ProductClass)), "UPS") {
 		if _, err := e.activationRefresher.SyncFromParameters(
 			ctx, dev.ID, dev.Carrier, dev.Technology, dev.ProductClass,
 		); err != nil {

@@ -6622,6 +6622,11 @@
               "description": "Remark 备注信息",
               "nullable": true,
               "type": "string"
+            },
+            "site_id": {
+              "description": "SiteID 站点 ID。UPS 设备写入 device_ups_info，基站仍走 devices.site_id 更新接口。",
+              "nullable": true,
+              "type": "string"
             }
           },
           "type": "object"
@@ -6783,6 +6788,10 @@
                   },
                   "oui": {
                     "description": "OUI 设备 OUI（可选）。为空时从 SN 前6位截取。",
+                    "type": "string"
+                  },
+                  "product_class": {
+                    "description": "ProductClass 设备 TR-069 ProductClass（可选）。UPS 预登记可填写 UPS*，\n真正上线后仍由 Inform 上报值覆盖。",
                     "type": "string"
                   },
                   "remark": {
@@ -6986,6 +6995,12 @@
         },
         {
           "name": "control_source",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "device_type",
           "in": "query",
           "required": false,
           "type": "string"
@@ -19908,6 +19923,10 @@
             },
             "is_keep_config": {
               "type": "boolean"
+            },
+            "product_class_hint": {
+              "description": "ProductClassHint is used by UFTE when firmware metadata does not carry a\nconcrete product_class. It keeps read-side task classification aligned\nwith the selected task template/product scope.",
+              "type": "string"
             },
             "rollback_on_failure": {
               "description": "RollbackOnFailure (T-0021): when true (and Strategy=\"canary\"), a stage\nthat exceeds its failure threshold will pause AND auto-trigger a\nrollback for the already-promoted devices. Default false.",

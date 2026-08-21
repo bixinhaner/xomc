@@ -66,7 +66,7 @@ import type {
   NorthboundUpdateInventoryProfileRequest,
 } from '@core/services/api/northboundPageConfigApi';
 import { loadPmMetrics, type PmMetric } from './pmMetricCatalog';
-import { NorthboundI18nScope, useNorthboundI18n, useNorthboundLocale } from './i18n';
+import { NorthboundI18nScope, useNorthboundI18n } from './i18n';
 import styles from './index.module.css';
 
 type Domain = 'CM' | 'PM' | 'MR' | 'LOG' | 'INVENTORY';
@@ -172,7 +172,8 @@ interface InventoryConfigRow {
 interface FileProfileEditorValues {
   scenarioCode: string;
   vendor?: string;
-  scenarioName: string;
+  /** 表单中已无对应控件，仅经 setFieldsValue 保留原值 */
+  scenarioName?: string;
   scenarioNameEn?: string;
   name: string;
   description?: string;
@@ -5659,13 +5660,6 @@ function deliveryProtocolTag(protocol: DeliveryProtocol) {
   return <Tag color={protocol === 'SFTP' ? 'blue' : 'cyan'}>{protocol}</Tag>;
 }
 
-function scenarioDisplayName(scenario: ScenarioRow, locale: string) {
-  if (locale === 'en-US') {
-    return scenario.scenarioNameEn || scenario.scenarioName || scenario.code;
-  }
-  return scenario.scenarioName || scenario.scenarioNameEn || scenario.code;
-}
-
 function socketProfileTag(profile: SocketProfile, translate: (value: string) => string = (value) => value) {
   return <Tag color={profile === 'CTCC' ? 'blue' : 'purple'}>{translate(profile === 'CTCC' ? '电信' : '联通')}</Tag>;
 }
@@ -6296,7 +6290,6 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
 
 export default function NorthboundPageConfig() {
   const nt = useNorthboundI18n();
-  const locale = useNorthboundLocale();
   const [configForm] = Form.useForm();
   const [fileProfiles, setFileProfiles] = useState<ScenarioRow[]>(scenarioRows);
   const [selectedScenario, setSelectedScenario] = useState<ScenarioRow | null>(null);
@@ -7208,11 +7201,14 @@ export default function NorthboundPageConfig() {
       const deliveryRows = getFileDeliveryTargets(code);
       if (!validateDeliveryTargetsBeforeSave('file', code, deliveryRows)) return;
       const groups = serializeEditorPeriodRows(editorPeriodRows, fieldRowsByTarget);
+      // 场景名称字段已从表单移除，读取表单 store 中保留的原值，缺省回退到配置名称
+      const scenarioName = String(configForm.getFieldValue('scenarioName') ?? '').trim() || values.name.trim() || code;
+      const scenarioNameEn = String(configForm.getFieldValue('scenarioNameEn') ?? '').trim() || scenarioName;
       const request: NorthboundUpdateFileProfileRequest = {
         name: values.name.trim(),
         vendor,
-        scenario_name: values.scenarioName.trim(),
-        scenario_name_en: values.scenarioNameEn?.trim() || values.scenarioName.trim(),
+        scenario_name: scenarioName,
+        scenario_name_en: scenarioNameEn,
         description: values.description?.trim() ?? '',
         flags: editorMode === 'create' ? ['custom'] : selectedScenario?.flags ?? [],
         enabled,
@@ -8068,11 +8064,6 @@ export default function NorthboundPageConfig() {
       dataIndex: 'code',
       width: 96,
       render: (value: string) => <Typography.Text strong className={styles.scenarioCode}>{value}</Typography.Text>,
-    },
-    {
-      title: '场景名称',
-      width: 140,
-      render: (_, row) => <Typography.Text ellipsis>{scenarioDisplayName(row, locale)}</Typography.Text>,
     },
     {
       title: '状态',
@@ -10419,8 +10410,6 @@ export default function NorthboundPageConfig() {
               </div>
               <Descriptions bordered size="small" column={2}>
                 <Descriptions.Item label="场景号/配置编号">{selectedScenario.code}</Descriptions.Item>
-                <Descriptions.Item label="场景中文名称">{selectedScenario.scenarioName}</Descriptions.Item>
-                <Descriptions.Item label="场景英文名称">{selectedScenario.scenarioNameEn}</Descriptions.Item>
                 <Descriptions.Item label="配置名称">{selectedScenario.name}</Descriptions.Item>
                 <Descriptions.Item label="场景说明" span={2}>{selectedScenario.description}</Descriptions.Item>
                 <Descriptions.Item label="业务域" span={2}>
@@ -10582,12 +10571,6 @@ export default function NorthboundPageConfig() {
               <Input />
             </Form.Item>
             <Form.Item label="厂商" name="vendor">
-              <Input />
-            </Form.Item>
-            <Form.Item label="场景中文名称" name="scenarioName" rules={[{ required: true, message: '请输入场景中文名称' }]}>
-              <Input />
-            </Form.Item>
-            <Form.Item label="场景英文名称" name="scenarioNameEn">
               <Input />
             </Form.Item>
             <Form.Item label="配置名称" name="name" rules={[{ required: true, message: '请输入配置名称' }]}>

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Alert,
@@ -23,6 +23,10 @@ import {
 } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useCreateDevice } from '@core/hooks/api/useDevices';
+import { useSystemLicense } from '@core/hooks/api/useSystemLicense';
+import {
+  isDeviceStandardValueVisibleByLicense,
+} from '@core/utils/licenseFeatures';
 import { useT } from '@/hooks/useT';
 import type { CarrierCode, DeviceTechnology, CreateDeviceInput } from '@core/types/device';
 
@@ -31,6 +35,7 @@ const { Title, Text } = Typography;
 interface BasicFormValues {
   serialNumber: string;
   oui: string;
+  deviceType: RegisterDeviceType;
   carrier: CarrierCode;
   technology: DeviceTechnology;
   manufacturer?: string;
@@ -47,6 +52,7 @@ interface NetworkFormValues {
 }
 
 type Step = 'basic' | 'network' | 'confirm';
+type RegisterDeviceType = 'BASE_STATION' | 'UPS';
 
 const CARRIER_OPTIONS: { label: string; value: CarrierCode }[] = [
   { label: '中国移动 (cmcc)', value: 'cmcc' },
@@ -59,13 +65,20 @@ const TECHNOLOGY_OPTIONS: { label: string; value: DeviceTechnology }[] = [
   { label: 'NR (5G)', value: 'nr' },
 ];
 
-// productClass 是 ProductRegistry 路由 key（CPE 通过 TR-069 Inform 上报真实值后会覆盖此处占位）。
-// 这里给的几个粗分类供运维预登记时选一个，CPE 上线后自动更新。
+const REGISTER_DEVICE_TYPE_OPTIONS: { labelKey: string; value: RegisterDeviceType }[] = [
+  { labelKey: 'device.tab.baseStation', value: 'BASE_STATION' },
+  { labelKey: 'device.type.UPS', value: 'UPS' },
+];
+
+// productClass 是 ProductRegistry 路由 key，设备通过 TR-069 Inform 上报真实值后会覆盖此处占位。
+// 这里给几个粗分类供运维预登记时选择。
 const PRODUCT_CLASS_OPTIONS = [
   { label: 'eNB (LTE 基站)', value: 'eNB' },
   { label: 'gNB (5G 基站)', value: 'gNB' },
   { label: 'CPE', value: 'CPE' },
   { label: 'eGW', value: 'eGW' },
+  { label: 'UPS', value: 'UPS' },
+  { label: 'UPS_M3_BMU (UPS)', value: 'UPS_M3_BMU' },
 ];
 
 export default function DeviceRegistration() {
@@ -77,7 +90,28 @@ export default function DeviceRegistration() {
   const [networkForm] = Form.useForm<NetworkFormValues>();
   const [basicData, setBasicData] = useState<BasicFormValues | null>(null);
   const [networkData, setNetworkData] = useState<NetworkFormValues | null>(null);
+  const [deviceRegisterType, setDeviceRegisterType] = useState<RegisterDeviceType>('BASE_STATION');
   const [submitted, setSubmitted] = useState(false);
+  const { data: systemLicense, isLoading: systemLicenseLoading } = useSystemLicense();
+
+  const registerDeviceTypeOptions = useMemo(
+    () => REGISTER_DEVICE_TYPE_OPTIONS
+      .filter((option) => isDeviceStandardValueVisibleByLicense(option.value, systemLicense, systemLicenseLoading))
+      .map((option) => ({
+        value: option.value,
+        label: t(option.labelKey),
+      })),
+    [systemLicense, systemLicenseLoading, t],
+  );
+
+  const productClassOptions = useMemo(
+    () => PRODUCT_CLASS_OPTIONS.filter((option) => (
+      isDeviceStandardValueVisibleByLicense(String(option.value), systemLicense, systemLicenseLoading, {
+        matchProductClassPrefix: true,
+      })
+    )),
+    [systemLicense, systemLicenseLoading],
+  );
 
   const STEPS: { title: string; key: Step }[] = [
     { title: t('common.detail'), key: 'basic' },
@@ -108,7 +142,13 @@ export default function DeviceRegistration() {
   const handleSubmit = useCallback(async () => {
     if (!basicData || !networkData) return;
     const input: CreateDeviceInput = {
-      ...basicData,
+      serialNumber: basicData.serialNumber,
+      oui: basicData.oui,
+      carrier: basicData.carrier,
+      technology: basicData.technology,
+      manufacturer: basicData.manufacturer,
+      productClass: basicData.productClass,
+      modelName: basicData.modelName,
       ...networkData,
     };
     try {
@@ -122,8 +162,45 @@ export default function DeviceRegistration() {
     }
   }, [basicData, networkData, createDevice, t]);
 
+  const handleDeviceTypeChange = useCallback((value: RegisterDeviceType) => {
+    setDeviceRegisterType(value);
+    if (value === 'UPS') {
+      basicForm.setFieldsValue({
+        productClass: 'UPS_M3_BMU',
+        technology: 'lte',
+      });
+      return;
+    }
+
+    const currentProductClass = basicForm.getFieldValue('productClass');
+    if (typeof currentProductClass === 'string' && currentProductClass.startsWith('UPS')) {
+      basicForm.setFieldsValue({ productClass: undefined });
+    }
+  }, [basicForm]);
+
+  useEffect(() => {
+    if (
+      systemLicenseLoading
+      || deviceRegisterType !== 'UPS'
+      || isDeviceStandardValueVisibleByLicense(deviceRegisterType, systemLicense, false)
+    ) {
+      return;
+    }
+    setDeviceRegisterType('BASE_STATION');
+    basicForm.setFieldsValue({
+      deviceType: 'BASE_STATION',
+      productClass: undefined,
+      technology: 'lte',
+    });
+  }, [basicForm, deviceRegisterType, systemLicense, systemLicenseLoading]);
+
   const renderBasicStep = () => (
-    <Form form={basicForm} layout="vertical" size="middle">
+    <Form
+      form={basicForm}
+      layout="vertical"
+      size="middle"
+      initialValues={{ deviceType: 'BASE_STATION', technology: 'lte' }}
+    >
       <Row gutter={24}>
         <Col span={12}>
           <Form.Item
@@ -152,6 +229,19 @@ export default function DeviceRegistration() {
         </Col>
         <Col span={12}>
           <Form.Item
+            name="deviceType"
+            label={t('provision.deviceType')}
+            rules={[{ required: true, message: t('common.pleaseSelect') }]}
+          >
+            <Select
+              placeholder={t('common.pleaseSelect')}
+              options={registerDeviceTypeOptions}
+              onChange={handleDeviceTypeChange}
+            />
+          </Form.Item>
+        </Col>
+        <Col span={12}>
+          <Form.Item
             name="carrier"
             label={t('device.carrier')}
             rules={[{ required: true, message: t('common.pleaseSelect') }]}
@@ -159,15 +249,25 @@ export default function DeviceRegistration() {
             <Select placeholder={t('common.pleaseSelect')} options={CARRIER_OPTIONS} />
           </Form.Item>
         </Col>
-        <Col span={12}>
+        {deviceRegisterType === 'UPS' ? (
           <Form.Item
             name="technology"
-            label={t('device.networkType')}
+            hidden
             rules={[{ required: true, message: t('common.pleaseSelect') }]}
           >
-            <Select placeholder={t('common.pleaseSelect')} options={TECHNOLOGY_OPTIONS} />
+            <Input />
           </Form.Item>
-        </Col>
+        ) : (
+          <Col span={12}>
+            <Form.Item
+              name="technology"
+              label={t('device.networkType')}
+              rules={[{ required: true, message: t('common.pleaseSelect') }]}
+            >
+              <Select placeholder={t('common.pleaseSelect')} options={TECHNOLOGY_OPTIONS} />
+            </Form.Item>
+          </Col>
+        )}
         <Col span={12}>
           <Form.Item name="manufacturer" label={t('device.vendor')}>
             <Input placeholder="Baicells" />
@@ -178,11 +278,24 @@ export default function DeviceRegistration() {
             name="productClass"
             label={t('device.productClass')}
             tooltip={t('device.productClassHint')}
+            rules={[
+              {
+                validator: (_, value) => {
+                  const text = String(value ?? '');
+                  if (basicForm.getFieldValue('deviceType') === 'UPS' && !text.startsWith('UPS')) {
+                    return Promise.reject(new Error(t('device.upsProductClassRequired')));
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
           >
             <Select
               placeholder={t('common.pleaseSelect')}
-              options={PRODUCT_CLASS_OPTIONS}
+              options={productClassOptions}
               allowClear
+              showSearch
+              optionFilterProp="label"
             />
           </Form.Item>
         </Col>
@@ -270,8 +383,9 @@ export default function DeviceRegistration() {
                 {[
                   { label: t('device.sn'), value: basicData?.serialNumber },
                   { label: t('device.oui'), value: basicData?.oui?.toUpperCase() },
+                  { label: t('provision.deviceType'), value: basicData?.deviceType === 'UPS' ? t('device.type.UPS') : t('device.tab.baseStation') },
                   { label: t('device.carrier'), value: basicData?.carrier },
-                  { label: t('device.networkType'), value: basicData?.technology },
+                  { label: t('device.networkType'), value: basicData?.deviceType === 'UPS' ? 'UPS' : basicData?.technology },
                   { label: t('device.vendor'), value: basicData?.manufacturer || '-' },
                   { label: t('device.productClass'), value: basicData?.productClass || '-' },
                   { label: t('device.model'), value: basicData?.modelName || '-' },
@@ -331,6 +445,7 @@ export default function DeviceRegistration() {
             networkForm.resetFields();
             setBasicData(null);
             setNetworkData(null);
+            setDeviceRegisterType('BASE_STATION');
             setCurrentStep(0);
             setSubmitted(false);
           }}

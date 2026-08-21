@@ -87,6 +87,38 @@ func TestHandler_BatchPreRegister_CreateNew(t *testing.T) {
 	assert.Equal(t, 0, resp.Failed)
 }
 
+// UPS 预登记可携带 ProductClass，占位设备在首次 Inform 前也能进入 UPS 识别口径。
+func TestHandler_BatchPreRegister_UPSProductClass(t *testing.T) {
+	h, deviceRepo, _ := newTestHandler()
+	router := setupRouter(h)
+
+	name := "机房UPS-01"
+	body := BatchPreRegisterRequest{
+		Devices: []BatchPreRegisterRow{
+			{
+				SerialNumber: "UPS-SN-00001",
+				DeviceName:   &name,
+				ProductClass: "UPS_M3_BMU",
+				Carrier:      model.CarrierCTCC,
+				Technology:   model.TechLTE,
+				OUI:          "ABCDEF",
+			},
+		},
+	}
+	w := postBatchPreReg(t, router, body)
+	assert.Equal(t, http.StatusOK, w.Code)
+	resp := decodeBatchPreRegResp(t, w)
+	assert.Equal(t, 1, resp.Total)
+	assert.Equal(t, 1, resp.Created)
+	assert.Equal(t, 0, resp.Failed)
+
+	created, err := deviceRepo.GetBySerialNumber(t.Context(), "UPS-SN-00001")
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	assert.Equal(t, "UPS_M3_BMU", created.ProductClass)
+	assert.Equal(t, name, created.DeviceName)
+}
+
 // carrier 无法推断（OUI 未知且 CSV 未填）→ error_code="carrier_required"，计入 failed。
 func TestHandler_BatchPreRegister_CarrierRequired(t *testing.T) {
 	h, _, _ := newTestHandler()

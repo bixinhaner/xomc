@@ -9,9 +9,40 @@ import { useT } from '@/hooks/useT';
 const { Text } = Typography;
 const FIXED_NETWORK_TABLE_MODELS = new Set(['BLN', 'BLQ', 'MLN', 'MLQ']);
 
+interface NetworkGroupCacheEntry {
+  groups?: QuickSettingsGroup[];
+  promise?: Promise<QuickSettingsGroup[]>;
+}
+
+const networkGroupCache = new Map<string, NetworkGroupCacheEntry>();
+
 function isNetworkGroup(group: QuickSettingsGroup): boolean {
   return /(?:network|interface|wan|lan|route|dscp)/i.test(group.id)
     && !/(?:ipsec|dscp|static-route)/i.test(group.id);
+}
+
+function paramModelCacheKey(paramModelName: string | undefined): string | undefined {
+  const key = paramModelName?.trim();
+  return key ? key : undefined;
+}
+
+function cachedNetworkGroups(paramModelName: string | undefined): QuickSettingsGroup[] | undefined {
+  const key = paramModelCacheKey(paramModelName);
+  return key ? networkGroupCache.get(key)?.groups : undefined;
+}
+
+function loadNetworkGroups(paramModelName: string): Promise<QuickSettingsGroup[]> {
+  const cached = networkGroupCache.get(paramModelName);
+  if (cached?.groups) return Promise.resolve(cached.groups);
+  if (cached?.promise) return cached.promise;
+  const promise = quicksettingsApi.getGroupsByParamModel(paramModelName)
+    .then((response) => response.groups.filter(isNetworkGroup));
+  networkGroupCache.set(paramModelName, { promise });
+  void promise.then(
+    (groups) => networkGroupCache.set(paramModelName, { groups }),
+    () => networkGroupCache.delete(paramModelName),
+  );
+  return promise;
 }
 
 function concretePath(template: string, instances: number[]): string {
@@ -32,6 +63,16 @@ function templatePrefixMatcher(template: string): RegExp {
 function fieldPath(group: QuickSettingsGroup, param: QuickSettingsParam, instances: number[]): string {
   if (param.standardPath) return concretePath(param.standardPath, instances);
   return `${concretePath(group.objectPath ?? '', instances)}${param.leaf ?? param.name}`;
+}
+
+function interfaceNameSheetFieldName(
+  group: QuickSettingsGroup,
+  param: QuickSettingsParam,
+  instances: number[],
+): Array<string | number> | undefined {
+  if (group.id !== 'gnb-network-interface' || param.name !== 'Name') return undefined;
+  const rowIndex = (instances[0] ?? 1) - 1;
+  return ['sheetParameters', 'INTERFACE', rowIndex, 'Interface Name'];
 }
 
 function canonicalHeader(input: unknown): string {
@@ -149,12 +190,14 @@ function ParamControl({
   readOnly = false,
   value,
   onChange,
+  onValueChange,
   onRequestEdit,
 }: {
   param: QuickSettingsParam;
   readOnly?: boolean;
   value?: unknown;
   onChange?: (value: unknown) => void;
+  onValueChange?: (value: unknown) => void;
   onRequestEdit?: () => void;
 }) {
   const options = param.enumOptions?.map((option) => ({ value: option.value, label: option.label }));
@@ -162,16 +205,20 @@ function ParamControl({
     return <Input value={options.find((option) => option.value === value)?.label ?? String(value ?? '')} readOnly onFocus={onRequestEdit} />;
   }
   return options?.length
-    ? <Select options={options} value={value as string | undefined} onChange={onChange} />
-    : <Input readOnly={readOnly} value={value == null ? '' : String(value)} onFocus={readOnly ? onRequestEdit : undefined} onChange={onChange} />;
-}
-
-function valueFromControlChange(value: unknown): unknown {
-  if (value && typeof value === 'object' && 'target' in value) {
-    const target = (value as { target?: { value?: unknown } }).target;
-    return target?.value;
-  }
-  return value;
+    ? <Select options={options} value={value as string | undefined} onChange={(nextValue) => { onRequestEdit?.(); onChange?.(nextValue); onValueChange?.(nextValue); }} />
+    : (
+      <Input
+        readOnly={readOnly}
+        value={value == null ? '' : String(value)}
+        onFocus={readOnly ? onRequestEdit : undefined}
+        onChange={(event) => {
+          const nextValue = event.target.value;
+          if (!readOnly) onRequestEdit?.();
+          onChange?.(nextValue);
+          onValueChange?.(nextValue);
+        }}
+      />
+    );
 }
 
 function AbsoluteNetworkParameterItem({
@@ -179,31 +226,107 @@ function AbsoluteNetworkParameterItem({
   label,
   param,
   readOnly,
-  required,
   onRequestEdit,
 }: {
   path: string;
   label: string;
   param: QuickSettingsParam;
   readOnly: boolean;
-  required?: boolean;
   onRequestEdit?: () => void;
 }) {
   const form = Form.useFormInstance();
-  const watchedValue = Form.useWatch(['networkParameterValues', path], { form, preserve: true });
-  const value = watchedValue ?? form.getFieldValue(['networkParameterValues', path]);
-  return (
-    <Form.Item label={label} required={required}>
-      <ParamControl
-        param={param}
+  const namePath = ['networkParameterValues', path];
+  const watchedValue = Form.useWatch(namePath, { form, preserve: true });
+  const value = watchedValue ?? form.getFieldValue(namePath);
+  const options = param.enumOptions?.map((option) => ({ value: option.value, label: option.label }));
+  const control = options?.length
+    ? (
+      readOnly
+        ? <Input value={options.find((option) => option.value === value)?.label ?? String(value ?? '')} readOnly onFocus={onRequestEdit} />
+        : (
+          <Select
+            options={options}
+            value={value as string | undefined}
+            onChange={(nextValue) => { onRequestEdit?.(); form.setFieldValue(namePath, nextValue); }}
+          />
+        )
+    )
+    : (
+      <Input
         readOnly={readOnly}
-        value={value}
-        onRequestEdit={onRequestEdit}
-        onChange={(nextValue) => {
-          onRequestEdit?.();
-          form.setFieldValue(['networkParameterValues', path], valueFromControlChange(nextValue));
+        value={value == null ? '' : String(value)}
+        onFocus={readOnly ? onRequestEdit : undefined}
+        onChange={(event) => {
+          if (!readOnly) onRequestEdit?.();
+          form.setFieldValue(namePath, event.target.value);
         }}
       />
+    );
+  return (
+    <Form.Item
+      label={label}
+      preserve
+    >
+      {control}
+    </Form.Item>
+  );
+}
+
+function SheetParameterItem({
+  namePath,
+  label,
+  param,
+  readOnly,
+  onRequestEdit,
+}: {
+  namePath: Array<string | number>;
+  label: string;
+  param: QuickSettingsParam;
+  readOnly: boolean;
+  onRequestEdit?: () => void;
+}) {
+  const form = Form.useFormInstance();
+  const watchedValue = Form.useWatch(namePath, { form, preserve: true });
+  const value = watchedValue ?? form.getFieldValue(namePath);
+  const options = param.enumOptions?.map((option) => ({ value: option.value, label: option.label }));
+  const setValue = (nextValue: unknown) => {
+    form.setFieldValue(namePath, nextValue);
+  };
+  const control = options?.length
+    ? (
+      readOnly
+        ? <Input value={options.find((option) => option.value === value)?.label ?? String(value ?? '')} readOnly onFocus={onRequestEdit} />
+        : (
+          <Select
+            options={options}
+            value={value as string | undefined}
+            onChange={(nextValue) => { onRequestEdit?.(); setValue(nextValue); }}
+          />
+        )
+    )
+    : (
+      <Input
+        readOnly={readOnly}
+        value={value == null ? '' : String(value)}
+        onFocus={readOnly ? onRequestEdit : undefined}
+        onChange={(event) => {
+          if (!readOnly) onRequestEdit?.();
+          setValue(event.target.value);
+        }}
+        onInput={(event) => {
+          if (!readOnly) setValue((event.target as HTMLInputElement).value);
+        }}
+        onBlur={(event) => {
+          if (!readOnly) setValue(event.target.value);
+        }}
+      />
+    );
+  return (
+    <Form.Item
+      label={label}
+      preserve
+    >
+      {control}
     </Form.Item>
   );
 }
@@ -229,10 +352,23 @@ function ParamGrid({ group, instances, includeInterfaceName = false, readOnly = 
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
       {params.map((param) => {
         const path = fieldPath(group, param, instances);
+        const interfaceNameFieldName = interfaceNameSheetFieldName(group, param, instances);
         const importedName = group.multiInstance
           ? undefined
           : sheetFieldNameByHeader(sheetParameters, candidateHeaders(group, param, path));
         const label = intl.locale === 'en-US' ? (param.titleEn || param.name) : (param.titleZh || param.name);
+        if (interfaceNameFieldName) {
+          return (
+            <SheetParameterItem
+              key={path}
+              namePath={interfaceNameFieldName}
+              label={label}
+              param={param}
+              readOnly={readOnly}
+              onRequestEdit={onRequestEdit}
+            />
+          );
+        }
         if (group.multiInstance) {
           return (
             <AbsoluteNetworkParameterItem
@@ -241,7 +377,6 @@ function ParamGrid({ group, instances, includeInterfaceName = false, readOnly = 
               label={label}
               param={param}
               readOnly={readOnly}
-              required={param.name === 'Name' && includeInterfaceName}
               onRequestEdit={onRequestEdit}
             />
           );
@@ -252,7 +387,6 @@ function ParamGrid({ group, instances, includeInterfaceName = false, readOnly = 
             name={importedName ?? ['networkParameterValues', path]}
             label={label}
             preserve={false}
-            rules={param.name === 'Name' && includeInterfaceName ? [{ required: true }] : undefined}
           >
             <ParamControl param={param} readOnly={readOnly} onRequestEdit={onRequestEdit} />
           </Form.Item>
@@ -428,7 +562,7 @@ export default function CommonQuickSettingsNetworkCards({
 }) {
   const t = useT();
   const intl = useIntl();
-  const [groups, setGroups] = useState<QuickSettingsGroup[]>([]);
+  const [groups, setGroups] = useState<QuickSettingsGroup[]>(() => cachedNetworkGroups(paramModelName) ?? []);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const form = Form.useFormInstance();
@@ -441,14 +575,22 @@ export default function CommonQuickSettingsNetworkCards({
   const locale = intl.locale === 'en-US' ? 'en-US' : 'zh-CN';
   useEffect(() => {
     let active = true;
-    if (!paramModelName) {
+    const cacheKey = paramModelCacheKey(paramModelName);
+    if (!cacheKey) {
       setGroups([]);
+      return undefined;
+    }
+    const cached = cachedNetworkGroups(cacheKey);
+    if (cached) {
+      setGroups(cached);
+      setLoading(false);
+      setFailed(false);
       return undefined;
     }
     setLoading(true);
     setFailed(false);
-    void quicksettingsApi.getGroupsByParamModel(paramModelName)
-      .then((response) => { if (active) setGroups(response.groups.filter(isNetworkGroup)); })
+    void loadNetworkGroups(cacheKey)
+      .then((nextGroups) => { if (active) setGroups(nextGroups); })
       .catch(() => { if (active) setFailed(true); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };

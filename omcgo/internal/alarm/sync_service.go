@@ -9,20 +9,20 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 	coreerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
 const (
-	syncLockTTL = 10 * time.Minute
-	syncLockKey = "alarm:sync:lock:%s"
+	syncLockTTL                      = 10 * time.Minute
+	syncLockKey                      = "alarm:sync:lock:%s"
 	concurrentTaskVisibilityAttempts = 5
 	concurrentTaskVisibilityDelay    = 50 * time.Millisecond
-	pendingLockOwnerPrefix          = "pending:"
-	taskLockOwnerPrefix             = "task:"
+	pendingLockOwnerPrefix           = "pending:"
+	taskLockOwnerPrefix              = "task:"
 )
 
 var ErrAlarmSyncInProgress = fmt.Errorf("alarm sync already in progress: %w", coreerrors.ErrAlreadyExists)
@@ -228,6 +228,7 @@ type AlarmSyncService struct {
 	redisClient redis.UniversalClient
 	eventBus    event.EventBus
 	logger      *zap.Logger
+	deviceRead  deviceReader
 }
 
 // NewAlarmSyncService creates a new AlarmSyncService.
@@ -245,10 +246,29 @@ func NewAlarmSyncService(
 	}
 }
 
+func (s *AlarmSyncService) WithDeviceReader(reader deviceReader) *AlarmSyncService {
+	s.deviceRead = reader
+	return s
+}
+
 // TriggerSync triggers an alarm sync for a device by creating a GPV task.
 // When a sync is already in progress, it returns the latest open task so callers can
 // observe the eventual terminal status instead of treating the request as completed.
 func (s *AlarmSyncService) TriggerSync(ctx context.Context, deviceSN string) (*task.Task, error) {
+	deviceSN = strings.TrimSpace(deviceSN)
+	if s.deviceRead != nil && deviceSN != "" {
+		dev, err := s.deviceRead.GetBySerialNumber(ctx, deviceSN)
+		if err != nil {
+			return nil, fmt.Errorf("lookup device for alarm sync: %w", err)
+		}
+		if dev != nil && isUPSProductClass(dev.ProductClass) {
+			s.logger.Info("skip alarm sync GPV for UPS device",
+				zap.String("device_sn", deviceSN),
+				zap.String("product_class", dev.ProductClass))
+			return nil, nil
+		}
+	}
+
 	// Redis SETNX dedup: prevent concurrent syncs for the same device
 	lockKey := fmt.Sprintf(syncLockKey, deviceSN)
 	lockOwner := newPendingLockOwner()
@@ -365,11 +385,11 @@ func (s *AlarmSyncService) TriggerSync(ctx context.Context, deviceSN string) (*t
 	params := json.RawMessage(`{"names":["Device.FaultMgmt.CurrentAlarm."]}`)
 	maxRetries := 2 // CreateTaskRequest.MaxRetries 为 *int（区分未设置/显式 0）
 	syncTask, err := s.taskService.CreateTask(ctx, &task.CreateTaskRequest{
-		DeviceSN:    deviceSN,
-		Method:      "GetParameterValues",
-		Params:      params,
-		Source:      task.TaskSourceSystem,
-		CreatorID:   "", // 系统任务：空串表示非用户发起，与其它 TaskSourceSystem 任务
+		DeviceSN:  deviceSN,
+		Method:    "GetParameterValues",
+		Params:    params,
+		Source:    task.TaskSourceSystem,
+		CreatorID: "", // 系统任务：空串表示非用户发起，与其它 TaskSourceSystem 任务
 		// （见 pm/online_subscriber.go、notification/task_subscriber.go 等）保持一致。
 		// 之前误用 uuid.Nil.String()（"00000000-...-000000000000"）——该值能被
 		// uuid.Parse 成功解析，导致 taskLogObserver.parseOperatorID 把它当成合法

@@ -430,6 +430,8 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 		}
 		return g
 	}
+	deviceMonitorFeatures := []string{"eNB.Monitor", "gNB.Monitor", "CPE.Monitor", "UPS.Monitor"}
+	upgradeFileFeatures := []string{"eNB.UpgradeFile", "gNB.UpgradeFile", "CPE.UpgradeFile", "UPS.Monitor"}
 
 	// ----- Device routes → resource "devices" -----
 	dh := c.deviceHandlerDeps
@@ -437,39 +439,39 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	deviceHandler.SetPermissionService(c.PermService)
 	locationSyncRepo := device.NewPgLocationObservationRepository(c.PgPool)
 	deviceHandler.SetLocationSyncService(device.NewLocationSyncService(locationSyncRepo))
-	deviceHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	deviceHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 	if c.GeofenceHandler != nil {
-		c.GeofenceHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+		c.GeofenceHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 	}
 	if c.DeviceAccessHTTPHandler != nil {
 		c.DeviceAccessHTTPHandler.RegisterRoutes(permGroup("devices"))
 	}
 	if c.miscDeps.paramSyncHandler != nil {
-		c.miscDeps.paramSyncHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+		c.miscDeps.paramSyncHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 	}
 
 	deviceInfoHandler := device.NewDeviceInfoHandler(c.DeviceService)
 	deviceInfoHandler.SetPermissionService(c.PermService)
-	deviceInfoHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	deviceInfoHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 
 	regHandler := device.NewRegistrationHandler(dh.regService)
 	regHandler.SetPermissionService(c.PermService) // #64 设备组可见性数据权限
-	regHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	regHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 
 	columnConfigRepo := device.NewPgColumnConfigRepository(c.PgPool)
 	columnConfigHandler := device.NewColumnConfigHandler(columnConfigRepo)
-	columnConfigHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	columnConfigHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 
 	exportService := device.NewExportService(c.DeviceInfoRepo, c.Logger)
 	exportService.SetControlSummaryReader(device.NewPgDeviceControlSummaryReader(c.PgPool))
 	exportHandler := device.NewExportHandler(exportService)
 	exportHandler.SetPermissionService(c.PermService)
-	exportHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	exportHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 
 	// T-0098 P5-01：dmRegistry 已删除，直接注入 ParamRegistry / ProductRegistry。
 	paramTreeHandler := device.NewParameterTreeHandler(c.DeviceService, c.ParamRepo, c.ParamRegistry, c.ProductRegistry, c.Logger)
 	paramTreeHandler.SetPermissionService(c.PermService)
-	paramTreeHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	paramTreeHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 
 	// T-0179 + T-0183: devsweep HTTP 端点已下线 — omcctl device sweep-paths
 	// 改成进程内直连 PG/Redis,在 CLI 进程内调用 devsweep.Service + Applier。
@@ -484,7 +486,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 			c.ProductRepo,
 			c.ParamRegistry,
 		)
-		quickSettingsHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+		quickSettingsHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 	}
 
 	// T-0098-P5-01：旧 /api/v1/datamodels CRUD 已下线，治理走 /api/v1/products + /api/v1/param-models（super_admin）。
@@ -495,7 +497,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	templateHandler := template.NewHandler(ch.templateRepo)
 	// T-0120: 接 provisioning engine 给 POST /:id/dispatch 提供 Path A 显式下发能力。
 	templateHandler.SetDispatcher(md.provisionEngine)
-	templateHandler.RegisterRoutes(featGroup("config", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	templateHandler.RegisterRoutes(featGroup("config", deviceMonitorFeatures...))
 
 	// ----- Provisioning routes → resource "config" -----
 	provisionHandler := provision.NewHandler(md.provisionRepo, md.provisionEngine)
@@ -533,7 +535,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 			md.provisionEngine.SetAutomaticPolicyExecutor(provisionHandler)
 		}
 	}
-	provisionHandler.RegisterRoutes(featGroup("config", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	provisionHandler.RegisterRoutes(featGroup("config", deviceMonitorFeatures...))
 	provisionHandler.RegisterPublicRoutes(publicV1)
 
 	// ----- Topology routes → resource "devices" -----
@@ -645,10 +647,10 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	md.dashboardHandler.RegisterRoutes(featGroup("devices", "Dashboard"))
 
 	// ----- Syslog routes → resource "devices" -----
-	md.syslogHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	md.syslogHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 
 	// ----- Config sync routes → resource "config" -----
-	md.syncHandler.RegisterRoutes(featGroup("config", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	md.syncHandler.RegisterRoutes(featGroup("config", deviceMonitorFeatures...))
 
 	// ----- MR routes → resource "pm" -----
 	mrHandler := mr.NewHandler(md.mrStore, md.mrIndRepo, md.mrMapRepo, c.MinIO, c.Cfg.MinIO.Buckets.MRFiles, c.Logger)
@@ -664,19 +666,19 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- Software routes → resource "firmware" -----
 	md.softwareHandler.SetPermissionService(c.PermService) // #59 升级/回退创建逐设备归属校验
-	md.softwareHandler.RegisterRoutes(featGroup("firmware", "eNB.UpgradeFile", "gNB.UpgradeFile", "CPE.UpgradeFile"))
+	md.softwareHandler.RegisterRoutes(featGroup("firmware", upgradeFileFeatures...))
 	md.ufteHandler.SetPermissionService(c.PermService) // #63 设备组可见性数据权限
-	md.ufteHandler.RegisterRoutes(featGroup("firmware", "eNB.UpgradeFile", "gNB.UpgradeFile", "CPE.UpgradeFile"))
+	md.ufteHandler.RegisterRoutes(featGroup("firmware", upgradeFileFeatures...))
 
 	// ----- Task routes → resource "devices" -----
-	md.taskHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	md.taskHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 
 	// ----- Interop routes → resource "interop" -----
 	md.interopHandler.SetPermissionService(c.PermService) // #63 设备组可见性数据权限
-	md.interopHandler.RegisterRoutes(featGroup("interop", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	md.interopHandler.RegisterRoutes(featGroup("interop", deviceMonitorFeatures...))
 
 	// ----- Backup routes → resource "devices" -----
-	md.backupHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	md.backupHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 
 	// ----- 文件管理 4 Tab 批量下载（bundle 模块,同步流式） -----
 	// 每个模块 POST /<module>/batch-download 挂在各自资源下,鉴权独立。
@@ -709,23 +711,23 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- Station Log routes → resource "devices" -----
 	if md.stationlogHandler != nil {
 		md.stationlogHandler.SetPermissionService(c.PermService) // #63 设备组可见性数据权限
-		md.stationlogHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+		md.stationlogHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 	}
 
 	// ----- EventLog routes → resource "devices" -----
 	if md.eventlogHandler != nil {
 		md.eventlogHandler.SetPermissionService(c.PermService) // #63 设备组可见性数据权限
-		md.eventlogHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+		md.eventlogHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 	}
 
 	// ----- RebootRecord routes（统一重启记录）→ resource "devices" -----
 	if md.rebootrecordHandler != nil {
 		md.rebootrecordHandler.SetPermissionService(c.PermService) // #63 设备组可见性数据权限
-		md.rebootrecordHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+		md.rebootrecordHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 	}
 
 	// ----- File Manager routes → resource "devices" -----
-	md.fileHandler.RegisterRoutes(featGroup("devices", "eNB.UpgradeFile", "gNB.UpgradeFile", "CPE.UpgradeFile"))
+	md.fileHandler.RegisterRoutes(featGroup("devices", upgradeFileFeatures...))
 
 	// ----- MML Console routes → resource "devices" -----
 	md.mmlHandler.RegisterRoutes(featGroup("devices", "eNB.Mml"))
@@ -742,11 +744,11 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	md.sseHandler.RegisterRoutes(v1)
 
 	// ----- Notifications → resource "devices" -----
-	md.notificationHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	md.notificationHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 
 	// ----- T-0137 / M1: TR069 报文跟踪 → resource "devices" -----
 	if md.traceHandler != nil {
-		md.traceHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+		md.traceHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 	}
 
 	// ----- W2.A.4 / T-0043: Notification template + history → resource "alarms" -----
@@ -768,7 +770,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	}
 
 	// ----- Config Baseline routes → resource "config" -----
-	md.baselineHandler.RegisterRoutes(featGroup("config", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	md.baselineHandler.RegisterRoutes(featGroup("config", deviceMonitorFeatures...))
 
 	// ----- System License (singleton) routes → resource "devices" -----
 	// F06 重构 Step 5：老 /licenses/* multi-license 路由已下线；本路由是唯一入口。
@@ -780,13 +782,13 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// GET  /api/v1/devices/:id/license-params          → ListLicenseParams
 	// POST /api/v1/devices/:id/license-params/refresh  → 下发 GPV 刷新
 	if md.licenseParamHandler != nil {
-		md.licenseParamHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+		md.licenseParamHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 	}
 
 	// ----- OpsTools routes → resource "devices" -----
-	md.opsHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	md.opsHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 	if md.opsExtHandler != nil {
-		md.opsExtHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+		md.opsExtHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
 	}
 
 	// ----- Report routes → resource "pm" -----

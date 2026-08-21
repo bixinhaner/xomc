@@ -66,6 +66,7 @@ type BatchInformProcessor struct {
 	// 两者为 nil 时退化为原 batch path 行为（无回填），与改造前等价。
 	productMatcher      ProductClassMatcher
 	infoSyncer          deviceInfoParameterSyncer
+	upsRuntimeRepo      UPSRuntimeRepository
 	infoProjectionSlots chan struct{}
 	infoProjectionRetry sync.Map
 }
@@ -90,6 +91,10 @@ func (p *BatchInformProcessor) SetProductMatcher(m ProductClassMatcher) {
 // Phase 3 follow-up — nil 时跳过投影。
 func (p *BatchInformProcessor) SetInfoSyncer(s *InfoSyncer) {
 	p.infoSyncer = s
+}
+
+func (p *BatchInformProcessor) SetUPSRuntimeRepository(repo UPSRuntimeRepository) {
+	p.upsRuntimeRepo = repo
 }
 
 // TransitionEventPublisher 是 BatchInformProcessor 调 DeviceService 发布
@@ -352,10 +357,13 @@ func (p *BatchInformProcessor) doFlush(ctx context.Context, buffer map[string]*i
 		return fmt.Errorf("batch upsert params: %w", err)
 	}
 
-	// 3. 批量 Redis 操作（仅 hit，避免把 stale device 写回 cache）
+	// 3. UPS 运行态投影。只处理 ProductClass=UPS* 的设备，失败不阻断既有制式。
+	p.projectUPSRuntime(ctx, hit)
+
+	// 4. 批量 Redis 操作（仅 hit，避免把 stale device 写回 cache）
 	p.batchRedisOps(ctx, hit)
 
-	// 4. T-0123/T-0125: PG + cache 写入成功后发 transition 事件。
+	// 5. T-0123/T-0125: PG + cache 写入成功后发 transition 事件。
 	// 与 UpdateFromInform 非 batch 路径行为对齐（device_service.go §UpdateFromInform 末尾）。
 	// 同一 Inform 满足两者时优先发 firmware.changed（不发 device.online），由
 	// HandleFirmwareChanged 触发模型刷新 + durable 全量同步覆盖 online 语义，避免双触发。
@@ -366,6 +374,23 @@ func (p *BatchInformProcessor) doFlush(ctx context.Context, buffer map[string]*i
 	}
 
 	return nil
+}
+
+func (p *BatchInformProcessor) projectUPSRuntime(ctx context.Context, updates []*informUpdate) {
+	if p == nil || p.upsRuntimeRepo == nil {
+		return
+	}
+	for _, update := range updates {
+		if update == nil || update.device == nil || update.inform == nil || !isUPSProductClass(update.inform.DeviceId.ProductClass) {
+			continue
+		}
+		if err := p.upsRuntimeRepo.UpsertFromInform(ctx, update.device, update.inform); err != nil {
+			p.logger.Warn("batch project UPS runtime from Inform failed",
+				zap.String("device_id", update.device.ID.String()),
+				zap.String("serial_number", update.device.SerialNumber),
+				zap.Error(err))
+		}
+	}
 }
 
 // handleParameterUpsertOutcome queues device_info projection for every device
@@ -383,6 +408,9 @@ func (p *BatchInformProcessor) handleParameterUpsertOutcome(
 	}
 	changed := make([]*informUpdate, 0, len(result.changedDevices))
 	for _, update := range hit {
+		if update == nil || update.device == nil || isUPSProductClass(update.device.ProductClass) {
+			continue
+		}
 		_, parameterChanged := result.changedDevices[update.device.ID]
 		_, retryPending := p.infoProjectionRetry.Load(update.device.ID)
 		if !parameterChanged && !retryPending {
@@ -594,7 +622,7 @@ func prepareDeviceUpdate(device *model.Device, inform *tr069.InformMessage) ([]m
 	if inferredTech, ok := detectTechnologyFromPaths(inform.ParameterList); ok {
 		device.Technology = inferredTech
 	}
-	device.FirmwareVersion = findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion")
+	device.FirmwareVersion = informSoftwareVersion(inform.ParameterList)
 	updateConnectionRequestSummary(device, inform.ParameterList)
 	device.LastInformAt = &now
 	device.LastInformEvents = tr069.EventCodes(inform.Event)
@@ -611,6 +639,9 @@ func prepareDeviceUpdate(device *model.Device, inform *tr069.InformMessage) ([]m
 		// 清空残留脏值，避免 batchRedisOps 把 cache/DB 老值刷回 Redis acs:stun:<SN>。
 		device.UDPConnectionRequestAddress = ""
 		device.NatDetected = false
+		if device.IPAddress == "" && isUPSProductClass(inform.DeviceId.ProductClass) {
+			device.IPAddress = informUPSExternalIPAddress(inform.ParameterList)
+		}
 	}
 
 	// T-0162: 收到 Inform 即视为在线 —— 必须显式写新字段 IsOnline，因为
@@ -772,7 +803,15 @@ func applyProductMetadataInline(ctx context.Context, matcher ProductClassMatcher
 	//     Technology(5G 设备被推成 lte 的根因);
 	//   · 产品已登记但 tech 为空(非无线产品,如核心网) → 清空,避免兜底推断的
 	//     lte 残留(设备列表错误显示 eNB(LTE))。
-	if normalized := model.NormalizeTechnology(matchRes.Product.Tech); normalized != "" {
+	if isUPSProductClass(device.ProductClass) {
+		if device.Technology != "" {
+			logger.Info("batch path applyProductMetadata: technology cleared for UPS product",
+				zap.String("serial_number", device.SerialNumber),
+				zap.String("product_class", device.ProductClass),
+				zap.String("old", string(device.Technology)))
+			device.Technology = ""
+		}
+	} else if normalized := model.NormalizeTechnology(matchRes.Product.Tech); normalized != "" {
 		if device.Technology != normalized {
 			logger.Info("batch path applyProductMetadata: technology corrected from ProductRegistry",
 				zap.String("serial_number", device.SerialNumber),
@@ -837,6 +876,9 @@ func (p *BatchInformProcessor) asyncSyncDeviceInfo(hit []*informUpdate) {
 		}()
 	}
 	for _, update := range hit {
+		if update == nil || update.device == nil || isUPSProductClass(update.device.ProductClass) {
+			continue
+		}
 		jobs <- update.device
 	}
 	close(jobs)

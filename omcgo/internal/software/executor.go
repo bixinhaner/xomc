@@ -15,9 +15,12 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
 	devtask "github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
+
+const upsSoftwareVersionParamPath = "InternetGatewayDevice.DeviceInfo.SoftwareVersion"
 
 // UpgradeExecutor handles the event-driven upgrade lifecycle for individual devices.
 type UpgradeExecutor struct {
@@ -389,7 +392,7 @@ func shouldResolveManagedFirmwareDownloadURL(fw *FirmwareVersion) bool {
 		return false
 	}
 	switch fw.FileType {
-	case FileTypeIMG, FileTypePATCH, FileTypeFPGA:
+	case FileTypeIMG, FileTypePATCH, FileTypeAP, FileTypeFPGA:
 		return true
 	default:
 		return false
@@ -1240,13 +1243,15 @@ func (e *UpgradeExecutor) HandleUploadResponse(ctx context.Context, evt event.Ev
 }
 
 // HandleRebootComplete handles device.inform.reboot_complete events.
-// Used for rollback completion detection and 4G upgrade completion.
+// Used for rollback completion detection, UPS post-boot version verification,
+// and legacy upgrade completion.
 func (e *UpgradeExecutor) HandleRebootComplete(ctx context.Context, evt event.Event) error {
 	var payload struct {
 		DeviceSN string `json:"device_sn"`
 		DeviceID struct {
 			SerialNumber string `json:"serial_number"`
 		} `json:"device_id"`
+		ParameterList []tr069.ParameterValueStruct `json:"parameter_list"`
 	}
 	if err := evt.DecodePayload(&payload); err != nil {
 		return nil
@@ -1278,6 +1283,9 @@ func (e *UpgradeExecutor) HandleRebootComplete(ctx context.Context, evt event.Ev
 	if err != nil {
 		return nil
 	}
+	if task.TaskType == TaskTypeUpgrade && isUPSUpgradeDevice(dev) {
+		return e.handleUPSUpgradeBoot(ctx, subTask, dev, payload.ParameterList)
+	}
 	if task.TaskType == TaskTypeUpgrade && Is5G(dev) {
 		e.logger.Debug("skip reboot_complete for 5G upgrade, waiting for 102 event",
 			zap.String("sub_task_id", subTask.ID.String()))
@@ -1291,6 +1299,91 @@ func (e *UpgradeExecutor) HandleRebootComplete(ctx context.Context, evt event.Ev
 		zap.String("sub_task_id", subTask.ID.String()),
 		zap.String("device_sn", deviceSN))
 	return nil
+}
+
+func (e *UpgradeExecutor) handleUPSUpgradeBoot(ctx context.Context, subTask *UpgradeSubTask, dev *model.Device, params []tr069.ParameterValueStruct) error {
+	targetVersion := e.upsUpgradeTargetVersion(ctx, subTask)
+	reportedVersion := firstNonBlank(
+		extractTR069ParamExact(params, upsSoftwareVersionParamPath),
+		extractTR069ParamSuffix(params, "DeviceInfo.SoftwareVersion"),
+		dev.FirmwareVersion,
+	)
+
+	if targetVersion == "" {
+		e.failSubTask(ctx, subTask, "UPS upgrade version verification failed: target version is empty.", FailureInternalError)
+		return nil
+	}
+	if reportedVersion == "" {
+		e.failSubTask(ctx, subTask, fmt.Sprintf("UPS upgrade version verification failed: no software version reported after reboot; target version: %s", targetVersion), FailureVersionMismatch)
+		return nil
+	}
+	if !versionsEquivalent(reportedVersion, targetVersion) {
+		e.failSubTask(ctx, subTask, fmt.Sprintf("UPS upgrade version verification failed: reported version %s does not match target version %s", reportedVersion, targetVersion), FailureVersionMismatch)
+		return nil
+	}
+
+	e.completeSubTask(ctx, subTask, dev.SerialNumber)
+	e.logger.Info("UPS reboot complete, software version verified",
+		zap.String("sub_task_id", subTask.ID.String()),
+		zap.String("device_sn", dev.SerialNumber),
+		zap.String("software_version", reportedVersion))
+	return nil
+}
+
+func (e *UpgradeExecutor) upsUpgradeTargetVersion(ctx context.Context, subTask *UpgradeSubTask) string {
+	if subTask == nil {
+		return ""
+	}
+	if v := strings.TrimSpace(subTask.DestVersion); v != "" {
+		return v
+	}
+	if subTask.FirmwareID == nil || e.firmwareRepo == nil {
+		return ""
+	}
+	fw, err := e.firmwareRepo.GetByID(ctx, *subTask.FirmwareID)
+	if err != nil || fw == nil {
+		return ""
+	}
+	return strings.TrimSpace(fw.Version)
+}
+
+func isUPSUpgradeDevice(dev *model.Device) bool {
+	if dev == nil {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(dev.ProductClass), "UPS")
+}
+
+func extractTR069ParamExact(params []tr069.ParameterValueStruct, exactName string) string {
+	for _, p := range params {
+		if strings.TrimSpace(p.Name) == exactName {
+			return strings.TrimSpace(p.Value)
+		}
+	}
+	return ""
+}
+
+func extractTR069ParamSuffix(params []tr069.ParameterValueStruct, nameSuffix string) string {
+	for _, p := range params {
+		name := strings.TrimSpace(p.Name)
+		if strings.HasSuffix(name, nameSuffix) {
+			return strings.TrimSpace(p.Value)
+		}
+	}
+	return ""
+}
+
+func versionsEquivalent(left, right string) bool {
+	return strings.TrimSpace(left) == strings.TrimSpace(right)
+}
+
+func firstNonBlank(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 // HandleUpgradeFinish handles the 5G 102 UPGRADE FINISH event.

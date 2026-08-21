@@ -25,6 +25,9 @@ type DeviceFilter struct {
 	Carrier      *model.CarrierCode
 	Technology   *model.Technology
 	Technologies []model.Technology
+	// DeviceType 是设备列表 Tab 维度。UPS 只按 Inform ProductClass 的 UPS 前缀判断；
+	// 不把 UPS 塞进 technology/network_type，避免污染既有无线制式过滤。
+	DeviceType string
 
 	// DEPRECATED (T-0162): 用 LifecycleState / IsOnline 替代。保留过渡期供
 	// 老 query 参数自动翻译；handler 收到 `?status=` 会派生到 LifecycleState +
@@ -630,6 +633,8 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 		builder = builder.Where(sq.Eq{"d.technology": *filter.Technology})
 		countBuilder = countBuilder.Where(sq.Eq{"d.technology": *filter.Technology})
 	}
+	builder = applyDeviceListDeviceTypeFilter(builder, filter.DeviceType)
+	countBuilder = applyDeviceListDeviceTypeFilter(countBuilder, filter.DeviceType)
 	// T-0162: filter.Status 老字段过渡兼容——翻译为 lifecycle_state + is_online
 	if filter.Status != nil {
 		lifecycle, isOnline := DeriveLifecycleFromStatus(*filter.Status)
@@ -1333,7 +1338,7 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 	).From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
-		LeftJoin("device_info di ON d.id = di.device_id").
+		LeftJoin("device_info di ON d.id = di.device_id AND COALESCE(d.product_class, '') NOT LIKE 'UPS%'").
 		Where(sq.NotEq{"d.latitude": nil}).
 		Where(sq.NotEq{"d.longitude": nil})
 
@@ -1374,7 +1379,7 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 		From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
-		LeftJoin("device_info di ON d.id = di.device_id").
+		LeftJoin("device_info di ON d.id = di.device_id AND COALESCE(d.product_class, '') NOT LIKE 'UPS%'").
 		Where(sq.NotEq{"d.latitude": nil}).
 		Where(sq.NotEq{"d.longitude": nil})
 
@@ -1545,7 +1550,7 @@ func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, filter GeoStatsFil
 		From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
-		LeftJoin("device_info di ON d.id = di.device_id").
+		LeftJoin("device_info di ON d.id = di.device_id AND COALESCE(d.product_class, '') NOT LIKE 'UPS%'").
 		Where(baseCondition).
 		Where(sq.LtOrEq{"COALESCE(di.ue_count, 0)": 0})
 
@@ -1599,7 +1604,7 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 	).From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
-		LeftJoin("device_info di ON d.id = di.device_id")
+		LeftJoin("device_info di ON d.id = di.device_id AND COALESCE(d.product_class, '') NOT LIKE 'UPS%'")
 
 	// 复用 BuildSearchOR：支持逗号分隔多值搜索 + 50 个值限制
 	if cond := BuildSearchOR(keyword, searchFields); cond != nil {
@@ -1660,7 +1665,9 @@ func recycleBinSelectColumns() []string {
 		"d.nat_detected", "d.udp_connection_request_address",
 		"d.last_inform_at", "d.last_inform_events",
 		"d.last_boot_at", "d.boot_count",
-		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
+		"d.inform_interval", "d.site_name",
+		`CASE WHEN ` + upsProductClassPredicate + ` THEN udi.site_id ELSE d.site_id END AS site_id`,
+		"d.latitude", "d.longitude",
 		"d.location_source_mode",
 		"dlo.latitude AS reported_latitude", "dlo.longitude AS reported_longitude",
 		"dlo.gps_height AS reported_gps_height", "dlo.observed_at AS reported_observed_at",
@@ -1673,16 +1680,23 @@ func recycleBinSelectColumns() []string {
 		"dg.id as group_id",
 		"dg.name as group_name",
 		"COALESCE(dgm.source_type, 'auto') as source_type",
-		// device_info columns (no alarm_severity needed for recycle bin)
-		"di.device_name", "di.address", "di.remark", "di.project_status", "di.height",
+		// device info columns (no alarm_severity needed for recycle bin).
+		// UPS uses device_ups_info; radio devices keep using device_info.
+		`CASE WHEN ` + upsProductClassPredicate + ` THEN udi.device_name ELSE di.device_name END AS device_name`,
+		`CASE WHEN ` + upsProductClassPredicate + ` THEN udi.address ELSE di.address END AS address`,
+		`CASE WHEN ` + upsProductClassPredicate + ` THEN udi.remark ELSE di.remark END AS remark`,
+		"di.project_status", "di.height",
 		"di.eci", "di.pci", "di.cell_id", "di.freq_point", "di.bandwidth", "di.transmit_power", "di.plmn",
 		"di.rf_status", "di.cell_status", "di.op_state", "di.mme_status", "di.sync_status", "di.kpi_status",
 		"di.num_of_cells", "di.gps_status", "COALESCE(di.ue_count, 0)",
 		"NULL::text AS alarm_severity", // Placeholder for compatibility with DeviceWithInfo
 		"di.license_status",
 		"di.mac", "di.hardware_version",
-		"di.first_online_time", "di.last_online_time", "di.last_offline_time", "di.run_time",
-		"di.cumulative_online_duration",
+		`CASE WHEN ` + upsProductClassPredicate + ` THEN udi.first_online_time ELSE di.first_online_time END AS first_online_time`,
+		`CASE WHEN ` + upsProductClassPredicate + ` THEN udi.last_online_time ELSE di.last_online_time END AS last_online_time`,
+		`CASE WHEN ` + upsProductClassPredicate + ` THEN udi.last_offline_time ELSE di.last_offline_time END AS last_offline_time`,
+		`CASE WHEN ` + upsProductClassPredicate + ` THEN udi.run_time ELSE di.run_time END AS run_time`,
+		`CASE WHEN ` + upsProductClassPredicate + ` THEN udi.cumulative_online_duration ELSE di.cumulative_online_duration END AS cumulative_online_duration`,
 		// Phase 2/3 扩展列
 		"di.tac", "di.lac", "di.band", "di.ul_earfcn",
 		"di.subframe_assignment", "di.special_subframe", "di.root_index",
@@ -1732,6 +1746,16 @@ func recycleBinSelectColumns() []string {
 		END AS offline_minutes`,
 		"FALSE AS param_sync_running",     // Placeholder for shared DeviceWithInfo scanner
 		"NULL::int AS active_alarm_count", // Placeholder for compatibility
+		`CASE
+			WHEN COALESCE(d.product_class, '') LIKE 'UPS%' THEN 'UPS'
+			ELSE 'BASE_STATION'
+		END AS device_type`,
+		"udi.external_ip", "udi.total_voltage", "udi.total_temperature", "udi.total_current",
+		"udi.software_version", "udi.hardware_version", "udi.manufacturer", "udi.manufacturer_oui",
+		"udi.run_time", "udi.bms_charging",
+		"udi.ac_power", "udi.ac_voltage", "udi.dc_voltage", "udi.dc_current", "udi.board_temperature",
+		"udi.sfp_state", "udi.port0_state", "udi.port1_state", "udi.port2_state", "udi.port3_state",
+		"udi.average_soc", "udi.pack_counts", "udi.last_inform_at",
 	}
 }
 
@@ -1739,6 +1763,8 @@ func recycleBinSearchFields() []string {
 	return []string{
 		"d.serial_number",
 		"d.site_name",
+		"udi.device_name",
+		"udi.site_id",
 		"di.mac",
 	}
 }
@@ -1746,7 +1772,8 @@ func recycleBinSearchFields() []string {
 func buildRecycleBinListBuilders(filter RecycleBinFilter) (sq.SelectBuilder, sq.SelectBuilder) {
 	builder := storage.Psql.Select(recycleBinSelectColumns()...).
 		From("devices d").
-		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin("device_info di ON di.device_id = d.id AND COALESCE(d.product_class, '') NOT LIKE 'UPS%'").
+		LeftJoin("device_ups_info udi ON udi.device_id = d.id AND COALESCE(d.product_class, '') LIKE 'UPS%'").
 		LeftJoin("device_location_observations dlo ON d.id = dlo.device_id").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
@@ -1754,7 +1781,8 @@ func buildRecycleBinListBuilders(filter RecycleBinFilter) (sq.SelectBuilder, sq.
 
 	countBuilder := storage.Psql.Select("COUNT(*)").
 		From("devices d").
-		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin("device_info di ON di.device_id = d.id AND COALESCE(d.product_class, '') NOT LIKE 'UPS%'").
+		LeftJoin("device_ups_info udi ON udi.device_id = d.id AND COALESCE(d.product_class, '') LIKE 'UPS%'").
 		Where(sq.NotEq{"d.deleted_at": nil})
 
 	// Apply filters
@@ -1969,7 +1997,7 @@ func (r *PgDeviceRepository) RestoreDevices(ctx context.Context, ids []uuid.UUID
 }
 
 // PermanentDelete permanently removes devices from the database.
-// This also removes related device_group_members and device_info records.
+// This also removes related device_group_members and device-specific info records.
 // Returns the number of devices actually deleted.
 func (r *PgDeviceRepository) PermanentDelete(ctx context.Context, ids []uuid.UUID) (int64, error) {
 	if len(ids) == 0 {
@@ -1991,13 +2019,24 @@ func (r *PgDeviceRepository) PermanentDelete(ctx context.Context, ids []uuid.UUI
 		return 0, fmt.Errorf("delete device_group_members: %w", err)
 	}
 
-	// Remove device_info records
+	// Remove radio device_info records and UPS-only info records.
 	_, err = tx.Exec(ctx,
-		`DELETE FROM device_info WHERE device_id = ANY($1)`,
+		`DELETE FROM device_info di
+		  USING devices d
+		  WHERE di.device_id = d.id
+		    AND d.id = ANY($1)
+		    AND COALESCE(d.product_class, '') NOT LIKE 'UPS%'`,
 		ids,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("delete device_info: %w", err)
+	}
+	_, err = tx.Exec(ctx,
+		`DELETE FROM device_ups_info WHERE device_id = ANY($1)`,
+		ids,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("delete device_ups_info: %w", err)
 	}
 
 	// Permanently delete devices
@@ -2029,6 +2068,7 @@ func (r *PgDeviceRepository) ListStaleForParamSync(ctx context.Context, threshol
 			sq.Eq{"d.last_param_sync_at": nil},
 			sq.Lt{"d.last_param_sync_at": threshold},
 		}).
+		Where(sq.Expr("NOT (" + upsProductClassPredicate + ")")).
 		Where(notDeleted).
 		OrderBy("d.last_param_sync_at ASC NULLS FIRST").
 		Limit(uint64(limit))
@@ -2313,12 +2353,15 @@ const cpeProductClassPredicate = `(
 //
 // enbThresholdSec：基站类阈值（秒）；cpeThresholdSec：CPE 类阈值（秒）。
 // 返回按 last_inform_at ASC 排序，优先处理最久未心跳的设备。
-func (r *PgDeviceRepository) FindStaleDevicesByClass(ctx context.Context, enbThresholdSec, cpeThresholdSec, limit int) ([]*model.Device, error) {
+func (r *PgDeviceRepository) FindStaleDevicesByClass(ctx context.Context, enbThresholdSec, cpeThresholdSec, upsThresholdSec, limit int) ([]*model.Device, error) {
 	if enbThresholdSec <= 0 {
 		enbThresholdSec = defaultENBOfflineSec
 	}
 	if cpeThresholdSec <= 0 {
 		cpeThresholdSec = defaultCPEOfflineSec
+	}
+	if upsThresholdSec <= 0 {
+		upsThresholdSec = defaultUPSOfflineSec
 	}
 	if limit <= 0 {
 		limit = 1000
@@ -2333,7 +2376,8 @@ func (r *PgDeviceRepository) FindStaleDevicesByClass(ctx context.Context, enbThr
 	// 从不进入判离线分支。用 make_interval(secs => (?)::int) 把秒数显式转 int 再造
 	// interval，绕开 text*interval 运算。
 	staleExpr := fmt.Sprintf(
-		"d.last_inform_at < NOW() - make_interval(secs => (CASE WHEN %s THEN (?)::int ELSE (?)::int END))",
+		"d.last_inform_at < NOW() - make_interval(secs => (CASE WHEN %s THEN (?)::int WHEN %s THEN (?)::int ELSE (?)::int END))",
+		upsProductClassPredicate,
 		cpeProductClassPredicate,
 	)
 	builder := storage.Psql.Select(deviceColumns()...).
@@ -2341,7 +2385,7 @@ func (r *PgDeviceRepository) FindStaleDevicesByClass(ctx context.Context, enbThr
 		Where(sq.Eq{"d.is_online": true}).
 		Where(notDeleted).
 		Where("d.last_inform_at IS NOT NULL").
-		Where(staleExpr, cpeThresholdSec, enbThresholdSec).
+		Where(staleExpr, upsThresholdSec, cpeThresholdSec, enbThresholdSec).
 		OrderBy("d.last_inform_at ASC").
 		Limit(uint64(limit))
 
@@ -2375,20 +2419,9 @@ func (r *PgDeviceRepository) FindOfflineDevicesBefore(ctx context.Context, cutof
 		limit = 200
 	}
 
-	builder := storage.Psql.Select(deviceColumns()...).
-		From("devices d").
-		LeftJoin("device_info di ON di.device_id = d.id").
-		Where(sq.Eq{"d.lifecycle_state": model.LifecycleCommissioned}).
-		Where(sq.Eq{"d.is_online": false}).
-		Where(notDeleted).
-		Where("di.last_offline_time IS NOT NULL").
-		Where(sq.LtOrEq{"di.last_offline_time": cutoff}).
-		OrderBy("di.last_offline_time ASC").
-		Limit(uint64(limit))
-
-	query, args, err := builder.ToSql()
+	query, args, err := buildFindOfflineDevicesBeforeQuery(cutoff, limit)
 	if err != nil {
-		return nil, fmt.Errorf("build find offline devices query: %w", err)
+		return nil, err
 	}
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -2407,11 +2440,32 @@ func (r *PgDeviceRepository) FindOfflineDevicesBefore(ctx context.Context, cutof
 	return devices, nil
 }
 
+func buildFindOfflineDevicesBeforeQuery(cutoff time.Time, limit int) (string, []interface{}, error) {
+	lastOfflineExpr := `CASE WHEN COALESCE(d.product_class, '') LIKE 'UPS%' THEN udi.last_offline_time ELSE di.last_offline_time END`
+	builder := storage.Psql.Select(deviceColumns()...).
+		From("devices d").
+		LeftJoin("device_info di ON di.device_id = d.id AND COALESCE(d.product_class, '') NOT LIKE 'UPS%'").
+		LeftJoin("device_ups_info udi ON udi.device_id = d.id AND COALESCE(d.product_class, '') LIKE 'UPS%'").
+		Where(sq.Eq{"d.lifecycle_state": model.LifecycleCommissioned}).
+		Where(sq.Eq{"d.is_online": false}).
+		Where(notDeleted).
+		Where(lastOfflineExpr + " IS NOT NULL").
+		Where(sq.LtOrEq{lastOfflineExpr: cutoff}).
+		OrderBy(lastOfflineExpr + " ASC").
+		Limit(uint64(limit))
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return "", nil, fmt.Errorf("build find offline devices query: %w", err)
+	}
+	return query, args, nil
+}
+
 // MarkOfflineWithAccounting 事务性把单台设备从"在线"翻转到"离线":
 //  1. devices.is_online → false（仅当当前为 true,否则整个事务空转）
 //  2. devices.last_offline_reason → reason
-//  3. device_info.last_offline_time → now
-//  4. device_info.cumulative_online_duration += GREATEST(0, now - last_online_time)
+//  3. 基站写 device_info.last_offline_time；UPS 写 device_ups_info.last_offline_time
+//  4. 对应信息表 cumulative_online_duration += GREATEST(0, now - last_online_time)
 //
 // 全部在同一 TX 内完成,失败回滚不留半成品。
 //
@@ -2432,36 +2486,53 @@ func (r *PgDeviceRepository) MarkOfflineWithAccounting(ctx context.Context, devi
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Step 1: 翻 is_online + 记原因,只在当前在线时才动手。
-	res, err := tx.Exec(ctx, `
+	var productClass string
+	err = tx.QueryRow(ctx, `
 		UPDATE devices
 		   SET is_online = false,
 		       last_offline_reason = $2,
 		       updated_at = NOW()
 		 WHERE id = $1
 		   AND is_online = true
-		   AND deleted_at IS NULL`,
-		deviceID, reason)
-	if err != nil {
-		return false, fmt.Errorf("update devices offline: %w", err)
-	}
-	if res.RowsAffected() == 0 {
+		   AND deleted_at IS NULL
+		RETURNING COALESCE(product_class, '')`,
+		deviceID, reason).Scan(&productClass)
+	if err == pgx.ErrNoRows {
 		// 已是 offline 或不存在 / 已软删 —— 幂等返回。
 		if err := tx.Commit(ctx); err != nil {
 			return false, fmt.Errorf("commit no-op tx: %w", err)
 		}
 		return false, nil
 	}
+	if err != nil {
+		return false, fmt.Errorf("update devices offline: %w", err)
+	}
 
 	// Step 2: 离线时间戳 + 累计在线时长。
 	// last_online_time 为 NULL 时（如设备从未触发 RecordOnline）累加 0,保守。
-	if _, err := tx.Exec(ctx, `
-		UPDATE device_info
-		   SET last_offline_time = $2,
-		       cumulative_online_duration = COALESCE(cumulative_online_duration, 0)
-		                                  + GREATEST(0, EXTRACT(EPOCH FROM ($2 - COALESCE(last_online_time, $2)))::bigint)
-		 WHERE device_id = $1`,
-		deviceID, now); err != nil {
-		return false, fmt.Errorf("update device_info offline accounting: %w", err)
+	if isUPSProductClass(productClass) {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO device_ups_info (
+				device_id, last_offline_time, cumulative_online_duration, created_at, updated_at
+			) VALUES ($1, $2, 0, NOW(), NOW())
+			ON CONFLICT (device_id) DO UPDATE SET
+				last_offline_time = EXCLUDED.last_offline_time,
+				cumulative_online_duration = COALESCE(device_ups_info.cumulative_online_duration, 0)
+					+ GREATEST(0, EXTRACT(EPOCH FROM ($2 - COALESCE(device_ups_info.last_online_time, $2)))::bigint),
+				updated_at = NOW()`,
+			deviceID, now); err != nil {
+			return false, fmt.Errorf("update UPS device info offline accounting: %w", err)
+		}
+	} else {
+		if _, err := tx.Exec(ctx, `
+			UPDATE device_info
+			   SET last_offline_time = $2,
+			       cumulative_online_duration = COALESCE(cumulative_online_duration, 0)
+			                                  + GREATEST(0, EXTRACT(EPOCH FROM ($2 - COALESCE(last_online_time, $2)))::bigint)
+			 WHERE device_id = $1`,
+			deviceID, now); err != nil {
+			return false, fmt.Errorf("update device_info offline accounting: %w", err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {

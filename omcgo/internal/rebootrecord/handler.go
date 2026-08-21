@@ -76,7 +76,7 @@ func parseFilter(c *gin.Context) Filter {
 // List godoc
 // @Summary 统一重启记录列表（event_logs ∪ station_fault_logs）
 // @Param device_sn   query string false "设备 SN（模糊匹配 ILIKE）"
-// @Param device_type query string false "设备类型：eNB / gNB"
+// @Param device_type query string false "设备类型：eNB / gNB / GSM / UPS"
 // @Param reboot_type query string false "重启类型：normal / abnormal / 空=全部"
 // @Param start_time  query string false "起始时间 RFC3339"
 // @Param end_time    query string false "结束时间 RFC3339"

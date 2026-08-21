@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
   Button,
   Space,
@@ -23,7 +23,9 @@ import {
   useRebootRecordList,
   useRebootRecordStatByDevice,
 } from '@core/hooks/api/useRebootRecord';
+import { useSystemLicense } from '@core/hooks/api/useSystemLicense';
 import { rebootRecordApi } from '@core/services/api/rebootRecordApi';
+import { isDeviceStandardValueVisibleByLicense } from '@core/utils/licenseFeatures';
 import type {
   RebootRecord,
   RebootRecordListParams,
@@ -31,7 +33,7 @@ import type {
   RebootType,
   DeviceRebootStat,
 } from '@core/services/api/rebootRecordApi';
-import { rebootRecordDeviceTypeOptions } from './filterOptions';
+import { getRebootRecordDeviceTypeOptions } from './filterOptions';
 
 // 「启动记录」页面（统一重启记录单列表）
 //
@@ -94,6 +96,23 @@ export default function AbnormalReboot() {
   const [selected, setSelected] = useState<RebootRecord | null>(null);
 
   const [statVisible, setStatVisible] = useState(false);
+  const { data: systemLicense, isLoading: systemLicenseLoading } = useSystemLicense();
+
+  useEffect(() => {
+    if (
+      systemLicenseLoading
+      || typeof filters.deviceType !== 'string'
+      || isDeviceStandardValueVisibleByLicense(filters.deviceType, systemLicense, false)
+    ) {
+      return;
+    }
+    setFilters((prev) => {
+      const next = { ...prev };
+      delete next.deviceType;
+      return next;
+    });
+    setPage(1);
+  }, [filters.deviceType, systemLicense, systemLicenseLoading]);
 
   // ----- 主列表查询参数（跟随筛选） -----
   const queryParams = useMemo<RebootRecordListParams>(() => {
@@ -164,11 +183,11 @@ export default function AbnormalReboot() {
         name: 'deviceType',
         label: t('log.exception.column.deviceType'),
         type: 'select',
-        options: [...rebootRecordDeviceTypeOptions],
+        options: getRebootRecordDeviceTypeOptions(systemLicense, systemLicenseLoading),
       },
       { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', span: 2 },
     ],
-    [t],
+    [systemLicense, systemLicenseLoading, t],
   );
 
   const columns: DataTableColumn<RebootRecord>[] = useMemo(
@@ -307,6 +326,13 @@ export default function AbnormalReboot() {
         render: (val: string) => val || '-',
       },
       {
+        title: t('log.exception.column.deviceType'),
+        dataIndex: 'deviceType',
+        key: 'deviceType',
+        width: 140,
+        render: (val: string) => val || '-',
+      },
+      {
         title: t('page.rebootRecords.stat.totalCount'),
         dataIndex: 'totalCount',
         key: 'totalCount',
@@ -342,6 +368,7 @@ export default function AbnormalReboot() {
     const rows = statRows.map((r) => ({
       [t('log.exception.column.deviceCode')]: r.deviceSn,
       [t('log.event.stat.deviceName')]: r.deviceName || '-',
+      [t('log.exception.column.deviceType')]: r.deviceType || '-',
       [t('page.rebootRecords.stat.totalCount')]: r.totalCount,
       [t('page.rebootRecords.stat.abnormalCount')]: r.abnormalCount,
       [t('log.event.stat.latestAt')]: fmtTime(r.latestAt),
@@ -504,7 +531,7 @@ export default function AbnormalReboot() {
         open={statVisible}
         onCancel={() => setStatVisible(false)}
         footer={null}
-        width={820}
+        width={900}
       >
         <Space style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end' }}>
           <Button

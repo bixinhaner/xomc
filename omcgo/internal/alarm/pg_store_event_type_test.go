@@ -71,6 +71,11 @@ func TestNormalizedTechnologyAliases(t *testing.T) {
 			input:    "gNB",
 			expected: []string{"gnb", "nr", "5gnr", "gnodeb"},
 		},
+		{
+			name:     "ups option maps to ups bucket",
+			input:    "UPS",
+			expected: []string{"ups"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -86,4 +91,14 @@ func TestNormalizedTechnologyExprIncludesAliases(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, sql, "LOWER(COALESCE(technology, ''))")
 	assert.Equal(t, []interface{}{"enb", "lte", "enodeb"}, args)
+}
+
+func TestAlarmTechnologyExprDerivesUPSFromProductClass(t *testing.T) {
+	expr := alarmTechnologyExpr("alarms_active", "d")
+
+	assert.Contains(t, expr, "d.product_class")
+	assert.Contains(t, expr, "alarms_active.alarm_source")
+	assert.Contains(t, expr, "LIKE 'UPS%'")
+	assert.Contains(t, expr, "NULLIF(alarms_active.technology, '')")
+	assert.Contains(t, expr, "NULLIF(d.technology, '')")
 }

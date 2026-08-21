@@ -53,12 +53,13 @@ const { Dragger } = Upload;
 const { TextArea } = Input;
 
 // 文件类型枚举
-type FileType = 'upgrade' | 'patch' | 'fpga';
+type FileType = 'upgrade' | 'patch' | 'ap' | 'fpga';
 
 // 文件类型 tab 到后端 fileType 的映射
-const fileTypeParamMap: Record<FileType, 0 | 1 | 6> = {
+const fileTypeParamMap: Record<FileType, 0 | 1 | 5 | 6> = {
   upgrade: 0,
   patch: 1,
+  ap: 5,
   fpga: 6,
 };
 
@@ -402,6 +403,7 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
     const nameMap: Record<FileType, string> = {
       upgrade: 'IMAGE',
       patch: 'PATCH',
+      ap: t('software.firmware.apFile'),
       fpga: t('software.firmware.fpgaFile'),
     };
     return nameMap[fileType];
@@ -455,6 +457,7 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
         >
           <Radio.Button value="upgrade">IMAGE</Radio.Button>
           <Radio.Button value="patch">PATCH</Radio.Button>
+          <Radio.Button value="ap">{t('software.firmware.apFile')}</Radio.Button>
           <Radio.Button value="fpga">{t('software.firmware.fpgaFile')}</Radio.Button>
         </Radio.Group>
         <Button type="primary" icon={<InboxOutlined />} onClick={() => handleOpenImportDrawer('add')}>
@@ -556,7 +559,7 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
                 {t('software.firmware.fileName')}
                 {importMode === 'add' && (
                   <span style={{ color: '#999', fontSize: 12 }}>
-                    ({t('software.firmware.supportFormat', { format: fileType === 'upgrade' ? 'IMG / EXT' : fileType === 'patch' ? 'Patch' : 'IMG' })})
+                    ({t('software.firmware.supportFormat', { format: fileType === 'upgrade' ? 'IMG / EXT' : fileType === 'patch' ? 'Patch' : fileType === 'ap' ? 'IMG / BIN' : 'IMG' })})
                   </span>
                 )}
               </Space>

@@ -15,7 +15,7 @@
  *   b. 一级 ne-types 表删除"来源(builtin/custom)"列,保留"加载源(loaded_from)"列。
  *   c. 所有文件均可删除,去掉 deletable 置灰守门。
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Card,
@@ -44,11 +44,16 @@ import {
   useAlarmDeleteFile,
   useAlarmDownloadXml,
 } from '@core/hooks/api/useAlarmDefinitions';
+import { useSystemLicense } from '@core/hooks/api/useSystemLicense';
 import type {
   AlarmDefinition,
   AlarmDefinitionFilter,
   AlarmNeTypeStat,
 } from '@core/types/alarmDefinition';
+import {
+  filterDeviceScopedItemsByLicense,
+  isDeviceStandardValueVisibleByLicense,
+} from '@core/utils/licenseFeatures';
 import AlarmDefinitionDrawer from './AlarmDefinitionDrawer';
 import AlarmUploadXmlModal from './AlarmUploadXmlModal';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
@@ -97,7 +102,10 @@ export default function AlarmLibraryPage() {
     }
     return value === EMPTY_LOADED_FROM ? '' : value;
   })();
-  const inDetail = Boolean(selectedNeType);
+  const { data: systemLicense, isLoading: systemLicenseLoading } = useSystemLicense();
+  const selectedNeTypeVisible = !selectedNeType
+    || isDeviceStandardValueVisibleByLicense(selectedNeType, systemLicense, systemLicenseLoading);
+  const inDetail = Boolean(selectedNeType && selectedNeTypeVisible);
 
   const setSelectedNeType = (next: string | undefined, loadedFrom?: string) => {
     const params = new URLSearchParams(searchParams);
@@ -122,17 +130,26 @@ export default function AlarmLibraryPage() {
   const [nePageSize, setNePageSize] = useState(PRODUCT_TABLE_DEFAULT_PAGE_SIZE);
   const { data: neTypesData, isLoading: isNeTypesLoading } = useAlarmNeTypeStats();
   const neTypesItems = useMemo<AlarmNeTypeStat[]>(() => {
-    const all = neTypesData?.items || [];
+    const all = filterDeviceScopedItemsByLicense(neTypesData?.items || [], systemLicense, systemLicenseLoading);
     const kw = neKeyword.trim().toLowerCase();
     if (!kw) return all;
     return all.filter((row) => row.neType.toLowerCase().includes(kw));
-  }, [neTypesData, neKeyword]);
+  }, [neTypesData, neKeyword, systemLicense, systemLicenseLoading]);
 
   // ── 二级(AlarmDefinition 详情) ─────────────────────────────────
   const [detailFilter, setDetailFilter] = useState<AlarmDefinitionFilter>({
     page: 1,
     pageSize: PRODUCT_TABLE_DEFAULT_PAGE_SIZE,
   });
+  useEffect(() => {
+    if (systemLicenseLoading || !selectedNeType) return;
+    if (isDeviceStandardValueVisibleByLicense(selectedNeType, systemLicense, false)) return;
+    const params = new URLSearchParams(searchParams);
+    params.delete('neType');
+    params.delete('loadedFrom');
+    setDetailFilter({ page: 1, pageSize: PRODUCT_TABLE_DEFAULT_PAGE_SIZE });
+    setSearchParams(params, { replace: true });
+  }, [searchParams, selectedNeType, setSearchParams, systemLicense, systemLicenseLoading]);
   const detailQueryFilter = useMemo<AlarmDefinitionFilter>(
     () => (
       selectedNeType

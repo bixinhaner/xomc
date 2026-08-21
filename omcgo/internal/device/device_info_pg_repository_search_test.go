@@ -12,10 +12,11 @@ func TestDeviceListSearchFields(t *testing.T) {
 	assert.Equal(t, []string{
 		"d.serial_number",
 		"d.site_name",
+		"COALESCE(udi.site_id, d.site_id)",
 		"d.manufacturer",
 		"d.model_name",
-		"di.device_name",
-		"di.address",
+		"COALESCE(udi.device_name, di.device_name)",
+		"COALESCE(udi.address, di.address)",
 		"host(d.ip_address)",
 		"di.mac",
 		"di.pci",

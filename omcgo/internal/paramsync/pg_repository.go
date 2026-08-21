@@ -219,10 +219,11 @@ func (r *PGRepository) ListRegisteredSyncCandidates(ctx context.Context, limit i
 			},
 		})
 	query, args, err := storage.Psql.
-		Select("d.id", "d.serial_number").
+		Select("d.id", "d.serial_number", "COALESCE(d.product_class, '')").
 		From("devices d").
 		LeftJoin("parameter_sync_device_state state ON state.device_id = d.id").
 		Where(sq.Eq{"d.deleted_at": nil}).
+		Where("COALESCE(d.product_class, '') NOT LIKE 'UPS%'").
 		Where("d.extension_data ->> '_system_registration_source_event_id' IS NOT NULL").
 		Where("(state.next_auto_sync_at IS NULL OR state.next_auto_sync_at <= now())").
 		Where(sq.Expr("NOT EXISTS (?)", covered)).
@@ -242,7 +243,7 @@ func (r *PGRepository) ListRegisteredSyncCandidates(ctx context.Context, limit i
 	devices := make([]*model.Device, 0)
 	for rows.Next() {
 		dev := &model.Device{}
-		if err := rows.Scan(&dev.ID, &dev.SerialNumber); err != nil {
+		if err := rows.Scan(&dev.ID, &dev.SerialNumber, &dev.ProductClass); err != nil {
 			return nil, fmt.Errorf("scan registered parameter sync candidate: %w", err)
 		}
 		devices = append(devices, dev)

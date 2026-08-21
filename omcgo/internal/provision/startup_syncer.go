@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/device"
 	"go.uber.org/zap"
 )
 
@@ -93,6 +94,12 @@ func (s *StartupSyncer) Run(ctx context.Context) error {
 			}
 		}
 		for _, dev := range devices {
+			if device.IsUPSProductClass(dev.ProductClass) {
+				s.logger.Info("OMC redeploy parameter sync skipped for UPS device",
+					zap.String("trigger", "omc_redeploy"), zap.String("redeploy_id", s.runID.String()),
+					zap.String("device_id", dev.ID.String()), zap.String("device_sn", dev.SerialNumber))
+				continue
+			}
 			key := "omc-redeploy:" + uuid.NewSHA1(s.runID, []byte(dev.ID.String())).String()
 			sourceEventID := "omc-redeploy:" + s.runID.String() + ":" + dev.ID.String()
 			result, err := s.submitWithRetry(ctx, dev, key, sourceEventID)

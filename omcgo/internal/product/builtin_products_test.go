@@ -109,6 +109,26 @@ func TestBuiltinProducts_ParamModelsReferenceLoadableXML(t *testing.T) {
 	}
 }
 
+func TestBuiltinProducts_UPSIsInformOnlyProduct(t *testing.T) {
+	doc := loadBuiltinProductsForTest(t)
+
+	var ups *xmlProduct
+	for i := range doc.Products {
+		if doc.Products[i].Name == "UPS" {
+			ups = &doc.Products[i]
+			break
+		}
+	}
+	require.NotNil(t, ups, "products.xml 应内置 UPS 产品")
+	assert.Equal(t, "UPS", ups.ParamModel, "UPS 产品目录应绑定 UPS 参数模型名称用于标准化展示")
+	assert.Equal(t, "false", ups.EnableFileType11, "UPS 不支持 FileType=11 参数模型上传")
+	assert.Empty(t, ups.Indicator.DeviceType, "UPS 不接入 KPI 指标 deviceType")
+	assert.Empty(t, ups.Indicator.Platform, "UPS 不接入 KPI 指标平台")
+	assert.Equal(t, "UPS", ups.Alarm.NeType, "UPS 仍需绑定 UPS 告警库")
+	require.Len(t, ups.Patterns, 1)
+	assert.Equal(t, "^UPS.*", ups.Patterns[0].Value)
+}
+
 func TestBuiltinProducts_BLNProductClassRules(t *testing.T) {
 	doc := loadBuiltinProductsForTest(t)
 

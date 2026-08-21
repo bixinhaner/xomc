@@ -95,16 +95,17 @@ func (m *svcMockTaskRepo) ListActiveCanaryTaskIDs(_ context.Context) ([]uuid.UUI
 }
 
 type svcMockSubTaskRepo struct {
-	createFn            func(ctx context.Context, task *UpgradeSubTask) error
-	updateStatusFn      func(ctx context.Context, id uuid.UUID, status UpgradeState, msg string) error
-	listByTaskIDFn      func(ctx context.Context, taskID uuid.UUID, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error)
-	getByIDFn           func(ctx context.Context, id uuid.UUID) (*UpgradeSubTask, error)
-	getActiveByDeviceFn func(ctx context.Context, deviceID uuid.UUID) (*UpgradeSubTask, error)
-	getByCommandKeyFn   func(ctx context.Context, commandKey string) (*UpgradeSubTask, error)
-	batchCreateFn       func(ctx context.Context, tasks []*UpgradeSubTask) error
-	updateDestByIDFn    func(ctx context.Context, id uuid.UUID, destVersion string) error
-	failStaleFn         func(ctx context.Context, cutoffs StaleTimeouts) (StaleFailures, error)
-	failStaleDetailsFn  func(ctx context.Context, cutoffs StaleTimeouts) ([]UpgradeSubTask, error)
+	createFn               func(ctx context.Context, task *UpgradeSubTask) error
+	updateStatusFn         func(ctx context.Context, id uuid.UUID, status UpgradeState, msg string) error
+	updateStatusWithCodeFn func(ctx context.Context, id uuid.UUID, status UpgradeState, msg string, code FailureCode) error
+	listByTaskIDFn         func(ctx context.Context, taskID uuid.UUID, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error)
+	getByIDFn              func(ctx context.Context, id uuid.UUID) (*UpgradeSubTask, error)
+	getActiveByDeviceFn    func(ctx context.Context, deviceID uuid.UUID) (*UpgradeSubTask, error)
+	getByCommandKeyFn      func(ctx context.Context, commandKey string) (*UpgradeSubTask, error)
+	batchCreateFn          func(ctx context.Context, tasks []*UpgradeSubTask) error
+	updateDestByIDFn       func(ctx context.Context, id uuid.UUID, destVersion string) error
+	failStaleFn            func(ctx context.Context, cutoffs StaleTimeouts) (StaleFailures, error)
+	failStaleDetailsFn     func(ctx context.Context, cutoffs StaleTimeouts) ([]UpgradeSubTask, error)
 }
 
 func (m *svcMockSubTaskRepo) Create(ctx context.Context, task *UpgradeSubTask) error {
@@ -179,7 +180,10 @@ func TestListAllSubTasksByTaskID_PagesAll(t *testing.T) {
 func (m *svcMockSubTaskRepo) ListAll(_ context.Context, _ AllSubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
 	return model.NewListResponse([]UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil
 }
-func (m *svcMockSubTaskRepo) UpdateStatusWithCode(_ context.Context, id uuid.UUID, status UpgradeState, msg string, _ FailureCode) error {
+func (m *svcMockSubTaskRepo) UpdateStatusWithCode(ctx context.Context, id uuid.UUID, status UpgradeState, msg string, code FailureCode) error {
+	if m.updateStatusWithCodeFn != nil {
+		return m.updateStatusWithCodeFn(ctx, id, status, msg, code)
+	}
 	if m.updateStatusFn != nil {
 		return m.updateStatusFn(context.Background(), id, status, msg)
 	}
@@ -640,6 +644,62 @@ func TestService_BatchUpgrade_PersistsDownloadFileTypeOverride(t *testing.T) {
 	assert.Equal(t, "Firmware Upgrade Fpga", createdTask.DownloadFileType)
 }
 
+func TestService_BatchUpgrade_UsesProductClassHintWhenFirmwareClassBlank(t *testing.T) {
+	deviceID := uuid.New()
+	firmwareID := uuid.New()
+	var createdTask *UpgradeTask
+
+	fwRepo := &svcMockFirmwareRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*FirmwareVersion, error) {
+			require.Equal(t, firmwareID, id)
+			return &FirmwareVersion{
+				ID:        firmwareID,
+				Version:   "UPS-AP-V1.0.0",
+				FileName:  "ups-ap.bin",
+				MD5Val:    "abc123",
+				MinIOPath: "firmware/ap/UPS/UPS-AP-V1.0.0/ups-ap.bin",
+				FileSize:  2048,
+				FileType:  FileTypeAP,
+			}, nil
+		},
+	}
+	taskRepo := &svcMockTaskRepo{
+		createFn: func(_ context.Context, task *UpgradeTask) error {
+			task.ID = uuid.New()
+			copyTask := *task
+			createdTask = &copyTask
+			return nil
+		},
+	}
+
+	svc := NewSoftwareService(
+		fwRepo,
+		taskRepo,
+		&svcMockSubTaskRepo{},
+		&svcMockDeviceRepo{},
+		&svcMockCmdQueue{},
+		nil,
+		nil,
+		"test-bucket",
+		&svcMockEventBus{},
+		nil,
+		zap.NewNop(),
+	)
+
+	_, err := svc.BatchUpgrade(context.Background(), BatchUpgradeRequest{
+		DeviceIDs:        []uuid.UUID{deviceID},
+		FirmwareID:       firmwareID,
+		TaskName:         "ups-ap-upgrade",
+		TaskType:         TaskTypeUpgrade,
+		DownloadFileType: "1 Firmware Upgrade Image",
+		ProductClassHint: "UPS",
+		CreateSuspended:  true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, createdTask)
+	assert.Equal(t, "UPS", createdTask.ProductClass)
+}
+
 func TestService_BatchUpgrade_PersistsCreateUserFromRequest(t *testing.T) {
 	deviceID := uuid.New()
 	firmwareID := uuid.New()
@@ -866,6 +926,77 @@ func TestService_HandleTransferComplete_MatchingCommandKeySuccess(t *testing.T) 
 	err = svc.HandleTransferComplete(context.Background(), evt)
 	require.NoError(t, err)
 	assert.Equal(t, UpgradeCompleted, updatedStatus)
+}
+
+func TestService_HandleTransferComplete_UPSWaitsForBootVersionVerification(t *testing.T) {
+	deviceID := uuid.New()
+	taskID := uuid.New()
+	subTaskID := uuid.New()
+	commandKey := "Download Upgrade," + subTaskID.String()
+
+	deviceRepo := &svcMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			require.Equal(t, "SN-UPS-TC-001", sn)
+			return &model.Device{
+				ID:           deviceID,
+				SerialNumber: sn,
+				ProductClass: "UPS_M3_BMU",
+				Technology:   model.TechLTE,
+			}, nil
+		},
+	}
+	taskRepo := &svcMockTaskRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*UpgradeTask, error) {
+			require.Equal(t, taskID, id)
+			return &UpgradeTask{ID: taskID, TaskType: TaskTypeUpgrade}, nil
+		},
+		incrementCountsFn: func(_ context.Context, _ uuid.UUID, _, _ int) error {
+			t.Fatalf("UPS TransferComplete must not complete the sub-task before 1 BOOT verification")
+			return nil
+		},
+	}
+
+	var updatedStatus UpgradeState
+	subTaskRepo := &svcMockSubTaskRepo{
+		getByCommandKeyFn: func(_ context.Context, got string) (*UpgradeSubTask, error) {
+			require.Equal(t, commandKey, got)
+			return &UpgradeSubTask{
+				ID:          subTaskID,
+				TaskID:      taskID,
+				Status:      UpgradeDownloading,
+				DeviceID:    deviceID,
+				DeviceSN:    "SN-UPS-TC-001",
+				CommandKey:  commandKey,
+				DestVersion: "UPS-AP-V1.0.1",
+			}, nil
+		},
+		updateStatusFn: func(_ context.Context, id uuid.UUID, status UpgradeState, _ string) error {
+			require.Equal(t, subTaskID, id)
+			updatedStatus = status
+			return nil
+		},
+	}
+
+	svc := NewSoftwareService(
+		&svcMockFirmwareRepo{},
+		taskRepo,
+		subTaskRepo,
+		deviceRepo,
+		&svcMockCmdQueue{}, nil, nil, "test-bucket",
+		&svcMockEventBus{}, nil, zap.NewNop(),
+	)
+
+	evt, err := event.NewEvent(event.SubjectDeviceTransferComplete, map[string]any{
+		"command_key": commandKey,
+		"fault_struct": map[string]any{
+			"fault_code":   0,
+			"fault_string": "",
+		},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.HandleTransferComplete(context.Background(), evt))
+	assert.Equal(t, UpgradeRebooting, updatedStatus)
 }
 
 func TestService_HandleTransferComplete_LegacyDeviceSNPayloadIgnored(t *testing.T) {

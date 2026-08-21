@@ -97,6 +97,19 @@ func TestStartupSyncerLogsOMCRedeployLifecycle(t *testing.T) {
 	require.Equal(t, started[0].ContextMap()["redeploy_id"], completed[0].ContextMap()["redeploy_id"])
 }
 
+func TestStartupSyncerSkipsUPSDevices(t *testing.T) {
+	ups := &model.Device{ID: uuid.New(), SerialNumber: "ups-device", ProductClass: "UPS_M3_BMU"}
+	radio := &model.Device{ID: uuid.New(), SerialNumber: "radio-device", ProductClass: "FAP/TEST"}
+	submitter := &startupSubmitter{}
+	s := NewStartupSyncer(
+		&startupPageLister{pages: [][]*model.Device{{ups, radio}}},
+		submitter, nil, 200, zap.NewNop(),
+	)
+
+	require.NoError(t, s.Run(context.Background()))
+	require.Equal(t, []string{"radio-device"}, submitter.calls)
+}
+
 func TestStartupSyncerNonLeaderDoesNothing(t *testing.T) {
 	lister := &startupPageLister{}
 	s := NewStartupSyncer(lister, &startupSubmitter{}, &fakeLeader{acquired: false}, 200, zap.NewNop())

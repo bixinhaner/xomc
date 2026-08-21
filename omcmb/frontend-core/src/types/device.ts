@@ -27,6 +27,8 @@ export type CarrierCode = 'cmcc' | 'ctcc' | 'cucc';
 // 制式 — 与后端 model.Technology 对齐（lte/nr）。
 export type DeviceTechnology = 'lte' | 'nr';
 
+export type DeviceListDeviceType = 'BASE_STATION' | 'UPS' | 'ALL';
+
 // 手动注册设备入参（与后端 device.CreateDeviceRequest 一一对应）。
 // 字段语义：
 //   - serialNumber / oui / carrier / technology 后端 required + oneof 校验
@@ -45,6 +47,32 @@ export interface CreateDeviceInput {
   siteId?: string;
   latitude?: number;
   longitude?: number;
+}
+
+export interface UPSRuntimeSummary {
+  externalIp?: string;
+  totalVoltage?: string;
+  totalTemperature?: string;
+  totalCurrent?: string;
+  softwareVersion?: string;
+  hardwareVersion?: string;
+  manufacturer?: string;
+  manufacturerOui?: string;
+  upTimeSeconds?: number;
+  bmsCharging?: string;
+  acPower?: string;
+  acVoltage?: string;
+  dcVoltage?: string;
+  dcCurrent?: string;
+  boardTemperature?: string;
+  sfpState?: string;
+  port0State?: string;
+  port1State?: string;
+  port2State?: string;
+  port3State?: string;
+  averageSoc?: number;
+  packCounts?: number;
+  lastInformAt?: string;
 }
 
 // 批量导入单行数据（wire 层 snake_case，与后端 device.BatchImportDeviceRow 一一对应）。
@@ -87,6 +115,8 @@ export interface BatchPreRegisterDevice {
   serial_number: string;
   device_name?: string;
   remark?: string;
+  /** TR-069 ProductClass。UPS 预登记可填 UPS*，设备上线后由 Inform 上报值覆盖。 */
+  product_class?: string;
   /** 运营商：cmcc / ctcc / cucc。为空时后端从 SN 前6位推断 OUI → CarrierRegistry。 */
   carrier?: 'cmcc' | 'ctcc' | 'cucc';
   /** 制式：lte / nr。为空时后端默认 lte。 */
@@ -130,6 +160,8 @@ export interface Device {
   vendor: string;
   productClass: string;
   networkType: string;
+  deviceType?: DeviceListDeviceType | string;
+  upsSummary?: UPSRuntimeSummary;
   deviceModel: string;
   region: string;
   stationId: string;
@@ -380,6 +412,8 @@ export interface DeviceFilter {
   snList?: string[];
   vendor?: string;
   productClass?: string;
+  /** 设备列表 Tab：BASE_STATION=既有基站视图，UPS=UPS 专属视图 */
+  deviceType?: DeviceListDeviceType;
   networkType?: string;
   /**
    * T-0162 DEPRECATED: 用 `lifecycleState` + `isOnline` 替代。

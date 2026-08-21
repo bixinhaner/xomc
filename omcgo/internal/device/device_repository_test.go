@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -228,7 +229,8 @@ func TestDeviceColumnsIncludeProductParameterBindings(t *testing.T) {
 // FindStaleDevicesByClass 在同一方法里内联构建 SQL 后立即 r.pool.Query，pool
 // 是具体 *pgxpool.Pool（非接口），无法注入 fake 捕获 SQL；故此处按生产方法
 // 完全相同的方式重建同一个 squirrel builder 再 ToSql 断言。CASE / CPE 谓词
-// 直接引用生产常量 cpeProductClassPredicate，CPE-分支顺序与谓词内容锚定生产；
+// 直接引用生产常量 upsProductClassPredicate/cpeProductClassPredicate，UPS/CPE
+// 分支顺序与谓词内容锚定生产；
 // make_interval / 占位符绑定顺序逐字镜像 device_repository.go，二者改动须同步。
 // ---------------------------------------------------------------------------
 
@@ -237,10 +239,11 @@ func TestDeviceColumnsIncludeProductParameterBindings(t *testing.T) {
 //
 // 注意：这是生产 builder 段的逐字镜像。若 FindStaleDevicesByClass 改了 SELECT 列、
 // WHERE 谓词、staleExpr 表达式或占位符绑定顺序，必须同步本函数，否则本测试失去回归意义。
-func buildFindStaleByClassSQLForTest(t *testing.T, cpeThresholdSec, enbThresholdSec, limit int) (string, []interface{}) {
+func buildFindStaleByClassSQLForTest(t *testing.T, upsThresholdSec, cpeThresholdSec, enbThresholdSec, limit int) (string, []interface{}) {
 	t.Helper()
 	staleExpr := fmt.Sprintf(
-		"d.last_inform_at < NOW() - make_interval(secs => (CASE WHEN %s THEN (?)::int ELSE (?)::int END))",
+		"d.last_inform_at < NOW() - make_interval(secs => (CASE WHEN %s THEN (?)::int WHEN %s THEN (?)::int ELSE (?)::int END))",
+		upsProductClassPredicate,
 		cpeProductClassPredicate,
 	)
 	builder := storage.Psql.Select(deviceColumns()...).
@@ -248,7 +251,7 @@ func buildFindStaleByClassSQLForTest(t *testing.T, cpeThresholdSec, enbThreshold
 		Where(sq.Eq{"d.is_online": true}).
 		Where(notDeleted).
 		Where("d.last_inform_at IS NOT NULL").
-		Where(staleExpr, cpeThresholdSec, enbThresholdSec).
+		Where(staleExpr, upsThresholdSec, cpeThresholdSec, enbThresholdSec).
 		OrderBy("d.last_inform_at ASC").
 		Limit(uint64(limit))
 
@@ -259,15 +262,16 @@ func buildFindStaleByClassSQLForTest(t *testing.T, cpeThresholdSec, enbThreshold
 
 // TestFindStaleDevicesByClass_SQLBuild_MakeIntervalAndCaseOrdering 断言离线判定
 // SQL 用 make_interval(secs => (?)::int) 造 interval（绕开 text*interval，issue #203
-// 回合2），CASE WHEN 把 CPE 谓词分支排在 ELSE（基站 eNB）之前，且占位参数按
-// cpeThresholdSec → enbThresholdSec → limit 的顺序绑定。
+// 回合2），CASE WHEN 把 UPS、CPE 谓词分支排在 ELSE（基站 eNB）之前，且占位参数按
+// upsThresholdSec → cpeThresholdSec → enbThresholdSec → limit 的顺序绑定。
 func TestFindStaleDevicesByClass_SQLBuild_MakeIntervalAndCaseOrdering(t *testing.T) {
 	const (
+		ups   = 300
 		cpe   = 600
 		enb   = 100
 		limit = 1000
 	)
-	query, args := buildFindStaleByClassSQLForTest(t, cpe, enb, limit)
+	query, args := buildFindStaleByClassSQLForTest(t, ups, cpe, enb, limit)
 
 	// 1) make_interval(secs => (?)::int) 表达式必须出现（修复 text*interval 42883）。
 	assert.Contains(t, query, "make_interval(secs =>",
@@ -275,15 +279,18 @@ func TestFindStaleDevicesByClass_SQLBuild_MakeIntervalAndCaseOrdering(t *testing
 	assert.Contains(t, query, "::int",
 		"秒数必须显式 cast 成 int 再喂 make_interval")
 
-	// 2) CASE WHEN <CPE 谓词> THEN ... ELSE ...：CPE 分支必须排在 ELSE（eNB）之前。
+	// 2) CASE WHEN <UPS 谓词> THEN ... WHEN <CPE 谓词> THEN ... ELSE ...。
 	assert.Contains(t, query, "CASE WHEN", "阈值选取必须用 CASE WHEN 分类")
 	caseIdx := strings.Index(query, "CASE WHEN")
+	upsIdx := strings.Index(query, "LIKE 'UPS%'")
 	cpeIdx := strings.Index(query, "ILIKE '%cpe%'")
 	elseIdx := strings.Index(query, "ELSE")
 	require.GreaterOrEqual(t, caseIdx, 0, "SQL 应含 CASE WHEN")
+	require.GreaterOrEqual(t, upsIdx, 0, "SQL 应含 UPS 谓词 LIKE 'UPS%'")
 	require.GreaterOrEqual(t, cpeIdx, 0, "SQL 应含 CPE 谓词 ILIKE '%cpe%'")
 	require.GreaterOrEqual(t, elseIdx, 0, "SQL 应含 ELSE 兜底（基站 eNB）分支")
-	assert.Less(t, caseIdx, cpeIdx, "CPE 谓词必须在 CASE WHEN 之后")
+	assert.Less(t, caseIdx, upsIdx, "UPS 谓词必须在 CASE WHEN 之后")
+	assert.Less(t, upsIdx, cpeIdx, "UPS 分支必须先于 CPE 分支")
 	assert.Less(t, cpeIdx, elseIdx, "CPE 分支（THEN）必须排在 ELSE（eNB）之前")
 
 	// CPE 谓词的四个关键字都在 THEN 之前（即 CPE 分支内）。
@@ -294,13 +301,15 @@ func TestFindStaleDevicesByClass_SQLBuild_MakeIntervalAndCaseOrdering(t *testing
 	}
 
 	// 3) 占位参数绑定顺序：WHERE 子句按出现顺序收集 args——
-	//    is_online=true（$1）→ staleExpr 的 CPE 分支(THEN, $2)=cpe → ELSE($3)=enb。
+	//    is_online=true（$1）→ staleExpr 的 UPS 分支(THEN, $2)=ups
+	//    → CPE 分支($3)=cpe → ELSE($4)=enb。
 	//    notDeleted / last_inform_at IS NOT NULL 不带占位参数；
-	//    Limit 由 squirrel 渲染为字面量 `LIMIT 1000`，不占位（故 args 只有 3 个）。
-	require.Len(t, args, 3, "占位参数：is_online、cpe 阈值、enb 阈值（limit 是字面量不占位）")
+	//    Limit 由 squirrel 渲染为字面量 `LIMIT 1000`，不占位（故 args 只有 4 个）。
+	require.Len(t, args, 4, "占位参数：is_online、ups 阈值、cpe 阈值、enb 阈值（limit 是字面量不占位）")
 	assert.EqualValues(t, true, args[0], "args[0] 是 is_online=true 谓词")
-	assert.EqualValues(t, cpe, args[1], "args[1] 必须绑 cpeThresholdSec（CPE 分支 THEN，$2 在 ELSE 之前）")
-	assert.EqualValues(t, enb, args[2], "args[2] 必须绑 enbThresholdSec（ELSE 基站分支，$3）")
+	assert.EqualValues(t, ups, args[1], "args[1] 必须绑 upsThresholdSec（UPS 分支 THEN）")
+	assert.EqualValues(t, cpe, args[2], "args[2] 必须绑 cpeThresholdSec（CPE 分支 THEN，$3 在 ELSE 之前）")
+	assert.EqualValues(t, enb, args[3], "args[3] 必须绑 enbThresholdSec（ELSE 基站分支，$4）")
 
 	// 4) 基本结构：在线 + 未软删 + last_inform_at 非空 + 按 last_inform_at 升序 + LIMIT 字面量。
 	assert.Contains(t, query, "d.is_online")
@@ -311,37 +320,37 @@ func TestFindStaleDevicesByClass_SQLBuild_MakeIntervalAndCaseOrdering(t *testing
 }
 
 // TestFindStaleDevicesByClass_NullProductClass_FallsIntoENBBranch 是 NULL
-// product_class 边界的 DB-free 断言：CASE 谓词全部走 `product_class ILIKE '%...%'`，
-// 当 product_class 为 SQL NULL 时，`NULL ILIKE '%cpe%'` 求值为 NULL（非 TRUE），
-// CASE WHEN 的所有分支条件均不满足 → 落入 ELSE（基站 eNB 阈值）分支。
+// product_class 边界的 DB-free 断言：UPS 分支用 COALESCE 后为 false，CPE 分支的
+// `NULL ILIKE '%cpe%'` 求值为 NULL（非 TRUE），CASE WHEN 的所有分支条件均不满足
+// → 落入 ELSE（基站 eNB 阈值）分支。
 // 这从 SQL/CASE 形状层面证明：NULL product_class 设备按基站阈值（enb）判离线，
 // 不会被误用 CPE 阈值（cpe）。真正在 PG 上的求值验证见下方 //go:build integration 版本。
 func TestFindStaleDevicesByClass_NullProductClass_FallsIntoENBBranch(t *testing.T) {
-	query, args := buildFindStaleByClassSQLForTest(t, 600, 100, 1000)
+	query, args := buildFindStaleByClassSQLForTest(t, 300, 600, 100, 1000)
 
-	// CPE 分类完全依赖 product_class 的 ILIKE 模式匹配——没有对 NULL 的显式兜底
-	// （如 COALESCE(product_class,'') 或 IS NOT NULL），因此 NULL 三值逻辑下
-	// CPE 分支不可能为 TRUE，必然落 ELSE。
+	// UPS 分支用 COALESCE，NULL → '' → LIKE 'UPS%' 为 false；CPE 分类仍依赖
+	// product_class 的 ILIKE 模式匹配，没有对 NULL 的显式兜底。因此 NULL 不会命中
+	// UPS/CPE，必然落 ELSE。
 	caseStart := strings.Index(query, "CASE WHEN")
 	caseEnd := strings.Index(query, "END")
 	require.GreaterOrEqual(t, caseStart, 0)
 	require.Greater(t, caseEnd, caseStart, "SQL 应含完整 CASE ... END")
 	caseExpr := query[caseStart : caseEnd+len("END")]
 
-	// CASE 谓词只用 product_class ILIKE，未对 NULL 做 COALESCE/IS NULL 兜底，
-	// 故 NULL product_class 三值逻辑下走 ELSE 分支。
+	// CASE 谓词中 UPS 分支允许 COALESCE；CPE 分支只用 product_class ILIKE，未用
+	// COALESCE/IS NULL 兜底，故 NULL product_class 仍走 ELSE 分支。
+	assert.Contains(t, caseExpr, "COALESCE",
+		"UPS 分类使用 COALESCE 将 NULL 显式归为非 UPS")
 	assert.Contains(t, caseExpr, "product_class ILIKE",
 		"CPE 分类只靠 product_class ILIKE 模式匹配")
-	assert.NotContains(t, caseExpr, "COALESCE",
-		"未对 product_class NULL 做 COALESCE 兜底——NULL 必落 ELSE（eNB）")
 	assert.NotContains(t, caseExpr, "IS NULL",
 		"CASE 谓词未显式处理 NULL——NULL ILIKE 求值 NULL→非 TRUE→走 ELSE（eNB）")
 	assert.Contains(t, caseExpr, "ELSE", "必须有 ELSE 兜底承接 NULL/非 CPE 设备")
 
-	// ELSE 分支绑的是 enbThresholdSec（args[2]，$3）——即 NULL product_class 设备用基站阈值。
-	// args 顺序见 SQLBuild 测试：[is_online, cpe($2,THEN), enb($3,ELSE)]。
-	require.Len(t, args, 3)
-	assert.EqualValues(t, 100, args[2], "ELSE（NULL/eNB）分支用 enbThresholdSec（$3）")
+	// ELSE 分支绑的是 enbThresholdSec（args[3]，$4）——即 NULL product_class 设备用基站阈值。
+	// args 顺序见 SQLBuild 测试：[is_online, ups($2), cpe($3), enb($4,ELSE)]。
+	require.Len(t, args, 4)
+	assert.EqualValues(t, 100, args[3], "ELSE（NULL/eNB）分支用 enbThresholdSec（$4）")
 }
 
 // TestAlarmSeverityTextToCodes 锁定 #361 文本↔severity 编码映射：
@@ -401,6 +410,12 @@ func TestDeviceWithInfoSelectColumns_AlarmAggregation(t *testing.T) {
 	assert.Contains(t, joined, "AS param_sync_running", "列表 DTO 必须暴露参数同步动态状态列")
 	assert.Contains(t, joined, "parameter_sync_requests", "durable paramsync 请求未终态时应显示同步中")
 	assert.Contains(t, joined, "parameter_sync_runs", "durable paramsync 运行未终态时应显示同步中")
+	assert.Contains(t, joined, "udi.device_name", "UPS 名称必须来自 device_ups_info")
+	assert.Contains(t, joined, "udi.first_online_time", "UPS 首次上线时间必须来自 device_ups_info")
+	assert.Contains(t, joined, "udi.run_time", "UPS 运行时长必须来自 device_ups_info")
+	assert.Contains(t, radioDeviceInfoJoinSQL, "NOT LIKE 'UPS%'", "device_info JOIN 必须排除 UPS")
+	assert.Contains(t, upsDeviceInfoJoinSQL, "device_ups_info", "UPS 必须 JOIN 独立信息表")
+	assert.NotContains(t, joined, "device_ups_runtime", "UPS 一对一运行态字段必须合并到 device_ups_info")
 	assert.NotContains(t, joined, "device_tasks dt", "旧 Path B sync-gpv 任务已废弃，动态状态不得依赖 device_tasks")
 	assert.NotContains(t, joined, "sync-gpv-", "动态状态只认 durable parameter_sync_* 数据面")
 	assert.NotContains(t, joined, "di.alarm_severity",
@@ -439,11 +454,15 @@ func TestBuildRecycleBinListBuilders_SearchIncludesMACInListAndCount(t *testing.
 
 	assert.Contains(t, listSQL, "d.serial_number ILIKE", "回收站搜索仍需支持 SN")
 	assert.Contains(t, listSQL, "d.site_name ILIKE", "回收站搜索仍需支持名称")
+	assert.Contains(t, listSQL, "udi.device_name ILIKE", "UPS 回收站搜索应查 device_ups_info.device_name")
+	assert.Contains(t, listSQL, "udi.site_id ILIKE", "UPS 回收站搜索应查 device_ups_info.site_id")
 	assert.Contains(t, listSQL, "di.mac ILIKE", "回收站搜索框承诺支持 MAC，应查询 device_info.mac")
-	assert.Contains(t, countSQL, "LEFT JOIN device_info di ON di.device_id = d.id",
+	assert.Contains(t, countSQL, "LEFT JOIN device_info di ON di.device_id = d.id AND COALESCE(d.product_class, '') NOT LIKE 'UPS%'",
 		"分页总数查询也必须 join device_info，否则 MAC 搜索下 count SQL 无法引用 di.mac")
+	assert.Contains(t, countSQL, "LEFT JOIN device_ups_info udi ON udi.device_id = d.id AND COALESCE(d.product_class, '') LIKE 'UPS%'",
+		"分页总数查询也必须 join device_ups_info，否则 UPS 搜索字段无法引用 udi")
 	assert.Contains(t, countSQL, "di.mac ILIKE", "分页总数口径必须与列表查询一致")
-	assert.Equal(t, []interface{}{"%48:BF%", "%48:BF%", "%48:BF%"}, listArgs)
+	assert.Equal(t, []interface{}{"%48:BF%", "%48:BF%", "%48:BF%", "%48:BF%", "%48:BF%"}, listArgs)
 	assert.Equal(t, listArgs, countArgs)
 }
 
@@ -529,6 +548,7 @@ func TestRecycleBinSelectColumns_ExposeStableRecycleMetadata(t *testing.T) {
 		"离线时长必须固定在移入回收站时刻，不能随查询时间继续增长")
 	assert.NotContains(t, joined, "NOW() - di.last_offline_time",
 		"回收站离线时长不得使用当前时间动态重算")
+	assert.NotContains(t, joined, "device_ups_runtime", "回收站 UPS 一对一字段必须来自 device_ups_info")
 }
 
 func TestRecycleBinListIncludesLocationObservationColumnsForSharedScanner(t *testing.T) {
@@ -544,4 +564,17 @@ func TestRecycleBinListIncludesLocationObservationColumnsForSharedScanner(t *tes
 	listSQL, _, err := listBuilder.ToSql()
 	require.NoError(t, err)
 	assert.Contains(t, listSQL, "LEFT JOIN device_location_observations dlo ON d.id = dlo.device_id")
+}
+
+func TestBuildFindOfflineDevicesBeforeQuerySeparatesUPSInfo(t *testing.T) {
+	cutoff := time.Date(2026, 8, 20, 10, 30, 0, 0, time.UTC)
+	query, args, err := buildFindOfflineDevicesBeforeQuery(cutoff, 25)
+	require.NoError(t, err)
+
+	assert.Contains(t, query, "device_info di ON di.device_id = d.id AND COALESCE(d.product_class, '') NOT LIKE 'UPS%'")
+	assert.Contains(t, query, "device_ups_info udi ON udi.device_id = d.id AND COALESCE(d.product_class, '') LIKE 'UPS%'")
+	assert.Contains(t, query, "CASE WHEN COALESCE(d.product_class, '') LIKE 'UPS%' THEN udi.last_offline_time ELSE di.last_offline_time END IS NOT NULL")
+	assert.Contains(t, query, "CASE WHEN COALESCE(d.product_class, '') LIKE 'UPS%' THEN udi.last_offline_time ELSE di.last_offline_time END <= $3")
+	assert.Contains(t, query, "ORDER BY CASE WHEN COALESCE(d.product_class, '') LIKE 'UPS%' THEN udi.last_offline_time ELSE di.last_offline_time END ASC")
+	assert.Equal(t, []interface{}{model.LifecycleCommissioned, false, cutoff}, args)
 }

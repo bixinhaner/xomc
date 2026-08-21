@@ -72,7 +72,7 @@ type DeviceStatusReconciler struct {
 // status_reconciler_test.go 需要 mock 本接口。*PgDeviceRepository 自动满足
 // (FindStaleDevicesByClass / MarkOfflineWithAccounting 见 device_repository.go)。
 type statusReconcilerRepo interface {
-	FindStaleDevicesByClass(ctx context.Context, enbThresholdSec, cpeThresholdSec, limit int) ([]*model.Device, error)
+	FindStaleDevicesByClass(ctx context.Context, enbThresholdSec, cpeThresholdSec, upsThresholdSec, limit int) ([]*model.Device, error)
 	MarkOfflineWithAccounting(ctx context.Context, deviceID uuid.UUID, reason string, now time.Time) (bool, error)
 }
 
@@ -186,6 +186,7 @@ func (r *DeviceStatusReconciler) Start() {
 		zap.Duration("scan_interval", r.nextScanInterval(th)),
 		zap.Int("enb_threshold_sec", th.ENBSec),
 		zap.Int("cpe_threshold_sec", th.CPESec),
+		zap.Int("ups_threshold_sec", th.UPSSec),
 		zap.Int("batch_size", r.batchSize),
 	)
 }
@@ -228,7 +229,7 @@ func (r *DeviceStatusReconciler) loop(ctx context.Context) {
 func (r *DeviceStatusReconciler) detect(ctx context.Context) OfflineThresholds {
 	start := time.Now()
 	th := r.currentThresholds(ctx)
-	devices, err := r.repo.FindStaleDevicesByClass(ctx, th.ENBSec, th.CPESec, r.batchSize)
+	devices, err := r.repo.FindStaleDevicesByClass(ctx, th.ENBSec, th.CPESec, th.UPSSec, r.batchSize)
 	if err != nil {
 		r.logger.Error("find stale devices failed", zap.Error(err))
 		return th
@@ -329,7 +330,9 @@ func (r *DeviceStatusReconciler) vetoAliveByOnlineIndex(
 	keep = make([]*model.Device, 0, len(candidates))
 	for i, d := range candidates {
 		threshold := th.ENBSec
-		if isCPEClass(d.ProductClass) {
+		if isUPSProductClass(d.ProductClass) {
+			threshold = th.UPSSec
+		} else if isCPEClass(d.ProductClass) {
 			threshold = th.CPESec
 		}
 		cutoff := nowUnix - int64(threshold)
@@ -403,6 +406,9 @@ func (r *DeviceStatusReconciler) markOffline(ctx context.Context, device *model.
 
 func (r *DeviceStatusReconciler) raiseOfflineAlarm(ctx context.Context, device *model.Device, raisedAt time.Time) error {
 	if r.alarmSink == nil {
+		return nil
+	}
+	if device != nil && isUPSProductClass(device.ProductClass) {
 		return nil
 	}
 	identifier, description, ok := disconnectedAlarmForTechnology(device.Technology)

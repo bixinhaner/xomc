@@ -72,12 +72,16 @@ func initDeviceModule(c *Container) error {
 	crDispatcher.SetLANPortLookup(newSTUNServerPortLookup(deviceRepo, paramRepo, c.Logger))
 
 	// DeviceService
+	upsInfoRepo := device.NewPgUPSDeviceInfoRepository(c.PgPool)
+	upsRuntimeRepo := device.NewPgUPSRuntimeRepository(c.PgPool)
 	deviceService := device.NewDeviceService(deviceRepo, paramRepo, reconciler, c.EventBus, logger)
 	deviceService.SetAntennaSectorPlanRepository(antennaPlanRepo)
 	deviceService.SetRedis(c.Redis)
 	deviceService.SetDisconnectedAlarmCleaner(c.AlarmPgStore, c.AlarmEngine)
 	deviceService.SetDeviceCache(deviceCache)
 	deviceService.SetDeviceInfoRepo(deviceInfoRepo)
+	deviceService.SetUPSDeviceInfoRepository(upsInfoRepo)
+	deviceService.SetUPSRuntimeRepository(upsRuntimeRepo)
 	deviceService.SetControlSummaryReader(device.NewPgDeviceControlSummaryReader(c.PgPool))
 	deviceService.SetDeviceGroupCountsInvalidator(c.GroupRepo)
 	// IDOR 防护：按 ID 直读端点据此判定调用者对设备所属设备组的归属。
@@ -221,6 +225,7 @@ func initDeviceModule(c *Container) error {
 		// Phase 3 follow-up: InfoSyncer 注入到 batch path,让 batch flush 后异步把
 		// device_parameters 投影到 device_info 新列（tac/band/ul_earfcn/mac/transmit_power 等）。
 		batchProcessor.SetInfoSyncer(infoSyncer)
+		batchProcessor.SetUPSRuntimeRepository(upsRuntimeRepo)
 		informHandler.SetBatchProcessor(batchProcessor)
 	}
 	if err := informHandler.Subscribe(c.EventBus); err != nil {

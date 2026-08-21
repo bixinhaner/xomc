@@ -19,11 +19,12 @@ const HEADER_ALIAS: Record<string, string> = {
   'SN': 'serial_number', 'serial_number': 'serial_number',
   'Device Name': 'device_name', 'device_name': 'device_name',
   'Remark': 'remark', 'remark': 'remark',
+  'ProductClass': 'product_class', 'Product Class': 'product_class', 'product_class': 'product_class',
   'Carrier': 'carrier', 'carrier': 'carrier',
   'Technology': 'technology', 'technology': 'technology',
   'OUI': 'oui', 'oui': 'oui',
   // 中文
-  '设备名称': 'device_name', '备注': 'remark',
+  '设备名称': 'device_name', '产品类型': 'product_class', '备注': 'remark',
   '运营商': 'carrier', '制式': 'technology',
 };
 
@@ -71,6 +72,7 @@ function parsePreRegCsv(
       serial_number: sn,
       device_name: get('device_name'),
       remark: get('remark'),
+      product_class: get('product_class'),
       carrier: rawCarrier && CARRIER_VALUES.has(rawCarrier) ? rawCarrier as 'cmcc' | 'ctcc' | 'cucc' : undefined,
       technology: rawTech && TECH_VALUES.has(rawTech) ? rawTech as 'lte' | 'nr' : undefined,
       oui: get('oui'),

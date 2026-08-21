@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import {
+  Alert,
   Button,
   Card,
   Checkbox,
@@ -49,8 +50,14 @@ import {
   useUnifiedFileTransferTaskTypes,
 } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
+import { useSystemLicense } from '@core/hooks/api/useSystemLicense';
 import { useSoftwareVersions } from '@core/hooks/api/useSoftware';
 import { useProductList } from '@core/hooks/api/useProducts';
+import {
+  filterDeviceScopedItemsByLicense,
+  isDeviceStandardValueVisibleByLicense,
+  isDeviceStandardVisibleByLicense,
+} from '@core/utils/licenseFeatures';
 import { unifiedFileTransferApi } from '@core/services/api/unifiedFileTransferApi';
 import { configSnapshotApi } from '@core/services/api/configSnapshotApi';
 import type { BatchGetSnapshotsResult } from '@core/services/api/configSnapshotApi';
@@ -81,6 +88,8 @@ import {
   localizeBuiltinTypeName,
   UPGRADE_LIKE_CATEGORIES,
   filterTaskTypesForCategory,
+  filterTaskTypesByUPSLicense,
+  filterFileTransferItemsByUPSLicense,
   resolveBackendCategoryParam,
 } from '../shared';
 import {
@@ -122,12 +131,13 @@ function buildDefaultTaskName(typeCode: string | undefined, username: string | u
 }
 
 function isUpgradeTaskCategory(category?: string) {
-  // qa-614 c6 #365 #373：2G(gsm_upgrade) 也是升级类，需固件选择；
-  // #368：device_upgrade 是 4G/5G 合并虚拟分类，同属升级类。
+  // qa-614 c6 #365 #373 / UPS：2G(gsm_upgrade) / UPS(ups_upgrade) 也是升级类，需固件选择；
+  // #368：device_upgrade 是 4G/5G/2G/UPS 合并虚拟分类，同属升级类。
   return (
     category === 'gnb_upgrade' ||
     category === 'enb_upgrade' ||
     category === 'gsm_upgrade' ||
+    category === 'ups_upgrade' ||
     category === 'device_upgrade'
   );
 }
@@ -162,6 +172,9 @@ function resolveFirmwareLibraryFileType(taskType?: UnifiedFileTransferTaskType):
   if (haystack.includes('patch')) {
     return 1;
   }
+  if (haystack.includes('ups') || haystack.includes('ap')) {
+    return 5;
+  }
   if (taskType && isUpgradeTaskCategory(taskType.category)) {
     return 0;
   }
@@ -169,11 +182,12 @@ function resolveFirmwareLibraryFileType(taskType?: UnifiedFileTransferTaskType):
 }
 
 function getUpgradeTypeLabel(category: string, fallback: string, t: (id: string) => string) {
-  // qa-614 c6 #365 #373 #368：2G(gsm_upgrade) 与合并虚拟分类 device_upgrade 同归升级标签。
+  // qa-614 c6 #365 #373 #368 / UPS：2G(gsm_upgrade)、UPS(ups_upgrade) 与合并虚拟分类 device_upgrade 同归升级标签。
   if (
     category === 'gnb_upgrade' ||
     category === 'enb_upgrade' ||
     category === 'gsm_upgrade' ||
+    category === 'ups_upgrade' ||
     category === 'device_upgrade'
   ) {
     return t('ufte.softLib.upgrade');
@@ -240,11 +254,17 @@ export default function FileTransferCenter() {
   // 跟 form 值不再一致 → typeCode 切换时不覆盖；用户没改 → 切换业务时跟着刷新。
   const lastAutoFilledTaskNameRef = useRef<string>('');
   const { data: taskTypes = [], isLoading: taskTypesLoading } = useUnifiedFileTransferTaskTypes();
+  const { data: systemLicense, isLoading: systemLicenseLoading } = useSystemLicense();
+  const showUPSOptions = isDeviceStandardVisibleByLicense(systemLicense, systemLicenseLoading, 'UPS');
+  const licensedTaskTypes = useMemo(
+    () => filterTaskTypesByUPSLicense(taskTypes, showUPSOptions),
+    [taskTypes, showUPSOptions],
+  );
   // 原始 categories 来自后端 ufte_task_types，新增一个虚拟分类 "mr_measurement"
   // 作为入口聚合按钮（点击跳到独立的 MR 任务管理页 /mr/tasks）。MR 不走 UFTE
   // 任务模板（PRD F05 决策 A — 独立引擎），这里只做"入口聚合"。
   const categories = useMemo(() => {
-    const base = buildCategoryTabs(taskTypes);
+    const base = buildCategoryTabs(licensedTaskTypes);
     // 末位插入虚拟项；templateCount=0 让现有 UFTE 模板渲染逻辑识别"无模板"
     return [
       ...base,
@@ -260,7 +280,7 @@ export default function FileTransferCenter() {
         templateCount: 0,
       },
     ];
-  }, [taskTypes, t]);
+  }, [licensedTaskTypes, t]);
   // URL 参数初始化：?category=...&typeCode=... 用于外部 deep link，直接定位到
   // 指定分类及任务类型。
   const [urlSearchParams] = useSearchParams();
@@ -269,6 +289,7 @@ export default function FileTransferCenter() {
   // 首屏 task-types 未返回时 categories 只含虚拟分类，自动选中会落在 'mr_measurement'；
   // 真实分类到达后仅当用户没主动选过时才回退，不覆盖用户选择。
   const categoryManuallyPickedRef = useRef(Boolean(urlSearchParams.get('category')));
+  const initialTypeCodeParamRef = useRef<string | undefined>(urlSearchParams.get('typeCode') || undefined);
   const [selectedTypeCode, setSelectedTypeCode] = useState<string | undefined>(() => urlSearchParams.get('typeCode') || undefined);
   const [taskPage, setTaskPage] = useState(1);
   const [taskPageSize, setTaskPageSize] = useState(10);
@@ -327,9 +348,9 @@ export default function FileTransferCenter() {
   const [detailTask, setDetailTask] = useState<UnifiedFileTransferTask | null>(null);
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
 
-  // qa-614 c6 #368：device_upgrade 虚拟分类展开为后端 category 查询参数。
-  // 选了具体 typeCode → 传 undefined（按 typeCode 精确过滤）；未选 → 传成员超集
-  // 'enb_upgrade'（softwareTaskType 集 {Upgrade,Patch,FPGA} 已含 4G+5G 全部升级任务）。
+  // qa-614 c6 #368 / UPS：device_upgrade 虚拟分类展开为后端 category 查询参数。
+  // 选了具体 typeCode → 传 undefined（按 typeCode 精确过滤）；未选 → 传 device_upgrade，
+  // 后端展开到 4G/5G/2G/UPS 升级成员，避免 UPS 被 enb_upgrade 二次过滤掉。
   const backendCategoryParam = resolveBackendCategoryParam(selectedCategory, selectedTypeCode);
 
   const { data: tasksData, isLoading: tasksLoading } = useUnifiedFileTransferTasks({
@@ -362,16 +383,24 @@ export default function FileTransferCenter() {
   // 是上一个 tab 的任务 ID"的违和感。
   // 注：表格 dataSource 切换后，AntD 表格会自动收起"勾选行"显示，但 selectedTaskIds
   // 状态还在 → 顶部"批量删除（N）"按钮的计数错位；这条 useEffect 同步清掉。
-  const recentTasks = tasksData?.items ?? [];
-  const recentDevices = devicesData?.items ?? [];
+  const recentTasksRaw = tasksData?.items ?? [];
+  const recentDevicesRaw = devicesData?.items ?? [];
+  const recentTasks = useMemo(
+    () => filterFileTransferItemsByUPSLicense(recentTasksRaw, showUPSOptions),
+    [recentTasksRaw, showUPSOptions],
+  );
+  const recentDevices = useMemo(
+    () => filterFileTransferItemsByUPSLicense(recentDevicesRaw, showUPSOptions),
+    [recentDevicesRaw, showUPSOptions],
+  );
 
   const filteredTaskTypes = useMemo(
     // 顺序由后端 ORDER BY sort_order ASC 控制（数据库字段 ufte_task_types.sort_order
     // 由内置模板初始化，未来可在「模板配置」页面拖拽调整）。前端不再二次排序，避免
     // 跟数据库源头不一致。
-    // qa-614 c6 #368：device_upgrade 虚拟分类下取 enb_upgrade + gnb_upgrade 两类。
-    () => filterTaskTypesForCategory(taskTypes, selectedCategory),
-    [selectedCategory, taskTypes],
+    // qa-614 c6 #368 / UPS：device_upgrade 虚拟分类下取 4G/5G/2G/UPS 全部升级模板。
+    () => filterTaskTypesForCategory(licensedTaskTypes, selectedCategory),
+    [licensedTaskTypes, selectedCategory],
   );
 
   const taskTypeOptions = useMemo(
@@ -398,18 +427,23 @@ export default function FileTransferCenter() {
   );
 
   const drawerTaskType = useMemo(
-    () => taskTypes.find((item) => item.typeCode === drawerTypeCode) ?? activeTaskType,
-    [activeTaskType, drawerTypeCode, taskTypes],
+    () => licensedTaskTypes.find((item) => item.typeCode === drawerTypeCode) ?? activeTaskType,
+    [activeTaskType, drawerTypeCode, licensedTaskTypes],
   );
   // #492：升级抽屉「产品类型」改为产品名。products 来自产品中心目录，用于把所选产品名映射成
   // product_id（固件按产品过滤）。
   const { data: productsData } = useProductList();
   const products = useMemo(() => productsData?.items ?? [], [productsData]);
+  const visibleProducts = useMemo(
+    () => filterDeviceScopedItemsByLicense(products, systemLicense, systemLicenseLoading),
+    [products, systemLicense, systemLicenseLoading],
+  );
   const drawerProductId = useMemo(
     () => products.find((p) => p.name === drawerProductClass)?.id,
     [products, drawerProductClass],
   );
   const firmwareLibraryFileType = resolveFirmwareLibraryFileType(drawerTaskType);
+  const isUPSUpgradeDrawer = drawerTaskType?.typeCode === 'UPS_AP_UPGRADE' || drawerTaskType?.category === 'ups_upgrade';
   const { data: firmwareData } = useSoftwareVersions({
     page: 1,
     pageSize: 200,
@@ -478,12 +512,13 @@ export default function FileTransferCenter() {
   // 产品目录全集，便于按产品收窄。value/label 均为产品英文名。
   const drawerProductClassOptions = useMemo(() => {
     const tplProducts = drawerTaskType?.products ?? [];
-    const names = tplProducts.length > 0 ? tplProducts : products.map((p) => p.name);
+    const names = tplProducts.length > 0 ? tplProducts : visibleProducts.map((p) => p.name);
     return Array.from(new Set(names))
+      .filter((name) => isDeviceStandardValueVisibleByLicense(name, systemLicense, systemLicenseLoading))
       .filter(Boolean)
       .sort((left, right) => left.localeCompare(right, 'zh-CN'))
       .map((name) => ({ label: name, value: name }));
-  }, [drawerTaskType?.products, products]);
+  }, [drawerTaskType?.products, systemLicense, systemLicenseLoading, visibleProducts]);
 
   const filteredFirmwareCandidates = useMemo(
     // #492：固件已按所选产品(product_id) 服务端过滤；这里仅在选了产品后展示其固件。
@@ -507,7 +542,7 @@ export default function FileTransferCenter() {
   const deviceProductNameOptions = useMemo(() => {
     const scoped = activeTaskType?.products ?? [];
     const names = new Set<string>(
-      scoped.length > 0 ? scoped : products.map((product) => product.name),
+      scoped.length > 0 ? scoped : visibleProducts.map((product) => product.name),
     );
     recentDevices.forEach((item) => {
       if (item.productName) {
@@ -516,9 +551,10 @@ export default function FileTransferCenter() {
     });
     return Array.from(names)
       .filter(Boolean)
+      .filter((name) => isDeviceStandardValueVisibleByLicense(name, systemLicense, systemLicenseLoading))
       .sort((left, right) => left.localeCompare(right, 'zh-CN'))
       .map((name) => ({ label: name, value: name }));
-  }, [activeTaskType?.products, products, recentDevices]);
+  }, [activeTaskType?.products, recentDevices, systemLicense, systemLicenseLoading, visibleProducts]);
 
   // qa-614 c6 #368：原 templateTabItems（『模板』子页签数据）已删除——与执行视图
   // 任务列表上方的 typeCode 下拉框完全重复（ant-space-item 多余）。typeCode 选择
@@ -852,6 +888,7 @@ export default function FileTransferCenter() {
   };
 
   useEffect(() => {
+    if (taskTypesLoading && categoryManuallyPickedRef.current) return;
     const next = resolveAutoSelectedCategory(categories, selectedCategory, categoryManuallyPickedRef.current);
     if (next !== null) {
       // 此 effect 产生的都是自动兜底选择（含 #127 虚拟分类→首个真实分类回退），
@@ -859,14 +896,30 @@ export default function FileTransferCenter() {
       categoryManuallyPickedRef.current = false;
       setSelectedCategory(next);
     }
-  }, [categories, selectedCategory]);
+  }, [categories, selectedCategory, taskTypesLoading]);
 
   useEffect(() => {
+    const initialTypeCode = initialTypeCodeParamRef.current;
+    if (!initialTypeCode) return;
+    if (filteredTaskTypes.some((item) => item.typeCode === initialTypeCode)) {
+      initialTypeCodeParamRef.current = undefined;
+      if (selectedTypeCode !== initialTypeCode) {
+        setSelectedTypeCode(initialTypeCode);
+      }
+      return;
+    }
+    if (!taskTypesLoading && taskTypes.length > 0) {
+      initialTypeCodeParamRef.current = undefined;
+    }
+  }, [filteredTaskTypes, selectedTypeCode, taskTypes.length, taskTypesLoading]);
+
+  useEffect(() => {
+    if (taskTypesLoading) return;
     const nextTypeCode = resolveTaskTypeFilterValue(filteredTaskTypes, selectedTypeCode);
     if (nextTypeCode !== selectedTypeCode) {
       setSelectedTypeCode(nextTypeCode);
     }
-  }, [filteredTaskTypes, selectedTypeCode]);
+  }, [filteredTaskTypes, selectedTypeCode, taskTypesLoading]);
 
   useEffect(() => {
     setTaskPage(1);
@@ -886,7 +939,7 @@ export default function FileTransferCenter() {
 
   const isUpgradeLikeCategory = UPGRADE_LIKE_CATEGORIES.has(selectedCategory);
 
-  const getTypeDef = (typeCode: string) => taskTypes.find((item) => item.typeCode === typeCode);
+  const getTypeDef = (typeCode: string) => licensedTaskTypes.find((item) => item.typeCode === typeCode);
 
   const getTaskTargetVersion = (record: UnifiedFileTransferTask) => {
     // 只有升级 / 回滚类才有"主任务目标版本"（固件版本号）；备份 / 日志采集 /
@@ -1085,7 +1138,7 @@ export default function FileTransferCenter() {
         render: (_, record) => (record.endedAt ? formatSystemTime(record.endedAt) : '-'),
       },
     ];
-  }, [isUpgradeLikeCategory, taskTypes, t]);
+  }, [isUpgradeLikeCategory, licensedTaskTypes, t]);
 
   const deviceColumns: ColumnsType<UnifiedFileTransferDeviceItem> = useMemo(() => {
     if (isUpgradeLikeCategory) {
@@ -1711,6 +1764,14 @@ export default function FileTransferCenter() {
               disabled={taskTypeOptions.length <= 1}
             />
           </Form.Item>
+          {isUPSUpgradeDrawer ? (
+            <Alert
+              type="info"
+              showIcon
+              message={t('ufte.form.upsInformDispatchHint')}
+              style={{ marginBottom: 16 }}
+            />
+          ) : null}
           {needsFirmwareSelection(drawerTaskType) ? (
             <>
               <Form.Item label={t('ufte.form.productClass')} name="productClass" rules={[{ required: true, message: t('ufte.form.productClass.required') }]}>

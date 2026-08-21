@@ -324,6 +324,27 @@ export const mockSoftwareVersions: SoftwareVersion[] = [
     bugFixes: ['基础稳定性'],
     known_issues: ['不支持5G功能'],
   },
+  {
+    id: 'ver-ups-001',
+    versionName: 'UPS AP V1.0.0',
+    versionCode: 'UPS-AP-V1.0.0',
+    deviceType: 'UPS',
+    productId: 'p-003',
+    productIds: ['p-003'],
+    vendor: 'Baicells',
+    releaseDate: '2026-08-19T00:00:00.000Z',
+    status: 'current',
+    fileSize: 1024 * 1024 * 32,
+    checksum: '456789012345678901234567890abcdef01234567',
+    fileName: 'ups-ap-v1.0.0.bin',
+    downloadUrl: '/software/ups/ups-ap-v1.0.0.bin',
+    releaseNotes: 'UPS AP 固件演示版本',
+    minHardwareVersion: 'UPS-M3',
+    features: ['UPS 运行状态上报', 'BMS 信息采集'],
+    bugFixes: ['修复升级演示数据缺失'],
+    fileType: 5,
+    recommend: true,
+  },
 ];
 
 export const mockUpgradePlans: UpgradePlan[] = [

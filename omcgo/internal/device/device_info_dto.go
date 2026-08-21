@@ -23,6 +23,13 @@ type DeviceWithInfo struct {
 	// when no geofence control action currently owns device deactivation.
 	ControlSummary *DeviceControlSummary `json:"control_summary"`
 
+	// DeviceType is the list tab dimension. UPS is identified by ProductClass
+	// prefix only; other existing devices stay in the base-station tab.
+	DeviceType string `json:"device_type"`
+
+	// UPSSummary contains list-level UPS power and battery status fields.
+	UPSSummary *UPSRuntimeSummary `json:"ups_summary,omitempty"`
+
 	// ===== 设备分组信息（可能为空）=====
 
 	// GroupID 设备分组 ID
@@ -216,6 +223,34 @@ type DeviceWithInfo struct {
 
 	// OfflineMinutes 剩余分钟数（0-59）
 	OfflineMinutes *int64 `json:"offline_minutes,omitempty"`
+}
+
+// UPSRuntimeSummary is the UPS list/detail read model projected from TR-069
+// parameters. Raw values remain in device_parameters and the parameter model.
+type UPSRuntimeSummary struct {
+	ExternalIP       *string    `json:"external_ip,omitempty"`
+	TotalVoltage     *string    `json:"total_voltage,omitempty"`
+	TotalTemperature *string    `json:"total_temperature,omitempty"`
+	TotalCurrent     *string    `json:"total_current,omitempty"`
+	SoftwareVersion  *string    `json:"software_version,omitempty"`
+	HardwareVersion  *string    `json:"hardware_version,omitempty"`
+	Manufacturer     *string    `json:"manufacturer,omitempty"`
+	ManufacturerOUI  *string    `json:"manufacturer_oui,omitempty"`
+	UpTimeSeconds    *int64     `json:"up_time_seconds,omitempty"`
+	BMSCharging      *string    `json:"bms_charging,omitempty"`
+	ACPower          *string    `json:"ac_power,omitempty"`
+	ACVoltage        *string    `json:"ac_voltage,omitempty"`
+	DCVoltage        *string    `json:"dc_voltage,omitempty"`
+	DCCurrent        *string    `json:"dc_current,omitempty"`
+	BoardTemperature *string    `json:"board_temperature,omitempty"`
+	SFPState         *string    `json:"sfp_state,omitempty"`
+	Port0State       *string    `json:"port0_state,omitempty"`
+	Port1State       *string    `json:"port1_state,omitempty"`
+	Port2State       *string    `json:"port2_state,omitempty"`
+	Port3State       *string    `json:"port3_state,omitempty"`
+	AverageSOC       *int       `json:"average_soc,omitempty"`
+	PackCounts       *int       `json:"pack_counts,omitempty"`
+	LastInformAt     *time.Time `json:"last_inform_at,omitempty"`
 }
 
 // DeviceListItem 简化的设备列表项，用于前端表格展示。
