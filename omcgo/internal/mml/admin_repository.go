@@ -215,6 +215,7 @@ func (r *PgSubFieldRepository) ListByCommand(ctx context.Context, commandID uuid
 		"default_selected", "is_required", "sort_order", "created_at", "updated_at",
 	).From("mml_command_sub_fields").
 		Where(sq.Eq{"command_id": commandID}).
+		Where(sq.Expr("deprecated_at IS NULL")).
 		OrderBy("sort_order ASC", "mml_code ASC").
 		ToSql()
 	if err != nil {
@@ -416,7 +417,8 @@ SELECT
 FROM mml_command_sub_fields csf
 JOIN standard_params sp ON sp.id = csf.standard_path_id
 ` + modelMappingJoin + `
-WHERE csf.command_id = $1` + paramModelFilter + `
+WHERE csf.command_id = $1
+  AND csf.deprecated_at IS NULL` + paramModelFilter + `
 ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 
 	rows, err := r.pool.Query(ctx, sqlText, args...)
@@ -524,6 +526,7 @@ FROM mml_command_sub_fields csf
 JOIN standard_params sp ON sp.id = csf.standard_path_id
 LEFT JOIN param_mappings pm ON pm.standard_path = sp.standard_path
 WHERE csf.command_id = $1
+  AND csf.deprecated_at IS NULL
 GROUP BY csf.id, sp.standard_path, sp.data_type, sp.access, sp.entry_type,
          sp.change_applies, sp.min_value, sp.max_value, sp.description
 ORDER BY csf.sort_order ASC, csf.mml_code ASC`

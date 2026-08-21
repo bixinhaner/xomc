@@ -73,6 +73,64 @@ describe('GPV 对象路径结果展示', () => {
     expect(row.cells[BSIC_PATH]).toBe('9');
   });
 
+  it('失败结果优先显示设备侧返回的参数级错误信息', () => {
+    const item: DeviceTaskResultItem = {
+      deviceSn: pendingRow.deviceSn,
+      failReason: '[Server] Get failed: Device.Legacy.',
+      result: {
+        success: false,
+        rawOutput: '',
+        parsedData: {
+          method: 'SetParameterValues',
+          param_faults: [{
+            parameter_name: 'Device.KeepalivedMgmt.VrrpMgmt.1.VirtualIpList.1.IP',
+            fault_code: 9005,
+            fault_string: 'Invalid parameter name',
+          }],
+        },
+        executionTime: 600,
+        timestamp: '',
+      },
+    };
+
+    const [row] = buildDeviceRows([item], columns, true);
+    expect(row.faultCode).toBe(
+      'Device.KeepalivedMgmt.VrrpMgmt.1.VirtualIpList.1.IP: 9005 Invalid parameter name',
+    );
+  });
+
+  it('没有参数级错误时从 SOAP Fault 原始报文显示设备侧错误', () => {
+    const faultXml = `
+      <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+        <soap:Body>
+          <soap:Fault>
+            <faultcode>Server</faultcode>
+            <faultstring>CPE rejected request</faultstring>
+            <detail>
+              <cwmp:Fault xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+                <FaultCode>9005</FaultCode>
+                <FaultString>Get failed: Device.KeepalivedMgmt.VrrpMgmt.</FaultString>
+              </cwmp:Fault>
+            </detail>
+          </soap:Fault>
+        </soap:Body>
+      </soap:Envelope>`;
+    const item: DeviceTaskResultItem = {
+      deviceSn: pendingRow.deviceSn,
+      failReason: '下发失败',
+      result: {
+        success: false,
+        rawOutput: faultXml,
+        parsedData: { method: 'GetParameterValues', raw_response: faultXml },
+        executionTime: 600,
+        timestamp: '',
+      },
+    };
+
+    const [row] = buildDeviceRows([item], columns, true);
+    expect(row.faultCode).toBe('[9005] Get failed: Device.KeepalivedMgmt.VrrpMgmt.');
+  });
+
   it('设备未返回对象后代时保留原对象列作为空结果占位', () => {
     expect(expandObjectPathColumns(columns, [pendingRow])).toEqual(columns);
   });
