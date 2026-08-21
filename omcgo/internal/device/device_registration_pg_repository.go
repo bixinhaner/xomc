@@ -291,7 +291,7 @@ func (r *PgRegistrationRepository) List(ctx context.Context, filter Registration
 	}
 	defer rows.Close()
 
-	var items []DeviceRegistration
+	items := make([]DeviceRegistration, 0)
 	for rows.Next() {
 		reg, err := scanRegistrationFromRows(rows)
 		if err != nil {

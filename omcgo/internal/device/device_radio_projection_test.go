@@ -58,6 +58,20 @@ func TestProjectRadioFrequencyFields_LTEFallsBackToCommonDLPerCell(t *testing.T)
 	assert.True(t, got.complete)
 }
 
+func TestProjectRadioFrequencyFields_LTESingleCellUsesOnlyObservedIndex(t *testing.T) {
+	params := map[string]string{
+		"Device.Services.FAPService.2.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells": "1",
+		"Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.EARFCNDL":          "1498",
+	}
+
+	got := projectRadioFrequencyFields(params, model.TechLTE, "FAP/BAIBLQ/SC")
+
+	assert.Equal(t, "1498", got.dlValue)
+	assert.True(t, got.dlObserved)
+	assert.True(t, got.complete)
+	assert.Empty(t, got.reason)
+}
+
 func TestProjectRadioFrequencyFields_NRPhysicalCells(t *testing.T) {
 	params := map[string]string{
 		"Device.Services.FAPService.1.CellConfig.NR.RAN.CA.PARAMS.NumOfCells": "2",
