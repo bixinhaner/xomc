@@ -785,6 +785,52 @@ describe('parameter configuration detail mapping', () => {
     expect(merged.sheetParameters.CELL[0]).not.toHaveProperty('ULBandwidth');
   });
 
+  it('persists row-level carrier bandwidth edits to mapped workbook columns that were absent from the imported row', () => {
+    const current = {
+      deviceType: 'gNB',
+      serialNumber: 'NR-SN-002',
+      sheetParameters: {
+        CELL: [{
+          'Serial Number': 'NR-SN-002',
+          'Cell Index': 1,
+        }],
+      },
+      workbookMappings: [
+        {
+          sheet: 'CELL',
+          header: 'DL Carrier Bandwidth',
+          trPath: 'Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.1.SCSSpecificCarrier.CarrierBandwidth',
+        },
+        {
+          sheet: 'CELL',
+          header: 'UL Carrier Bandwidth',
+          trPath: 'Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.1.SCSSpecificCarrier.CarrierBandwidth',
+        },
+      ],
+    };
+
+    const merged = mergeParamConfigFormValues(current, {
+      ...toParamConfigFormValues(current),
+      sheetParameters: {
+        CELL: [{
+          'Serial Number': 'NR-SN-002',
+          'Cell Index': 1,
+          DLBandwidth: '106',
+          ULBandwidth: '106',
+        }],
+      },
+    });
+
+    expect(merged.sheetParameters.CELL[0]).toMatchObject({
+      'Serial Number': 'NR-SN-002',
+      'Cell Index': 1,
+      'DL Carrier Bandwidth': '106',
+      'UL Carrier Bandwidth': '106',
+    });
+    expect(merged.dlbandwidth).toBe('106');
+    expect(merged.ulbandwidth).toBe('106');
+  });
+
   it('preserves all imported eNB sheets when the editor submits only mounted fields', () => {
     const current = {
       deviceType: 'eNB',
