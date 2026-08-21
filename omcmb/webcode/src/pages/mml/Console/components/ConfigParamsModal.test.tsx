@@ -691,6 +691,39 @@ describe('ConfigParamsModal', () => {
     expect(screen.getByText('false', { exact: true })).toBeInTheDocument();
   });
 
+  it('submits boolean true when the backing model enum uses 0/1 values', () => {
+    const onConfirmAndExecute = vi.fn();
+    const path = 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.NoRemoveEnable';
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'ADD',
+        targetObject: 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.',
+        paramPaths: [{
+          path,
+          label: 'NoRemoveEnable',
+          writable: true,
+          isObject: false,
+          valueType: 'BOOLEAN',
+          defaultValue: 'true',
+          enumOptions: [
+            { value: '0', label: 'false' },
+            { value: '1', label: 'true' },
+          ],
+        }],
+      },
+      selectedPathKeys: [path],
+      onConfirmAndExecute,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ }));
+
+    expect(screen.queryByText('mml.consoleV2.config.validation.enumValue')).not.toBeInTheDocument();
+    expect(onConfirmAndExecute).toHaveBeenCalledWith(expect.objectContaining({
+      values: { [path]: 'true' },
+    }));
+  });
+
   it('renders model enum values as a select and applies defaultValue', () => {
     renderModal({
       command: {

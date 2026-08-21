@@ -1022,11 +1022,15 @@ export function buildDeviceRows(
     });
     pathTasks.sort((a, b) => a.pathIndex - b.pathIndex);
     const allOk = base.every((r) => r.status === 'success');
+    const firstFault = base
+      .filter((r) => r.status === 'failed')
+      .map((r) => r.faultCode)
+      .find((fault): fault is string => Boolean(fault));
     rows.push({
       ...base[0],
       status: allOk ? 'success' : 'failed',
       cells,
-      faultCode: allOk ? undefined : PARTIAL_PATH_FAILED_FALLBACK,
+      faultCode: allOk ? undefined : (firstFault ?? PARTIAL_PATH_FAILED_FALLBACK),
       pathTasks,
     });
   }
