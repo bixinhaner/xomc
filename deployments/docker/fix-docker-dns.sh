@@ -105,6 +105,32 @@ EOF
 fi
 
 echo ""
+echo "2️⃣  锁定 Docker 173.x 网段..."
+if ! command -v python3 > /dev/null 2>&1; then
+    echo "❌ 缺少 python3,无法安全写入 Docker 网段策略"
+    exit 1
+fi
+sudo python3 - /etc/docker/daemon.json <<'PYEOF'
+import json
+import os
+
+path = "/etc/docker/daemon.json"
+data = {}
+if os.path.exists(path) and os.path.getsize(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except json.JSONDecodeError:
+        data = {}
+data["bip"] = "173.17.0.1/16"
+data["default-address-pools"] = [{"base": "173.19.0.0/16", "size": 24}]
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, ensure_ascii=False)
+    handle.write("\n")
+PYEOF
+echo "✅ Docker 网段已锁定为 bip=173.17.0.1/16, 地址池=173.19.0.0/16"
+
+echo ""
 echo "3️⃣  重启 Docker 服务..."
 if [[ "$OSTYPE" == "darwin"* ]]; then
     echo "ℹ️  macOS 系统,请手动重启 Docker Desktop"
@@ -116,6 +142,12 @@ else
     echo "✅ Docker 服务已重启"
 fi
 
+BRIDGE_SUBNETS="$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true)"
+if ! printf '%s' "$BRIDGE_SUBNETS" | grep -Eq '(^|[[:space:]])173\.'; then
+    echo "❌ Docker bridge 未切换到 173.x: ${BRIDGE_SUBNETS:-未知}"
+    exit 1
+fi
+
 echo ""
 echo "4️⃣  清理 Docker 构建缓存..."
 docker builder prune -f
@@ -123,7 +155,7 @@ echo "✅ 构建缓存已清理"
 
 echo ""
 echo "5️⃣  测试 DNS 解析..."
-if docker run --rm alpine:3.19 nslookup mirrors.aliyun.com > /dev/null 2>&1; then
+if docker run --network bridge --rm alpine:3.19 nslookup mirrors.aliyun.com > /dev/null 2>&1; then
     echo "✅ DNS 解析正常"
 else
     echo "⚠️  DNS 解析可能仍有问题,请检查网络"

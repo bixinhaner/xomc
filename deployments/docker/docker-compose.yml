@@ -1053,6 +1053,8 @@ volumes:
 
 networks:
   default:
+    # 使用新名字，避免 Compose 复用历史 docker_default 172.x 网络。
+    name: omcgo-dev-net
     driver: bridge
     ipam:
       driver: default

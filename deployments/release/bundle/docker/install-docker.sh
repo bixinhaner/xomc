@@ -14,7 +14,7 @@
 #                                                          /var 可用 < 15G 时还会问要不要把数据目录切到 /home
 #   sudo bash install-docker.sh --mirror daocloud        # 一气呵成，装完直接配 DaoCloud 加速
 #   sudo bash install-docker.sh --no-mirror              # 装完不动 daemon.json，跳过加速
-#   sudo bash install-docker.sh --skip-if-installed      # 已装则静默 0 退出（脚本里调）
+#   sudo bash install-docker.sh --skip-if-installed      # 已装则只断言 173.x 网段后退出
 #   sudo bash install-docker.sh --uninstall              # 卸载 docker 引擎(默认 dry-run)
 #   sudo bash install-docker.sh --uninstall --force --keep-data
 #                                                        # 真删 dockerd / 二进制 / systemd unit,但保留 /var/lib/docker
@@ -27,7 +27,7 @@
 #                         其它任意 URL 请单独运行 ../setup-mirrors.sh 后手编 daemon.json
 #   --no-mirror           装完不引导加速、不动 daemon.json（用户后期可单独运行
 #                         ../setup-mirrors.sh）
-#   --skip-if-installed   已检测到 docker 时静默 0 退出（install.sh 调用时用）
+#   --skip-if-installed   已检测到 docker 时跳过引擎安装，但仍断言 173.x 网段（install.sh 调用时用）
 #
 #   ── 卸载模式 ─────────────────────────────────────────────────────────────
 #   --uninstall           进入卸载模式(默认 dry-run,仅打印将要做的动作,不实际执行)
@@ -102,6 +102,58 @@ DOCKER_BIP="${DOCKER_BIP:-173.17.0.1/16}"
 DOCKER_ADDR_POOL_BASE="${DOCKER_ADDR_POOL_BASE:-173.19.0.0/16}"
 DOCKER_ADDR_POOL_SIZE="${DOCKER_ADDR_POOL_SIZE:-24}"
 
+validate_docker_network_values() {
+  command -v python3 >/dev/null 2>&1 ||
+  die "Docker 网段策略需要 python3 校验；禁止在无法校验时继续安装"
+  python3 - "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" <<'PYEOF'
+import ipaddress
+import sys
+
+bip_value, pool_value, pool_size_value = sys.argv[1:]
+try:
+  bip_network = ipaddress.ip_interface(bip_value).network
+  pool = ipaddress.ip_network(pool_value, strict=False)
+  pool_size = int(pool_size_value)
+except (ValueError, TypeError) as exc:
+  raise SystemExit(f"invalid Docker network policy: {exc}")
+
+docker_private_range = ipaddress.ip_network("173.0.0.0/8")
+compose_network = ipaddress.ip_network("173.18.0.0/16")
+if not bip_network.subnet_of(docker_private_range):
+  raise SystemExit(f"Docker bip must be in 173.0.0.0/8: {bip_value}")
+if not pool.subnet_of(docker_private_range):
+  raise SystemExit(f"Docker address pool must be in 173.0.0.0/8: {pool_value}")
+if not 1 <= pool_size <= 32 or pool_size < pool.prefixlen:
+  raise SystemExit(f"Docker address pool size must be between 1 and 32: {pool_size_value}")
+if bip_network.overlaps(compose_network) or pool.overlaps(compose_network):
+  raise SystemExit("Docker bip/address pool overlaps the fixed 173.18.0.0/16 Compose network")
+if bip_network.overlaps(pool):
+  raise SystemExit("Docker bip overlaps the Docker automatic address pool")
+PYEOF
+}
+
+assert_no_legacy_docker_networks() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker info >/dev/null 2>&1 || return 0
+
+  local network_id network_name subnet
+  local -a legacy_networks=()
+  while IFS= read -r network_id; do
+    [ -n "$network_id" ] || continue
+    network_name="$(docker network inspect "$network_id" --format '{{.Name}}' 2>/dev/null || echo "$network_id")"
+    while IFS= read -r subnet; do
+      [ -n "$subnet" ] || continue
+      case "$subnet" in
+        172.*) legacy_networks+=("${network_name}:${subnet}") ;;
+      esac
+    done < <(docker network inspect "$network_id" --format '{{range .IPAM.Config}}{{.Subnet}}{{"\n"}}{{end}}' 2>/dev/null || true)
+  done < <(docker network ls -q 2>/dev/null || true)
+
+  [ "${#legacy_networks[@]}" -eq 0 ] ||
+    die "检测到 Docker 172.x 网络：${legacy_networks[*]}；请先停止并删除旧 bridge 网络" \
+      "Docker 172.x networks detected: ${legacy_networks[*]}; stop and remove the old bridge networks first"
+}
+
 # ── assert_docker_network：幂等断言 docker0 网段(bip)+ 自动池(#155)──────────────
 # docker0 的 bip 由 /etc/docker/daemon.json 控制(compose 管不到 docker0)。历史 bug:bip 只
 # 在"全新装 dockerd"分支写,docker 已装即整段跳过、--skip-if-installed 更直接 exit 0 →
@@ -109,25 +161,35 @@ DOCKER_ADDR_POOL_SIZE="${DOCKER_ADDR_POOL_SIZE:-24}"
 # 且后续部署不修复、静默回退。本函数让每次部署都断言 bip:已正确→不动不重启;漂移→写
 # daemon.json(python3 merge 保其它键)+ (docker 在跑时)重启使 docker0 生效。
 assert_docker_network() {
-  local DAEMON_JSON=/etc/docker/daemon.json cur_bip=""
-  if ! command -v python3 >/dev/null 2>&1; then
-    warn "未装 python3,无法 merge daemon.json 网段。请手动设 bip=${DOCKER_BIP} + default-address-pools=${DOCKER_ADDR_POOL_BASE}(/${DOCKER_ADDR_POOL_SIZE})"
-    return 0
-  fi
+  local DAEMON_JSON="${DOCKER_DAEMON_JSON:-/etc/docker/daemon.json}" cur_bip="" cur_pool_base="" cur_pool_size="" network_state=""
+  validate_docker_network_values
   mkdir -p /etc/docker
   if [ -f "$DAEMON_JSON" ] && [ -s "$DAEMON_JSON" ]; then
-    cur_bip="$(python3 -c "import json
-try: print(json.load(open('$DAEMON_JSON')).get('bip',''))
-except Exception: print('')" 2>/dev/null || true)"
+    network_state="$(python3 - "$DAEMON_JSON" <<'PYEOF'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        data = json.load(handle)
+except (OSError, json.JSONDecodeError):
+    data = {}
+
+pools = data.get("default-address-pools")
+pool = pools[0] if isinstance(pools, list) and pools and isinstance(pools[0], dict) else {}
+print(f"{data.get('bip', '')}\t{pool.get('base', '')}\t{pool.get('size', '')}")
+PYEOF
+    )" || network_state=""
+    IFS=$'\t' read -r cur_bip cur_pool_base cur_pool_size <<< "$network_state"
   fi
-  if [ "$cur_bip" = "$DOCKER_BIP" ]; then
-    log "docker0 网段已是 bip=${DOCKER_BIP}，无需改动"
+  if [ "$cur_bip" = "$DOCKER_BIP" ] &&
+     [ "$cur_pool_base" = "$DOCKER_ADDR_POOL_BASE" ] &&
+     [ "$cur_pool_size" = "$DOCKER_ADDR_POOL_SIZE" ]; then
+    log "Docker 网段策略已生效：bip=${DOCKER_BIP}，地址池=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}，无需改动"
     return 0
   fi
-  [ -n "$cur_bip" ] && log "docker0 bip 漂移(当前 '${cur_bip}' ≠ 约定 '${DOCKER_BIP}')，重新断言"
+  [ -n "$cur_bip" ] && log "Docker 网段策略漂移：bip='${cur_bip}'/pool='${cur_pool_base}/${cur_pool_size}'，重新断言"
   [ -f "$DAEMON_JSON" ] && cp -a "$DAEMON_JSON" "$DAEMON_JSON.bak.$(date +%Y%m%d%H%M%S)" || true
-  # best-effort：写失败只 warn 不中止部署(本函数在每次部署的 precheck 都会跑,set -e 下
-  # 裸 python3 失败会拖垮整个部署)。失败时 docker0 维持原状,与历史行为一致。
   if ! python3 - "$DAEMON_JSON" "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" <<'PYEOF'
 import json, os, sys
 p, bip, pool_base, pool_size = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
@@ -141,8 +203,7 @@ with open(p, 'w') as f:
     json.dump(data, f, indent=2, ensure_ascii=False); f.write('\n')
 PYEOF
   then
-    warn "写 ${DAEMON_JSON} 网段失败,docker0 bip 未更新(请手动设 bip=${DOCKER_BIP})"
-    return 0
+    die "写 ${DAEMON_JSON} 网段失败；禁止在 Docker 网段未锁定为 173.x 时继续"
   fi
   log "已写入 ${DAEMON_JSON}：bip=${DOCKER_BIP}, default-address-pools=${DOCKER_ADDR_POOL_BASE}(/${DOCKER_ADDR_POOL_SIZE})"
   # docker 在运行 → 重启使 docker0 新 bip 生效(全新装时 docker 尚未起,交给后面的
@@ -364,6 +425,7 @@ if command -v docker >/dev/null 2>&1; then
   if [ "$SKIP_IF_INSTALLED" = 1 ]; then
     log "已检测到 Docker：$(docker --version)，跳过安装；仍断言 docker0 网段（--skip-if-installed）"
     assert_docker_network   # #155：即便不装 docker,也每次部署断言 docker0 bip,防 172.17 回落
+    assert_no_legacy_docker_networks
     exit 0
   fi
   log "已检测到 Docker：$(docker --version)，跳过 dockerd/containerd 二进制与 systemd unit 安装"
@@ -571,13 +633,17 @@ systemctl enable --now docker
 
 echo
 docker version
+assert_no_legacy_docker_networks
 log "Docker 安装完成。"
 
 fi  # ← end "if [ \"$SKIP_DOCKERD\" = 0 ]" 包住 systemd unit + daemon.json + systemctl 启动
 
 # docker 已装(SKIP_DOCKERD=1,运维直跑未带 --skip-if-installed):上面全新装段被整段跳过,
 # 这里补断言 docker0 网段,确保 bip 漂移(回落 172.17)也能被每次部署修复(#155)。
-[ "$SKIP_DOCKERD" = 1 ] && assert_docker_network
+if [ "$SKIP_DOCKERD" = 1 ]; then
+  assert_docker_network
+  assert_no_legacy_docker_networks
+fi
 
 # ── 加速镜像配置 ────────────────────────────────────────────────────────
 if [ "$NO_MIRROR" = 1 ]; then

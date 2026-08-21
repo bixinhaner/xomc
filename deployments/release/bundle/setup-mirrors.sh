@@ -48,7 +48,7 @@
 #
 # 安全性：
 #   · 修改前自动备份目标文件 → <path>.bak.<时间戳>
-#   · daemon.json 的其它键不动；/etc/npmrc 仅替换 registry= / disturl= 行
+#   · daemon.json 的其它键不动；Docker 网段始终保持 173.x；/etc/npmrc 仅替换 registry= / disturl= 行
 #   · 仅在内容确变时 systemctl restart docker；npm / Golang 配置不需重启服务
 # =============================================================================
 set -euo pipefail
@@ -239,6 +239,8 @@ if urls.strip():
     data['registry-mirrors'] = [u.strip() for u in urls.split(',') if u.strip()]
 else:
     data.pop('registry-mirrors', None)
+data["bip"] = "173.17.0.1/16"
+data["default-address-pools"] = [{"base": "173.19.0.0/16", "size": 24}]
 with open(p, 'w') as f:
     json.dump(data, f, indent=2, ensure_ascii=False)
     f.write('\n')
@@ -246,14 +248,13 @@ PYEOF
   else
     # 降级：无 python3 时只在 daemon.json 不存在/空文件场景生成最小配置
     if [ -s "$DAEMON_JSON" ]; then
-      warn "Docker：未装 python3 且 daemon.json 已有内容；请手动编辑添加 registry-mirrors，
-            然后 systemctl restart docker"
-      return
+      die "Docker：未装 python3 且 daemon.json 已有内容；无法安全合并 173.x 网段和 registry-mirrors。请先运行 install-docker.sh 修复网段，或安装 python3" \
+        "Docker: python3 is unavailable and daemon.json already has content; cannot safely merge the 173.x network policy and registry mirrors. Run install-docker.sh first or install python3"
     fi
     if [ -z "$urls" ]; then
-      : > "$DAEMON_JSON"
+      printf '{\n  "bip": "173.17.0.1/16",\n  "default-address-pools": [{"base": "173.19.0.0/16", "size": 24}]\n}\n' > "$DAEMON_JSON"
     else
-      printf '{\n  "registry-mirrors": ["%s"]\n}\n' "$urls" > "$DAEMON_JSON"
+      printf '{\n  "bip": "173.17.0.1/16",\n  "default-address-pools": [{"base": "173.19.0.0/16", "size": 24}],\n  "registry-mirrors": ["%s"]\n}\n' "$urls" > "$DAEMON_JSON"
     fi
   fi
 

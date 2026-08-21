@@ -47,7 +47,7 @@ bash diagnose-dns.sh
 nslookup mirrors.aliyun.com
 
 # 2. Docker 容器 DNS 正常吗?
-docker run --rm alpine:3.19 nslookup mirrors.aliyun.com
+docker run --network bridge --rm alpine:3.19 nslookup mirrors.aliyun.com
 
 # 3. Docker daemon 有 DNS 配置吗?
 cat /etc/docker/daemon.json | grep dns
@@ -131,7 +131,7 @@ ps aux | grep Docker
 # 3. 重新启动 Docker Desktop
 
 # 4. 验证 DNS 配置生效
-docker run --rm alpine:3.19 cat /etc/resolv.conf
+docker run --network bridge --rm alpine:3.19 cat /etc/resolv.conf
 
 # 5. 重新构建
 docker compose build
@@ -220,7 +220,7 @@ FROM registry.cn-hangzhou.aliyuncs.com/library/golang:1.25-alpine
 
 **症状**:
 ```
-docker run --rm alpine:3.19 wget https://mirrors.aliyun.com
+docker run --network bridge --rm alpine:3.19 wget https://mirrors.aliyun.com
 # wget: can't connect to remote host: Connection refused
 ```
 
@@ -312,7 +312,7 @@ RUN for i in 1 2 3; do \
 
 - [ ] **2. 容器 DNS 正常?**
   ```bash
-  docker run --rm alpine:3.19 nslookup mirrors.aliyun.com
+  docker run --network bridge --rm alpine:3.19 nslookup mirrors.aliyun.com
   ```
 
 - [ ] **3. Docker daemon 有 DNS 配置?**

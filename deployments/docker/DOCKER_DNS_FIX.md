@@ -3,6 +3,10 @@
 > **问题**: `docker compose build` 时 `go mod download` 报错 DNS 超时  
 > **错误**: `dial tcp: lookup mirrors.aliyun.com on 223.5.5.5:53: read udp 172.17.0.2:42280->223.5.5.5:53: i/o timeout`  
 > **创建时间**: 2025-04-10
+>
+> 以上 `172.17.0.2` 仅保留为历史故障样例。当前 Docker 网段策略统一使用 `173.x`，
+> 新建或重建 Docker 网络不得复用任何 `172.x` 网段；请以现行 Compose IPAM 和
+> `install-docker.sh` 的 173.x 校验为准。
 
 ---
 
@@ -76,6 +80,8 @@ bash fix-docker-dns.sh
 # 如果 /etc/docker/daemon.json 不存在
 sudo cat > /etc/docker/daemon.json << 'EOF'
 {
+  "bip": "173.17.0.1/16",
+  "default-address-pools": [{"base": "173.19.0.0/16", "size": 24}],
   "dns": [
     "223.5.5.5",
     "223.6.6.6",
@@ -118,7 +124,7 @@ docker builder prune -f
 **4. 测试 DNS 解析**
 
 ```bash
-docker run --rm alpine:3.19 nslookup mirrors.aliyun.com
+docker run --network bridge --rm alpine:3.19 nslookup mirrors.aliyun.com
 ```
 
 **5. 重新构建**
@@ -265,6 +271,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-migra
 # 1. 配置 Docker DNS (方案 1)
 sudo cat > /etc/docker/daemon.json << 'EOF'
 {
+  "bip": "173.17.0.1/16",
+  "default-address-pools": [{"base": "173.19.0.0/16", "size": 24}],
   "dns": ["223.5.5.5", "223.6.6.6", "114.114.114.114", "8.8.8.8"]
 }
 EOF
@@ -314,11 +322,11 @@ jobs:
 cat /etc/docker/daemon.json
 
 # 查看容器 DNS 配置
-docker run --rm alpine:3.19 cat /etc/resolv.conf
+docker run --network bridge --rm alpine:3.19 cat /etc/resolv.conf
 
 # 测试 DNS 解析
-docker run --rm alpine:3.19 nslookup mirrors.aliyun.com
-docker run --rm alpine:3.19 nslookup goproxy.cn
+docker run --network bridge --rm alpine:3.19 nslookup mirrors.aliyun.com
+docker run --network bridge --rm alpine:3.19 nslookup goproxy.cn
 ```
 
 ---
@@ -327,13 +335,13 @@ docker run --rm alpine:3.19 nslookup goproxy.cn
 
 ```bash
 # 测试 DNS 端口
-docker run --rm alpine:3.19 nc -vz -u 223.5.5.5 53
+docker run --network bridge --rm alpine:3.19 nc -vz -u 223.5.5.5 53
 
 # 测试 HTTPS 连接
-docker run --rm alpine:3.19 wget --spider https://mirrors.aliyun.com
+docker run --network bridge --rm alpine:3.19 wget --spider https://mirrors.aliyun.com
 
 # 测试 GOPROXY
-docker run --rm golang:1.25-alpine go env GOPROXY
+docker run --network bridge --rm golang:1.25-alpine go env GOPROXY
 ```
 
 ---
@@ -357,8 +365,8 @@ docker network ls
 docker network inspect bridge
 
 # 查看容器网络
-docker run --rm alpine:3.19 ip addr
-docker run --rm alpine:3.19 route -n
+docker run --network bridge --rm alpine:3.19 ip addr
+docker run --network bridge --rm alpine:3.19 route -n
 
 # 抓包分析
 sudo tcpdump -i docker0 port 53 -n
@@ -388,6 +396,8 @@ sudo journalctl -u docker -f
 # 1. 配置 Docker DNS
 sudo cat > /etc/docker/daemon.json << 'EOF'
 {
+  "bip": "173.17.0.1/16",
+  "default-address-pools": [{"base": "173.19.0.0/16", "size": 24}],
   "dns": ["223.5.5.5", "223.6.6.6", "114.114.114.114"]
 }
 EOF

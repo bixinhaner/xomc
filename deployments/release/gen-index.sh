@@ -216,7 +216,7 @@ sudo bash install-docker.sh --mirror daocloud       # 装完直接配 DaoCloud �
 sudo bash install-docker.sh --mirror xuanyuan       # 装完直接配轩辕加速(https://docker.xuanyuan.me)
 sudo bash install-docker.sh --mirror official       # 装完不配镜像,回归 Docker Hub 官方
 sudo bash install-docker.sh --no-mirror             # 装完不动 daemon.json,跳过加速引导
-sudo bash install-docker.sh --skip-if-installed     # 已装 docker 时静默 0 退出(脚本里调用)
+sudo bash install-docker.sh --skip-if-installed     # 已装 docker 时只断言 173.x 网段后退出(脚本里调用)
 sudo bash install-docker.sh --uninstall             # 卸载 docker 引擎(dry-run,仅列 9 步计划;不动 OMC 业务数据)
 sudo bash install-docker.sh --uninstall --force     # 真删:dockerd/二进制/systemd unit + apt/yum 系统包
 sudo bash install-docker.sh --uninstall --force --keep-data  # 真删但保留数据目录,日后重装可复用镜像

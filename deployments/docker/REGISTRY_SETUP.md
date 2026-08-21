@@ -64,6 +64,8 @@ failed to do request: Head "https://registry-1.docker.io/...": dial tcp ... i/o 
 sudo mkdir -p /etc/docker
 sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'
 {
+  "bip": "173.17.0.1/16",
+  "default-address-pools": [{"base": "173.19.0.0/16", "size": 24}],
   "registry-mirrors": [
     "https://docker.m.daocloud.io",
     "https://docker.1panel.live",
@@ -124,6 +126,8 @@ docker compose -f deployments/docker/docker-compose.yml up -d --build
 sudo mkdir -p /etc/docker
 sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'
 {
+  "bip": "173.17.0.1/16",
+  "default-address-pools": [{"base": "173.19.0.0/16", "size": 24}],
   "registry-mirrors": [
     "https://docker.m.daocloud.io",
     "https://docker.1panel.live",

@@ -217,7 +217,7 @@ http {
 }
 NGINX
     expect_success "nginx config test accepts repository 1024-bit certificate with web-only OpenSSL legacy config" \
-      docker run --rm \
+      docker run --network none --rm \
         -e OPENSSL_CONF=/etc/nginx/openssl-legacy.cnf \
         -v "$OPENSSL_LEGACY_CONF:/etc/nginx/openssl-legacy.cnf:ro" \
         -v "$REPO_CERT_DIR:/etc/nginx/cert:ro" \

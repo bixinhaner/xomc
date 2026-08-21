@@ -78,9 +78,9 @@ start_nats() {
   STORE="$(mktemp -d)"
   LOG="$STORE/nats.log"
   if [ "$NATS_SERVER_MODE" = docker ]; then
-    NATS_DOCKER_CID="$(docker run -d --rm --name "omc-gpv-nats-$$" \
-      -p "127.0.0.1:${PORT}:4222" -v "$STORE/data:/data" "$NATS_SERVER_IMAGE" \
-      -js -a 0.0.0.0 -p 4222 -sd /data)" || return 1
+    NATS_DOCKER_CID="$(docker run --network host -d --rm --name "omc-gpv-nats-$$" \
+      -v "$STORE/data:/data" "$NATS_SERVER_IMAGE" \
+      -js -a 127.0.0.1 -p "$PORT" -sd /data)" || return 1
     NATS_PID=""
   else
     "$NATS_SERVER_BIN" -js -a 127.0.0.1 -p "$PORT" -sd "$STORE/data" >"$LOG" 2>&1 &

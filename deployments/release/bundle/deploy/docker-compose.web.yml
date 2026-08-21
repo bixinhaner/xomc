@@ -13,6 +13,11 @@ networks:
   omcgo-net:
     name: omcgo-net
     driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 173.18.0.0/16
+          gateway: 173.18.0.1
 
 x-omc-json-log: &omc-json-log
   driver: json-file

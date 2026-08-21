@@ -231,6 +231,9 @@ PUBLIC_HOST_OVERRIDE="${OMC_PUBLIC_HOST:-}"
 INFRA_DIR="/opt/omc/infra"
 OMC_ROOT="/opt/omc"
 COMPOSE_PROJECT="omcgo"
+DOCKER_BIP="${DOCKER_BIP:-173.17.0.1/16}"
+DOCKER_ADDR_POOL_BASE="${DOCKER_ADDR_POOL_BASE:-173.19.0.0/16}"
+DOCKER_ADDR_POOL_SIZE="${DOCKER_ADDR_POOL_SIZE:-24}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -274,6 +277,105 @@ confirm() {
   prompt="$(install_message "$1" "${2:-}")"
   read -rp "$prompt [Y/n] " yn
   case "${yn:-Y}" in [Yy]*|"") return 0 ;; *) return 1 ;; esac
+}
+
+validate_docker_network_policy() {
+  command -v python3 >/dev/null 2>&1 ||
+    die "Docker 网段策略需要 python3 校验；禁止在无法校验时继续" "Docker network policy validation requires python3; refusing to continue without it" 1
+  python3 - "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" <<'PYEOF'
+import ipaddress
+import sys
+
+bip_value, pool_value, pool_size_value = sys.argv[1:]
+try:
+    bip_network = ipaddress.ip_interface(bip_value).network
+    pool_network = ipaddress.ip_network(pool_value, strict=False)
+    pool_size = int(pool_size_value)
+except (ValueError, TypeError) as exc:
+    raise SystemExit(f"invalid Docker network policy: {exc}")
+
+docker_range = ipaddress.ip_network("173.0.0.0/8")
+compose_network = ipaddress.ip_network("173.18.0.0/16")
+if not bip_network.subnet_of(docker_range):
+    raise SystemExit(f"Docker bip must be inside 173.0.0.0/8: {bip_value}")
+if not pool_network.subnet_of(docker_range):
+    raise SystemExit(f"Docker address pool must be inside 173.0.0.0/8: {pool_value}")
+if not 1 <= pool_size <= 32 or pool_size < pool_network.prefixlen:
+    raise SystemExit(f"invalid Docker address pool size: {pool_size_value}")
+if bip_network.overlaps(compose_network) or pool_network.overlaps(compose_network):
+    raise SystemExit("Docker bip/address pool overlaps the fixed 173.18.0.0/16 Compose network")
+if bip_network.overlaps(pool_network):
+    raise SystemExit("Docker bip overlaps the Docker automatic address pool")
+PYEOF
+}
+
+docker_network_policy_precheck() {
+  local daemon_json="${DOCKER_DAEMON_JSON:-/etc/docker/daemon.json}"
+  local network_state="" current_bip="" current_pool_base="" current_pool_size=""
+  local network_id network_name subnet
+  local -a forbidden_networks=()
+
+  validate_docker_network_policy ||
+    die "Docker 网段策略非法：bip=${DOCKER_BIP}，地址池=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}；必须使用互不重叠的 173.x 网段" "Invalid Docker network policy: bip=${DOCKER_BIP}, pool=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}; non-overlapping 173.x networks are required" 1
+
+  if [ -s "$daemon_json" ]; then
+    network_state="$(python3 - "$daemon_json" <<'PYEOF'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        data = json.load(handle)
+except (OSError, json.JSONDecodeError):
+    data = {}
+
+pools = data.get("default-address-pools")
+pool = pools[0] if isinstance(pools, list) and pools and isinstance(pools[0], dict) else {}
+print(f"{data.get('bip', '')}\t{pool.get('base', '')}\t{pool.get('size', '')}")
+PYEOF
+    )" || network_state=""
+    IFS=$'\t' read -r current_bip current_pool_base current_pool_size <<< "$network_state"
+  fi
+
+  if [ "$current_bip" != "$DOCKER_BIP" ] ||
+     [ "$current_pool_base" != "$DOCKER_ADDR_POOL_BASE" ] ||
+     [ "$current_pool_size" != "$DOCKER_ADDR_POOL_SIZE" ]; then
+    if [ "$CHECK_ONLY" = 1 ]; then
+      die "Docker 网段未锁定为 173.x：当前 bip=${current_bip:-<空>}，地址池=${current_pool_base:-<空>}/${current_pool_size:-<空>}；期望 bip=${DOCKER_BIP}，地址池=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}" "Docker networks are not locked to 173.x: current bip=${current_bip:-<empty>}, pool=${current_pool_base:-<empty>}/${current_pool_size:-<empty>}; expected bip=${DOCKER_BIP}, pool=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}" 1
+    fi
+    [ -f "$INFRA_DIR/docker/install-docker.sh" ] ||
+      die "Docker 网段未锁定且缺少修复脚本：$INFRA_DIR/docker/install-docker.sh；禁止继续启动容器" "Docker networks are not locked and the repair script is missing: $INFRA_DIR/docker/install-docker.sh; refusing to start containers" 1
+    log "Docker 网段未锁定，调用基础设施包修复为 173.x：bip=${DOCKER_BIP}，地址池=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}" "Docker networks are not locked; repairing them through the infrastructure bundle: bip=${DOCKER_BIP}, pool=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}"
+    DOCKER_BIP="$DOCKER_BIP" \
+    DOCKER_ADDR_POOL_BASE="$DOCKER_ADDR_POOL_BASE" \
+    DOCKER_ADDR_POOL_SIZE="$DOCKER_ADDR_POOL_SIZE" \
+      bash "$INFRA_DIR/docker/install-docker.sh" --skip-if-installed --no-mirror ||
+      die "Docker 网段修复失败；禁止继续启动容器" "Docker network repair failed; refusing to start containers" 1
+  fi
+
+  while IFS= read -r network_id; do
+    [ -n "$network_id" ] || continue
+    network_name="$(docker network inspect "$network_id" --format '{{.Name}}' 2>/dev/null || echo "$network_id")"
+    while IFS= read -r subnet; do
+      [ -n "$subnet" ] || continue
+      if ! python3 - "$subnet" <<'PYEOF'
+import ipaddress
+import sys
+
+try:
+    network = ipaddress.ip_network(sys.argv[1], strict=False)
+except ValueError:
+    raise SystemExit(1)
+raise SystemExit(0 if not network.overlaps(ipaddress.ip_network("172.0.0.0/8")) else 1)
+PYEOF
+      then
+        forbidden_networks+=("${network_name}:${subnet}")
+      fi
+    done < <(docker network inspect "$network_id" --format '{{range .IPAM.Config}}{{.Subnet}}{{"\n"}}{{end}}' 2>/dev/null || true)
+  done < <(docker network ls -q 2>/dev/null || true)
+
+  [ "${#forbidden_networks[@]}" -eq 0 ] ||
+    die "检测到 Docker 172.x 网络：${forbidden_networks[*]}；请先停止并删除旧 bridge 网络后重试，禁止带 172.x 路由启动" "Docker 172.x networks detected: ${forbidden_networks[*]}; stop and remove the old bridge networks before retrying, refusing to start with 172.x routes" 1
 }
 
 set_env_value() { # set_env_value <file> <key> <value>
@@ -545,7 +647,7 @@ heal_main_pg_timescaledb_downgrade() {
   case "${IMAGE_POSTGRES:-}" in *timescale*) return 0 ;; esac          # 目标本就 timescaledb，无陷阱
   docker volume inspect "$vol" >/dev/null 2>&1 || return 0             # 全新装，无存量卷
   local has_pre
-  has_pre="$(docker run --rm --entrypoint sh -v "$vol":/d:ro "$heal_img" \
+  has_pre="$(docker run --network none --rm --entrypoint sh -v "$vol":/d:ro "$heal_img" \
     -c "grep -E '^[[:space:]]*shared_preload_libraries[[:space:]]*=.*timescaledb' /d/postgresql.conf 2>/dev/null" 2>/dev/null || true)"
   [ -n "$has_pre" ] || return 0                                        # 已剥离/本就纯 PG → 跳过
 
@@ -561,7 +663,7 @@ heal_main_pg_timescaledb_downgrade() {
   # 重试场景下，上一轮 7.1 可能已建出 restart-loop 的 compose 主库容器在持卷，先移除释放卷（7.1 会重建）。
   docker rm -f "${COMPOSE_PROJECT}-postgres-1" >/dev/null 2>&1 || true
   log "自愈：用 $heal_img 临时挂卷启动主库 ..." "Recovery: starting the primary database with a temporary volume mount using $heal_img ..."
-  docker run -d --name "$cname" -e POSTGRES_PASSWORD=heal \
+  docker run --network none -d --name "$cname" -e POSTGRES_PASSWORD=heal \
     -v "$vol":/var/lib/postgresql/data "$heal_img" >/dev/null 2>&1 \
     || die "自愈：临时容器启动失败（$cname）" "Recovery failed: temporary container $cname could not start" 3
   local ok=0 i
@@ -729,6 +831,8 @@ if [ "$SKIP_INFRA" = 0 ]; then
 else
   precheck_skipped_infra_images
 fi
+
+docker_network_policy_precheck
 
 log "precheck 通过" "Precheck passed"
 

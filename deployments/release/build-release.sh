@@ -74,6 +74,50 @@ validate_release_https_cert_assets() { # validate_release_https_cert_assets <dir
     die "OMC HTTPS 8443 证书与私钥不匹配：$cert / $key"
 }
 
+validate_release_migration_baseline() {
+  local baseline="$REPO_ROOT/omcgo/migrations/000001_init_schema.sql"
+  [ -f "$baseline" ] || die "缺少主库迁移基线：$baseline"
+  log "校验迁移基线的 Goose 语句边界 ..."
+  awk '
+    BEGIN { statement_open = 0; dollar_blocks = 0; errors = 0 }
+    /^-- \+goose StatementBegin[[:space:]]*$/ {
+      if (statement_open) {
+        print "nested Goose StatementBegin at line " NR > "/dev/stderr"
+        errors = 1
+      }
+      statement_open = 1
+      next
+    }
+    /^[[:space:]]*(DO|AS)[[:space:]]+\$[^[:space:]]*\$/ {
+      dollar_blocks++
+      if (!statement_open) {
+        print "PL/pgSQL dollar-quoted block lacks Goose StatementBegin at line " NR > "/dev/stderr"
+        errors = 1
+      }
+    }
+    /^-- \+goose StatementEnd[[:space:]]*$/ {
+      if (!statement_open) {
+        print "Goose StatementEnd without StatementBegin at line " NR > "/dev/stderr"
+        errors = 1
+      }
+      statement_open = 0
+      next
+    }
+    END {
+      if (statement_open) {
+        print "Goose StatementBegin without StatementEnd" > "/dev/stderr"
+        errors = 1
+      }
+      if (dollar_blocks == 0) {
+        print "migration baseline contains no PL/pgSQL dollar-quoted blocks" > "/dev/stderr"
+        errors = 1
+      }
+      exit errors
+    }
+  ' "$baseline" ||
+    die "迁移基线校验失败：PL/pgSQL 语句必须使用成对的 -- +goose StatementBegin/StatementEnd"
+}
+
 copy_release_https_cert_assets() { # copy_release_https_cert_assets <stage>
   local stage="$1" dst
   dst="$stage/$RELEASE_HTTPS_CERT_PACKAGE_DIR"
@@ -143,6 +187,8 @@ if [ "$VERIFY_HTTPS_CERT_PACKAGE_LAYOUT_ONLY" = 1 ]; then
   log "OMC HTTPS 8443 证书发布包路径校验通过：$RELEASE_HTTPS_CERT_PACKAGE_DIR/cert.pem / key.pem"
   exit 0
 fi
+
+validate_release_migration_baseline
 
 log "运行发布前回归门禁 ..."
 RELEASE_VERIFY_SCRIPTS=(

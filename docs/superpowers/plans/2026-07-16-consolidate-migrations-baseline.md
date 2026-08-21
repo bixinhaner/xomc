@@ -44,7 +44,7 @@ Run:
 ```bash
 mkdir -p /tmp/omc-migration-baseline
 docker build -f deployments/docker/Dockerfile.app -t omcgo-migration-baseline:20260716 .
-docker network create omc-migration-baseline
+docker network create --driver bridge --subnet 173.21.0.0/16 --gateway 173.21.0.1 omc-migration-baseline
 docker run --rm -d --name omc-baseline-main-golden --network omc-migration-baseline --tmpfs /var/lib/postgresql/data:rw -e POSTGRES_USER=omcgo -e POSTGRES_PASSWORD=omcgo123 -e POSTGRES_DB=omcgo postgres:16-alpine
 docker run --rm -d --name omc-baseline-tsdb-golden --network omc-migration-baseline --tmpfs /var/lib/postgresql/data:rw -e POSTGRES_USER=omcgo -e POSTGRES_PASSWORD=omcgo123 -e POSTGRES_DB=omcgo timescale/timescaledb:2.25.2-pg16
 ```

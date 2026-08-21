@@ -116,6 +116,17 @@ EOF
   chmod +x "$bin/id" "$bin/docker" "$bin/systemctl" "$bin/sha256sum"
 }
 
+write_docker_daemon_json() {
+  cat >"$1" <<'EOF'
+{
+  "bip": "173.17.0.1/16",
+  "default-address-pools": [
+    {"base": "173.19.0.0/16", "size": 24}
+  ]
+}
+EOF
+}
+
 run_install() {
   local pkg="$1" root="$2" bin="$3" output="$4"
   shift 4
@@ -123,6 +134,7 @@ run_install() {
     PATH="$bin:$PATH" \
     DOCKER_LOG="$TMP/docker.log" \
     SYSTEMCTL_LOG="$TMP/systemctl.log" \
+    DOCKER_DAEMON_JSON="$TMP/daemon.json" \
     REAL_CP="${REAL_CP:-}" \
     bash "$pkg/deploy/install.sh" \
       --skip-infra --skip-monitoring --skip-web --yes \
@@ -135,6 +147,7 @@ ROOT_CHECK="$TMP/root-check"
 BIN_CHECK="$TMP/bin-check"
 prepare_package "$PKG_CHECK"
 prepare_stubs "$BIN_CHECK"
+write_docker_daemon_json "$TMP/daemon.json"
 mkdir -p "$ROOT_CHECK/releases/old/deploy" "$ROOT_CHECK/etc"
 ln -s "$ROOT_CHECK/releases/old" "$ROOT_CHECK/current"
 write_legacy_env "$ROOT_CHECK/releases/old/deploy/resources.env"

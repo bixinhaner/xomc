@@ -26,9 +26,9 @@ cd deployments/release
 
 可不下载；`build-release.sh` 会告警但继续，运维侧跳过"离线安装 Docker"即可。
 
-> ⚠️ **已装 Docker 的机器不会自动套用下面的网段配置**（`install-docker.sh` 的网段写入
-> 只在它真正安装/重装 dockerd 时执行）。已装机器请按"已装机器手动套用"一节手动改
-> `/etc/docker/daemon.json` 后 `systemctl restart docker`。
+> ⚠️ **已装 Docker 的机器也必须经过 173.x 网段断言**。`install-docker.sh
+> --skip-if-installed` 会校验并在必要时更新 `/etc/docker/daemon.json`、重启 Docker；发布
+> `install.sh` 也会在 Compose 启动前执行同一门禁。已有 172.x bridge 网络必须先停止并删除。
 
 ## Docker 网段规划（重要：避开公司 172.x 内网）
 
@@ -79,7 +79,8 @@ cd <部署目录> && docker compose down          # 停栈(释放旧 172.x 网�
 sudo systemctl restart docker                 # 重建 docker0 到 173.17
 docker network prune -f                        # 清掉残留的 172.x 旧网桥
 docker compose up -d                           # omcgo-net 按 173.18 重建
-# 校验:172.x 不应再指向 docker0;docker0 应为 173.17
-ip route | grep -E '172\.(17|18|19|28)|docker0'
+# 校验:Docker 路由和网络均应为 173.x；若仍列出 172.x，先删除对应旧网络
+ip -4 route
+docker network ls -q | xargs -r docker network inspect --format '{{.Name}} {{range .IPAM.Config}}{{.Subnet}} {{end}}'
 ```
 回滚：`sudo cp /etc/docker/daemon.json.bak /etc/docker/daemon.json && sudo systemctl restart docker`。

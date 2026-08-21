@@ -22,6 +22,16 @@ echo "-----------------------------------------"
 echo "Docker 网络列表:"
 docker network ls | grep bridge
 
+echo "Docker 173.x 网段检查:"
+BRIDGE_SUBNETS="$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true)"
+if ! printf '%s' "$BRIDGE_SUBNETS" | grep -Eq '(^|[[:space:]])173\.'; then
+    echo -e "${RED}❌ Docker bridge 仍使用 172.x：${BRIDGE_SUBNETS:-未知}${NC}"
+    echo "  请先运行: sudo bash /opt/omc/infra/docker/install-docker.sh --skip-if-installed --no-mirror"
+    exit 1
+else
+    echo -e "${GREEN}✅ Docker bridge 使用 173.x：$BRIDGE_SUBNETS${NC}"
+fi
+
 echo ""
 echo "bridge 网络详情:"
 docker network inspect bridge | jq '.[0].IPAM.Config'
@@ -78,7 +88,7 @@ echo "-----------------------------------------"
 
 # 启动测试容器
 echo "启动测试容器..."
-CONTAINER_ID=$(docker run -d --rm alpine:3.19 sleep 300)
+CONTAINER_ID=$(docker run --network bridge -d --rm alpine:3.19 sleep 300)
 
 echo ""
 echo "容器 IP 地址:"
@@ -110,11 +120,10 @@ else
 fi
 
 echo -n "  ping 宿主机... "
-HOST_IP=$(docker exec $CONTAINER_ID route -n | grep '^0.0.0.0' | awk '{print $2}' | sed 's/\.1$/\.1/')
-if docker exec $CONTAINER_ID ping -c 1 -W 2 172.17.0.1 > /dev/null 2>&1; then
-    echo -e "${GREEN}✅ 通 (172.17.0.1)${NC}"
+if [ -n "$GATEWAY" ] && docker exec "$CONTAINER_ID" ping -c 1 -W 2 "$GATEWAY" > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ 通 ($GATEWAY)${NC}"
 else
-    echo -e "${RED}❌ 不通 (172.17.0.1)${NC}"
+    echo -e "${RED}❌ 不通 (网关: ${GATEWAY:-未知})${NC}"
 fi
 
 # 清理
