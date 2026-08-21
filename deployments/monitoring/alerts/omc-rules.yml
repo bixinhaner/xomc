@@ -650,6 +650,67 @@ groups:
             durable consumer 存在未确认消息，且 ack rate 持续低于 delivery rate，
             backlog slope 同时为正。worker 已无法追平输入，需扩容或排查数据库瓶颈。
 
+      - alert: OMCCommandConsumerAckFailures
+        expr: increase(omc_eventbus_ack_failures_total{subject="command.get_parameters.response"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: command
+        annotations:
+          summary: "COMMAND/GPV consumer ACK 操作失败"
+          description: |
+            COMMAND/GPV consumer 的 Ack/Nak/Term/InProgress 操作持续失败。
+            Impact: JetStream 可能重投已处理消息，或 ack floor 无法推进。
+            Action: 按 durable/action/error_class 联查 NATS 连接、consumer 状态和应用日志。
+
+      - alert: OMCCommandConsumerAckFloorStalled
+        expr: |
+          omc_eventbus_consumer_ack_pending{subject="command.get_parameters.response"} > 0
+          and on (subject, durable)
+          omc_eventbus_consumer_oldest_age_seconds{subject="command.get_parameters.response"} > 300
+          and on (subject, durable)
+          changes(omc_eventbus_consumer_ack_sequence{subject="command.get_parameters.response"}[10m]) == 0
+        for: 10m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: command
+        annotations:
+          summary: "COMMAND/GPV durable ack floor 停滞"
+          description: |
+            durable consumer 存在未确认消息，最老消息超过 5 分钟，且 ack floor 10 分钟未推进。
+            Impact: GPV 响应可能积压并触发重投，单设备慢处理可能拖累参数同步。
+            Action: 联查 handler 耗时、本地队列深度、redelivery、ACK 失败和对应 durable 的 NATS ConsumerInfo。
+
+      - alert: OMCCommandConsumerRedeliveryHigh
+        expr: omc_eventbus_consumer_redelivered{subject="command.get_parameters.response"} > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: command
+        annotations:
+          summary: "COMMAND/GPV durable 出现持续 redelivery"
+          description: |
+            COMMAND/GPV durable consumer 持续存在重投消息。
+            Impact: 可能说明 handler 慢、ACK 失败或 NATS ack_wait 设置不足。
+            Action: 检查 omc_eventbus_handler_duration_seconds、omc_eventbus_ack_failures_total 和 NATS consumer 配置。
+
+      - alert: OMCCommandConsumerQueueSampleStale
+        expr: time() - omc_eventbus_consumer_sample_timestamp_seconds{subject="command.get_parameters.response"} > 300
+        for: 2m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: command
+        annotations:
+          summary: "COMMAND/GPV durable 健康样本已陈旧"
+          description: |
+            COMMAND/GPV consumer 超过 5 分钟没有新鲜 durable 健康样本。
+            Impact: 运维无法确认 ack floor、pending 和 redelivery 是否仍在推进。
+            Action: 检查采样器日志、NATS 管理查询和对应进程的 metrics 暴露。
+
       - alert: OMCPMStreamingAggregationNotReady
         expr: omc_pm_aggregation_ready == 0
         for: 2m
