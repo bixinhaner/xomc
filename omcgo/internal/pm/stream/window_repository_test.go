@@ -64,7 +64,7 @@ func TestClaimDueNewestOrderCanUseDueClaimIndexBackwards(t *testing.T) {
 		t.Fatalf("build newest claim SQL: %v", err)
 	}
 	if !strings.Contains(query,
-		"w.window_end DESC, w.task_version_id DESC, w.entity_key DESC, w.window_start DESC") {
+		"w.window_end DESC, w.entity_key DESC, w.task_version_id DESC, w.window_start DESC") {
 		t.Fatalf("newest claim order must be the exact reverse of the due-claim index: %q", query)
 	}
 }

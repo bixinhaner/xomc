@@ -345,17 +345,41 @@ func (r *Recovery) ReplayWindow(ctx context.Context, key WindowKey) error {
 	return nil
 }
 
-// ReplayDurableDeviceHour idempotently replays retained normalized PM events
-// into an incomplete synthetic device hour immediately before publication.
-// Existing source_file_id values are ignored by Redis, so this can only fill
-// missing slots; it cannot double-count the slots that were already accepted.
+// ReplayDurableDeviceHour is the single-version compatibility view of the
+// shared device-hour replay. Existing source_file_id values are ignored by
+// Redis, so replay can only fill missing slots and cannot double-count slots
+// that were already accepted.
 func (r *Recovery) ReplayDurableDeviceHour(
 	ctx context.Context,
 	key WindowKey,
 ) (bool, error) {
-	if r == nil || r.outbox == nil || r.store == nil ||
-		r.snapshot == nil || r.matcher == nil {
-		return false, fmt.Errorf("durable PM device-hour replay is not configured")
+	batch, err := r.LoadDurableDeviceHourVersions(ctx, key)
+	if err != nil {
+		return false, err
+	}
+	outcome, err := r.AccumulateDurableDeviceHourVersion(ctx, key, batch)
+	if err != nil {
+		return false, err
+	}
+	return outcome.Complete, nil
+}
+
+// DeviceHourReplayBatch is the immutable result of one device-hour SQL read,
+// JSON decode and rule match. It contains no Redis writes; a claimed finalize
+// job must explicitly apply only its own WindowKey contributions.
+type DeviceHourReplayBatch struct {
+	Contributions map[uuid.UUID][]Contribution
+	SourceRows    int64
+}
+
+// LoadDurableDeviceHourVersions reads and decodes one device-hour source once,
+// then caches matched contributions by task version without mutating Redis.
+func (r *Recovery) LoadDurableDeviceHourVersions(
+	ctx context.Context,
+	key WindowKey,
+) (*DeviceHourReplayBatch, error) {
+	if r == nil || r.outbox == nil || r.snapshot == nil || r.matcher == nil {
+		return nil, fmt.Errorf("durable PM device-hour replay is not configured")
 	}
 	snapshot := r.snapshot.Current()
 	var version *TaskVersionSnapshot
@@ -363,24 +387,36 @@ func (r *Recovery) ReplayDurableDeviceHour(
 		version = snapshot.ByVersion[key.TaskVersionID]
 	}
 	if version == nil || !version.DevicePipeline || key.Granularity != GranularityHourly {
-		return false, nil
+		return nil, nil
 	}
 
-	_, complete, matched, err := replayDurableDeviceHourSources(
+	batch, err := loadDurableDeviceHourVersionSources(
 		ctx,
 		key,
 		snapshot,
 		r.matcher,
-		r.outbox.VisitPayloadsForPeriod,
-		r.store.Accumulate,
+		r.outbox.VisitPayloadsForDevicePeriod,
 	)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	if !matched {
-		return false, nil
+	return batch, nil
+}
+
+// AccumulateDurableDeviceHourVersion applies only the currently claimed
+// WindowKey. Contributions cached for prepared, published or otherwise
+// unclaimed versions remain read-only and must follow their normal rebuild path.
+func (r *Recovery) AccumulateDurableDeviceHourVersion(
+	ctx context.Context,
+	key WindowKey,
+	batch *DeviceHourReplayBatch,
+) (DeviceHourReplayOutcome, error) {
+	if r == nil || r.store == nil {
+		return DeviceHourReplayOutcome{}, fmt.Errorf("durable PM device-hour accumulator is not configured")
 	}
-	return complete, nil
+	return accumulateDurableDeviceHourVersionSources(
+		ctx, key, batch, r.store.Accumulate,
+	)
 }
 
 type durablePayloadVisitor func(
@@ -395,6 +431,22 @@ type contributionAccumulatorFunc func(
 	Contribution,
 ) (AccumulateResult, error)
 
+type durableDevicePayloadVisitor func(
+	context.Context,
+	uuid.UUID,
+	time.Time,
+	time.Time,
+	func(event.PMAggregationNormalizedPayload) error,
+) error
+
+// DeviceHourReplayOutcome records one task version's independent result from
+// a durable source read shared by all versions of the same device-hour.
+type DeviceHourReplayOutcome struct {
+	ReceivedSlots int64
+	Complete      bool
+	Matched       bool
+}
+
 func replayDurableDeviceHourSources(
 	ctx context.Context,
 	key WindowKey,
@@ -403,13 +455,49 @@ func replayDurableDeviceHourSources(
 	visit durablePayloadVisitor,
 	accumulate contributionAccumulatorFunc,
 ) (received int64, complete bool, matched bool, err error) {
-	if snapshot == nil || matcher == nil || visit == nil || accumulate == nil {
-		return 0, false, false, fmt.Errorf("durable PM device-hour replay dependencies are incomplete")
+	batch, err := loadDurableDeviceHourVersionSources(
+		ctx, key, snapshot, matcher,
+		func(
+			ctx context.Context, _ uuid.UUID, start, end time.Time,
+			fn func(event.PMAggregationNormalizedPayload) error,
+		) error {
+			return visit(ctx, start, end, fn)
+		},
+	)
+	if err != nil {
+		return 0, false, false, err
 	}
-	err = visit(ctx, key.Start, key.End, func(payload event.PMAggregationNormalizedPayload) error {
-		if payload.DeviceID.String() != key.EntityKey {
+	outcome, err := accumulateDurableDeviceHourVersionSources(
+		ctx, key, batch, accumulate,
+	)
+	if err != nil {
+		return outcome.ReceivedSlots, outcome.Complete, outcome.Matched, err
+	}
+	return outcome.ReceivedSlots, outcome.Complete, outcome.Matched, nil
+}
+
+func loadDurableDeviceHourVersionSources(
+	ctx context.Context,
+	key WindowKey,
+	snapshot *TaskSnapshot,
+	matcher *Matcher,
+	visit durableDevicePayloadVisitor,
+) (*DeviceHourReplayBatch, error) {
+	if snapshot == nil || matcher == nil || visit == nil {
+		return nil, fmt.Errorf("durable PM device-hour replay dependencies are incomplete")
+	}
+	deviceID, err := uuid.Parse(key.EntityKey)
+	if err != nil {
+		return nil, fmt.Errorf("parse durable PM device-hour entity %q: %w", key.EntityKey, err)
+	}
+	batch := &DeviceHourReplayBatch{
+		Contributions: make(map[uuid.UUID][]Contribution),
+	}
+	err = visit(ctx, deviceID, key.Start, key.End, func(payload event.PMAggregationNormalizedPayload) error {
+		if payload.DeviceID != deviceID {
 			return nil
 		}
+		batch.SourceRows++
 		contributions, matchErr := matcher.MatchGranularity(
 			payload, snapshot, GranularityHourly,
 		)
@@ -417,25 +505,53 @@ func replayDurableDeviceHourSources(
 			return fmt.Errorf("match durable PM device-hour source: %w", matchErr)
 		}
 		for _, contribution := range contributions {
-			if !sameWindowKey(contribution.Key, key) {
+			if contribution.Key.EntityKey != key.EntityKey ||
+				contribution.Key.Granularity != key.Granularity ||
+				!contribution.Key.Start.Equal(key.Start) ||
+				!contribution.Key.End.Equal(key.End) {
 				continue
 			}
-			result, accumulateErr := accumulate(ctx, contribution)
-			if accumulateErr != nil {
-				return fmt.Errorf("accumulate durable PM device-hour source: %w", accumulateErr)
-			}
-			matched = true
-			if result.ReceivedSlots > received {
-				received = result.ReceivedSlots
-			}
-			complete = complete || result.Complete
+			versionID := contribution.Key.TaskVersionID
+			batch.Contributions[versionID] = append(
+				batch.Contributions[versionID], contribution,
+			)
 		}
 		return nil
 	})
 	if err != nil {
-		return 0, false, matched, fmt.Errorf("replay durable PM device-hour sources: %w", err)
+		return nil, fmt.Errorf("replay durable PM device-hour sources: %w", err)
 	}
-	return received, complete, matched, nil
+	return batch, nil
+}
+
+func accumulateDurableDeviceHourVersionSources(
+	ctx context.Context,
+	key WindowKey,
+	batch *DeviceHourReplayBatch,
+	accumulate contributionAccumulatorFunc,
+) (DeviceHourReplayOutcome, error) {
+	if batch == nil || accumulate == nil {
+		return DeviceHourReplayOutcome{}, nil
+	}
+	contributions := batch.Contributions[key.TaskVersionID]
+	outcome := DeviceHourReplayOutcome{Matched: len(contributions) > 0}
+	for _, contribution := range contributions {
+		if !sameWindowKey(contribution.Key, key) {
+			continue
+		}
+		result, err := accumulate(ctx, contribution)
+		if err != nil {
+			return outcome, fmt.Errorf(
+				"accumulate durable PM device-hour source for task version %s: %w",
+				key.TaskVersionID, err,
+			)
+		}
+		if result.ReceivedSlots > outcome.ReceivedSlots {
+			outcome.ReceivedSlots = result.ReceivedSlots
+		}
+		outcome.Complete = outcome.Complete || result.Complete
+	}
+	return outcome, nil
 }
 
 func (r *Recovery) recoverySourceFor(key WindowKey) (recoverySource, error) {

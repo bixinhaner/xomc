@@ -102,3 +102,92 @@ func TestReplayDurableDeviceHourSourcesRecoversIssue266MissingQuarter(t *testing
 		(values[3][0]+values[3][1])/1000, 0.000001,
 		"the exact 21:45 contribution from issue #266 must be restored")
 }
+
+func TestReplayDurableDeviceHourSourcesReadsFourTargetRowsOnceForTwoVersionsAmongTenThousandDevices(t *testing.T) {
+	deviceID := uuid.MustParse("30f3d50f-e1c4-4c3a-89b1-ac9da9a51350")
+	hourStart := time.Date(2026, 8, 4, 21, 0, 0, 0, time.UTC)
+	first := &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(), Enabled: true,
+		Technology: "lte", Dimension: DimensionDevice, DevicePipeline: true,
+		Granularities: []Granularity{GranularityHourly}, EffectiveFrom: hourStart,
+		Counters: map[string]CounterRule{
+			"C000060011": {MetricPath: "C000060011", Aggregation: AggregationSum},
+		},
+		Members: map[uuid.UUID][]TaskMember{
+			deviceID: {{DeviceID: deviceID, DimensionKey: deviceID.String()}},
+		},
+	}
+	second := *first
+	second.TaskID, second.VersionID = uuid.New(), uuid.New()
+	snapshot := BuildTaskSnapshot([]*TaskVersionSnapshot{first, &second})
+	key := WindowKey{
+		TaskID: first.TaskID, TaskVersionID: first.VersionID, EntityKey: deviceID.String(),
+		Granularity: GranularityHourly, Start: hourStart, End: hourStart.Add(time.Hour),
+	}
+
+	deviceRows := make(map[uuid.UUID]int, 10_000)
+	deviceRows[deviceID] = 4
+	for len(deviceRows) < 10_000 {
+		deviceRows[uuid.New()] = 4
+	}
+	payloads := make([]event.PMAggregationNormalizedPayload, 4)
+	for index := range payloads {
+		payloads[index] = validNormalizedEvent()
+		payloads[index].EventID = uuid.New()
+		payloads[index].SourceFileID = uuid.New()
+		payloads[index].DeviceID = deviceID
+		payloads[index].Technology = "lte"
+		payloads[index].WindowStart = hourStart.Add(time.Duration(index) * slotDuration)
+		payloads[index].WindowEnd = payloads[index].WindowStart.Add(slotDuration)
+		payloads[index].Measurements = []event.PMAggregationMeasurement{{
+			Metrics: []event.PMAggregationMetric{{
+				MetricPath: "C000060011", MetricType: "counter", StatisType: "sum", Value: 1,
+			}},
+		}}
+	}
+
+	reads, decodedRows := 0, 0
+	visit := func(
+		_ context.Context, gotDevice uuid.UUID, start, end time.Time,
+		fn func(event.PMAggregationNormalizedPayload) error,
+	) error {
+		reads++
+		require.Equal(t, deviceID, gotDevice)
+		require.Equal(t, 4, deviceRows[gotDevice])
+		require.True(t, start.Equal(hourStart))
+		require.True(t, end.Equal(hourStart.Add(time.Hour)))
+		for _, payload := range payloads {
+			decodedRows++
+			if err := fn(payload); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	accumulated := map[uuid.UUID]int{}
+	accumulate := func(_ context.Context, contribution Contribution) (AccumulateResult, error) {
+		accumulated[contribution.Key.TaskVersionID]++
+		count := accumulated[contribution.Key.TaskVersionID]
+		return AccumulateResult{ReceivedSlots: int64(count), Complete: count == 4}, nil
+	}
+
+	batch, err := loadDurableDeviceHourVersionSources(
+		context.Background(), key, snapshot, NewMatcher(time.UTC), visit,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, reads, "one device-hour must perform one durable source read")
+	require.Equal(t, 4, decodedRows, "10k-device fixture must decode only the target device rows")
+	for _, versionID := range []uuid.UUID{first.VersionID, second.VersionID} {
+		versionKey := key
+		versionKey.TaskVersionID = versionID
+		outcome, applyErr := accumulateDurableDeviceHourVersionSources(
+			context.Background(), versionKey, batch, accumulate,
+		)
+		require.NoError(t, applyErr)
+		require.Equal(t, 4, accumulated[versionID], "each version still receives all four slots")
+		require.True(t, outcome.Matched)
+		require.True(t, outcome.Complete)
+		require.EqualValues(t, 4, outcome.ReceivedSlots)
+	}
+}

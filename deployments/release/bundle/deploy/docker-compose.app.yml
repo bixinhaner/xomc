@@ -134,6 +134,8 @@ services:
       - "postgres://${POSTGRES_TSDB_USER}:${POSTGRES_TSDB_PASSWORD}@127.0.0.1:5432/${POSTGRES_TSDB_DB}?sslmode=disable"
       - "--path"
       - "/etc/omcgo/migrations/tsdb"
+      - "--reconcile"
+      - "/etc/omcgo/tsdb-schema-reconcile.sql"
       - "up"
     # 一次性迁移任务：限额防失控，无需 stop_grace_period（自行退出）
     deploy:

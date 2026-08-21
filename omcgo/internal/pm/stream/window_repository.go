@@ -371,11 +371,11 @@ func claimDueUpdate(
 	candidates = applyClaimVersionFilter(candidates, filter)
 	if order == claimNewestFirst {
 		candidates = candidates.OrderBy(
-			"w.window_end DESC", "w.task_version_id DESC", "w.entity_key DESC", "w.window_start DESC",
+			"w.window_end DESC", "w.entity_key DESC", "w.task_version_id DESC", "w.window_start DESC",
 		)
 	} else {
 		candidates = candidates.OrderBy(
-			"w.window_end", "w.task_version_id", "w.entity_key", "w.window_start",
+			"w.window_end", "w.entity_key", "w.task_version_id", "w.window_start",
 		)
 	}
 	candidates = candidates.
