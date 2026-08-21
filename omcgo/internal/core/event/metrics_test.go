@@ -55,6 +55,39 @@ func TestEventBusMetricsObserveQueueStatsBoundsPMLabels(t *testing.T) {
 	t.Fatal("omc_pm_queue_pending was not registered")
 }
 
+func TestEventBusMetricsObserveCommandConsumerQueueStats(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewEventBusMetrics(reg)
+	sampledAt := time.Date(2026, time.August, 21, 10, 0, 0, 0, time.UTC)
+
+	m.observeQueueStats(SubjectCommandGetParamsResponse, "device-rpc-gpv", QueueStats{
+		Pending:             5,
+		AckPending:          1,
+		Redelivered:         2,
+		OldestPendingAge:    30 * time.Second,
+		LastSequence:        99,
+		AckSequence:         88,
+		DeliverySequence:    12,
+		AckConsumerSequence: 9,
+		AckGap:              3,
+		SampledAt:           sampledAt,
+	})
+	m.observeConsumerQueueSampleFailure(SubjectCommandGetParamsResponse, "device-rpc-gpv")
+
+	labels := []string{SubjectCommandGetParamsResponse, "device-rpc-gpv"}
+	assert.Equal(t, float64(5), testutil.ToFloat64(m.ConsumerPending.WithLabelValues(labels...)))
+	assert.Equal(t, float64(1), testutil.ToFloat64(m.ConsumerAckPending.WithLabelValues(labels...)))
+	assert.Equal(t, float64(2), testutil.ToFloat64(m.ConsumerRedelivered.WithLabelValues(labels...)))
+	assert.Equal(t, float64(30), testutil.ToFloat64(m.ConsumerOldestAgeSeconds.WithLabelValues(labels...)))
+	assert.Equal(t, float64(99), testutil.ToFloat64(m.ConsumerLastSequence.WithLabelValues(labels...)))
+	assert.Equal(t, float64(12), testutil.ToFloat64(m.ConsumerDeliverySequence.WithLabelValues(labels...)))
+	assert.Equal(t, float64(88), testutil.ToFloat64(m.ConsumerAckSequence.WithLabelValues(labels...)))
+	assert.Equal(t, float64(9), testutil.ToFloat64(m.ConsumerAckConsumerSequence.WithLabelValues(labels...)))
+	assert.Equal(t, float64(3), testutil.ToFloat64(m.ConsumerAckGap.WithLabelValues(labels...)))
+	assert.Equal(t, float64(sampledAt.Unix()), testutil.ToFloat64(m.ConsumerSampleTimestampSeconds.WithLabelValues(labels...)))
+	assert.Equal(t, float64(1), testutil.ToFloat64(m.ConsumerSampleFailures.WithLabelValues(labels...)))
+}
+
 func TestEventBusMetricsRegistersPMQueueMetricContract(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewEventBusMetrics(reg)
@@ -68,6 +101,17 @@ func TestEventBusMetricsRegistersPMQueueMetricContract(t *testing.T) {
 		names[family.GetName()] = true
 	}
 	for _, name := range []string{
+		"omc_eventbus_consumer_pending",
+		"omc_eventbus_consumer_ack_pending",
+		"omc_eventbus_consumer_redelivered",
+		"omc_eventbus_consumer_oldest_age_seconds",
+		"omc_eventbus_consumer_last_sequence",
+		"omc_eventbus_consumer_delivery_sequence",
+		"omc_eventbus_consumer_ack_sequence",
+		"omc_eventbus_consumer_ack_consumer_sequence",
+		"omc_eventbus_consumer_ack_gap",
+		"omc_eventbus_consumer_sample_timestamp_seconds",
+		"omc_eventbus_consumer_sample_failures_total",
 		"omc_pm_queue_pending",
 		"omc_pm_queue_ack_pending",
 		"omc_pm_queue_redelivered",
@@ -89,6 +133,10 @@ func TestNewEventBusMetrics_Registered(t *testing.T) {
 
 	// CounterVec 无观测时 Gather 不返回，先打一个点再断言注册成功。
 	m.inc("pm.file.received", deliveryOutcomeAck)
+	m.incAckFailure("pm.file.received", "pm-workers", "ack", "other")
+	m.observeHandlerDuration("pm.file.received", "pm-workers", time.Millisecond)
+	m.observeLocalQueueDepth("pm.file.received", "pm-workers", 1)
+	m.observeQueueStats(SubjectCommandGetParamsResponse, "device-rpc-gpv", QueueStats{SampledAt: time.Now()})
 	families, err := reg.Gather()
 	require.NoError(t, err)
 	names := map[string]bool{}
@@ -96,6 +144,10 @@ func TestNewEventBusMetrics_Registered(t *testing.T) {
 		names[f.GetName()] = true
 	}
 	assert.True(t, names["omc_eventbus_delivery_total"], "delivery counter should be registered")
+	assert.True(t, names["omc_eventbus_ack_failures_total"], "ack failure counter should be registered")
+	assert.True(t, names["omc_eventbus_handler_duration_seconds"], "handler duration histogram should be registered")
+	assert.True(t, names["omc_eventbus_local_queue_depth"], "local queue gauge should be registered")
+	assert.True(t, names["omc_eventbus_consumer_ack_gap"], "consumer ack gap gauge should be registered")
 }
 
 func TestEventBusMetrics_Inc_ByOutcome(t *testing.T) {
@@ -112,6 +164,20 @@ func TestEventBusMetrics_Inc_ByOutcome(t *testing.T) {
 		testutil.ToFloat64(m.DeliveryTotal.WithLabelValues("alarm.raised", deliveryOutcomeDropped)))
 }
 
+func TestEventBusMetrics_IncAckFailure_ByActionAndClass(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewEventBusMetrics(reg)
+
+	m.incAckFailure(SubjectCommandGetParamsResponse, "device-rpc-gpv", "ack", "other")
+	m.incAckFailure(SubjectCommandGetParamsResponse, "device-rpc-gpv", "ack", "other")
+	m.incAckFailure(SubjectCommandGetParamsResponse, "device-rpc-gpv", "in_progress", "deadline")
+
+	assert.Equal(t, float64(2),
+		testutil.ToFloat64(m.AckFailures.WithLabelValues(SubjectCommandGetParamsResponse, "device-rpc-gpv", "ack", "other")))
+	assert.Equal(t, float64(1),
+		testutil.ToFloat64(m.AckFailures.WithLabelValues(SubjectCommandGetParamsResponse, "device-rpc-gpv", "in_progress", "deadline")))
+}
+
 func TestEventBusMetrics_ContractUsesOnlyLowCardinalityLabels(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewEventBusMetrics(reg)
@@ -119,6 +185,7 @@ func TestEventBusMetrics_ContractUsesOnlyLowCardinalityLabels(t *testing.T) {
 	m.observeQueueStats("acs:taskq:DEVICE-SN-001", "redis:key:acs:taskq:DEVICE-SN-001", QueueStats{SampledAt: time.Now()})
 	m.observeQueueStats(SubjectPMFileReceived, pmQueueStatsDurable, QueueStats{SampledAt: time.Now()})
 	m.observeQueueSampleFailure(SubjectPMFileReceived, pmQueueStatsDurable)
+	m.incAckFailure(SubjectCommandGetParamsResponse, "device-rpc-gpv", "ack", "other")
 
 	families, err := reg.Gather()
 	require.NoError(t, err)
@@ -140,5 +207,10 @@ func TestEventBusMetrics_NilSafe(t *testing.T) {
 	var m *EventBusMetrics
 	assert.NotPanics(t, func() {
 		m.inc("any.subject", deliveryOutcomeAck)
+		m.incAckFailure("any.subject", "durable", "ack", "other")
+		m.observeHandlerDuration("any.subject", "durable", time.Millisecond)
+		m.observeLocalQueueDepth("any.subject", "durable", 1)
+		m.observeConsumerQueueSampleFailure("any.subject", "durable")
+		m.observeQueueStats("any.subject", "durable", QueueStats{})
 	})
 }

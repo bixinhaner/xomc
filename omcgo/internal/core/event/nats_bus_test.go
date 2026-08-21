@@ -10,6 +10,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -145,6 +146,7 @@ func TestNATSEventBusQueueStats(t *testing.T) {
 				assert.Equal(t, uint64(11), stats.AckSequence)
 				assert.Equal(t, uint64(18), stats.DeliverySequence)
 				assert.Equal(t, uint64(9), stats.AckConsumerSequence)
+				assert.Equal(t, uint64(9), stats.AckGap)
 			},
 		},
 		{
@@ -183,6 +185,7 @@ func TestNATSEventBusQueueStats(t *testing.T) {
 				assert.Zero(t, stats.Pending)
 				assert.Equal(t, 1, stats.AckPending)
 				assert.InDelta(t, 2*time.Minute, stats.OldestPendingAge, float64(250*time.Millisecond))
+				assert.Zero(t, stats.AckGap)
 			},
 		},
 		{
@@ -223,6 +226,12 @@ func TestNATSEventBusQueueStats(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAckGap(t *testing.T) {
+	assert.Equal(t, uint64(0), ackGap(3, 3))
+	assert.Equal(t, uint64(0), ackGap(2, 3))
+	assert.Equal(t, uint64(5), ackGap(8, 3))
 }
 
 func TestNATSEventBusQueueStatsMissingConsumer(t *testing.T) {
@@ -604,6 +613,41 @@ func TestDecideAck_PermanentError_ReturnsTermRegardlessOfDeliveries(t *testing.T
 	assert.Zero(t, d.backoff)
 }
 
+func TestProcessMsgRecordsAckFailureAndHandlerDuration(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewEventBusMetrics(reg)
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.SetMetrics(metrics)
+	evt, err := NewEvent(SubjectCommandGetParamsResponse, map[string]any{"device_sn": "SN-ACK"})
+	require.NoError(t, err)
+	data, err := json.Marshal(evt)
+	require.NoError(t, err)
+
+	bus.processMsgWithDurable(
+		func(context.Context, Event) error { return nil },
+		&nats.Msg{Subject: SubjectCommandGetParamsResponse, Data: data},
+		maxDeliveries,
+		"device-rpc-gpv",
+	)
+
+	assert.Equal(t, float64(1),
+		testutil.ToFloat64(metrics.AckFailures.WithLabelValues(SubjectCommandGetParamsResponse, "device-rpc-gpv", "ack", "other")))
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	var observed bool
+	for _, family := range families {
+		if family.GetName() != "omc_eventbus_handler_duration_seconds" {
+			continue
+		}
+		for _, metric := range family.Metric {
+			if metric.GetHistogram().GetSampleCount() == 1 {
+				observed = true
+			}
+		}
+	}
+	assert.True(t, observed, "handler duration histogram must record the processed message")
+}
+
 func TestPullTuningForSubject_DefaultsAndOverride(t *testing.T) {
 	bus := NewNATSEventBus(nil, nil, zap.NewNop())
 
@@ -708,6 +752,32 @@ func TestKeyedDispatcherRunsDifferentDevicesInParallelAndSameDeviceInOrder(t *te
 	}
 }
 
+func TestKeyedDispatcherIsolatesDevicesThatWouldShareHashShard(t *testing.T) {
+	dispatcher := newKeyedDispatcher(2, 1)
+	t.Cleanup(dispatcher.Close)
+
+	keyA, keyB := keysForSameShard(2)
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	otherStarted := make(chan struct{})
+
+	require.NoError(t, dispatcher.Submit(context.Background(), keyA, func() {
+		close(firstStarted)
+		<-releaseFirst
+	}))
+	<-firstStarted
+	require.NoError(t, dispatcher.Submit(context.Background(), keyB, func() {
+		close(otherStarted)
+	}))
+
+	select {
+	case <-otherStarted:
+	case <-time.After(time.Second):
+		t.Fatal("different-device work sharing the old hash shard did not run in parallel")
+	}
+	close(releaseFirst)
+}
+
 func TestKeyedDispatcherAppliesBoundedBackpressure(t *testing.T) {
 	dispatcher := newKeyedDispatcher(1, 1)
 	t.Cleanup(dispatcher.Close)
@@ -750,6 +820,18 @@ func keysForDifferentShards(shards int) (string, string) {
 		}
 	}
 	panic("failed to find keys for distinct shards")
+}
+
+func keysForSameShard(shards int) (string, string) {
+	first := "SN-0"
+	firstShard := keyedShardIndex(first, shards)
+	for i := 1; i < 100; i++ {
+		candidate := fmt.Sprintf("SN-%d", i)
+		if keyedShardIndex(candidate, shards) == firstShard {
+			return first, candidate
+		}
+	}
+	panic("failed to find keys for same shard")
 }
 
 func TestUpdatedPullConsumerConfig_OverwritesMutableTuning(t *testing.T) {

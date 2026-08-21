@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -133,19 +134,35 @@ func keyedMaxAckPending(concurrency, queueDepth, requested int) int {
 
 type keyedJob func()
 
-// keyedDispatcher is a bounded, hash-sharded executor. FIFO within one shard
-// keeps all events for the same device ordered, while independent shards run
-// concurrently. Submit blocks at the configured queue depth, propagating
-// backpressure to JetStream instead of acknowledging work before it runs.
+// keyedDispatcher is a bounded per-key executor. FIFO within one key keeps all
+// events for the same device ordered, while different keys can run concurrently
+// up to the configured global limit. Submit blocks when total in-flight local
+// work reaches capacity, propagating backpressure to JetStream instead of
+// acknowledging work before it runs.
 type keyedDispatcher struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	queues    []chan keyedJob
-	wg        sync.WaitGroup
-	closeOnce sync.Once
+	ctx         context.Context
+	cancel      context.CancelFunc
+	queues      map[string][]keyedJob
+	active      map[string]bool
+	pendingSlot chan struct{}
+	workerSlot  chan struct{}
+	subject     string
+	durable     string
+	metrics     *EventBusMetrics
+	mu          sync.Mutex
+	wg          sync.WaitGroup
+	closeOnce   sync.Once
 }
 
 func newKeyedDispatcher(concurrency, queueDepth int) *keyedDispatcher {
+	return newObservedKeyedDispatcher(concurrency, queueDepth, "", "", nil)
+}
+
+func newObservedKeyedDispatcher(
+	concurrency, queueDepth int,
+	subject, durable string,
+	metrics *EventBusMetrics,
+) *keyedDispatcher {
 	if concurrency < 1 {
 		concurrency = 1
 	}
@@ -154,28 +171,18 @@ func newKeyedDispatcher(concurrency, queueDepth int) *keyedDispatcher {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &keyedDispatcher{
-		ctx:    ctx,
-		cancel: cancel,
-		queues: make([]chan keyedJob, concurrency),
+		ctx:         ctx,
+		cancel:      cancel,
+		queues:      make(map[string][]keyedJob),
+		active:      make(map[string]bool),
+		pendingSlot: make(chan struct{}, keyedMaxAckPending(concurrency, queueDepth, 0)),
+		workerSlot:  make(chan struct{}, concurrency),
+		subject:     subject,
+		durable:     durable,
+		metrics:     metrics,
 	}
-	for i := range d.queues {
-		queue := make(chan keyedJob, queueDepth)
-		d.queues[i] = queue
-		d.wg.Add(1)
-		go func() {
-			defer d.wg.Done()
-			for {
-				select {
-				case <-d.ctx.Done():
-					return
-				case job := <-queue:
-					if job != nil {
-						job()
-					}
-				}
-			}
-		}()
-	}
+	d.metrics.initConsumerObservation(subject, durable)
+	d.observeDepth()
 	return d
 }
 
@@ -183,20 +190,102 @@ func (d *keyedDispatcher) Submit(ctx context.Context, key string, job keyedJob) 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	queue := d.queues[keyedShardIndex(key, len(d.queues))]
 	select {
-	case queue <- job:
-		return nil
+	case d.pendingSlot <- struct{}{}:
+		d.observeDepth()
 	case <-ctx.Done():
 		return fmt.Errorf("submit keyed work: %w", ctx.Err())
 	case <-d.ctx.Done():
 		return fmt.Errorf("submit keyed work: dispatcher closed")
 	}
+
+	d.mu.Lock()
+	if err := d.ctx.Err(); err != nil {
+		d.mu.Unlock()
+		<-d.pendingSlot
+		d.observeDepth()
+		return fmt.Errorf("submit keyed work: dispatcher closed")
+	}
+	d.queues[key] = append(d.queues[key], job)
+	if !d.active[key] {
+		d.active[key] = true
+		d.wg.Add(1)
+		go d.runKey(key)
+	}
+	d.mu.Unlock()
+	return nil
 }
 
 func (d *keyedDispatcher) Close() {
 	d.closeOnce.Do(d.cancel)
 	d.wg.Wait()
+}
+
+func (d *keyedDispatcher) runKey(key string) {
+	defer d.wg.Done()
+	select {
+	case d.workerSlot <- struct{}{}:
+	case <-d.ctx.Done():
+		d.discardKey(key)
+		return
+	}
+	defer func() { <-d.workerSlot }()
+
+	for {
+		if err := d.ctx.Err(); err != nil {
+			d.discardKey(key)
+			return
+		}
+		job, ok := d.nextKeyJob(key)
+		if !ok {
+			return
+		}
+		if job != nil {
+			job()
+		}
+		<-d.pendingSlot
+		d.observeDepth()
+	}
+}
+
+func (d *keyedDispatcher) nextKeyJob(key string) (keyedJob, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	queue := d.queues[key]
+	if len(queue) == 0 {
+		delete(d.queues, key)
+		delete(d.active, key)
+		return nil, false
+	}
+	job := queue[0]
+	copy(queue, queue[1:])
+	queue[len(queue)-1] = nil
+	queue = queue[:len(queue)-1]
+	if len(queue) == 0 {
+		delete(d.queues, key)
+	} else {
+		d.queues[key] = queue
+	}
+	return job, true
+}
+
+func (d *keyedDispatcher) discardKey(key string) {
+	d.mu.Lock()
+	queue := d.queues[key]
+	delete(d.queues, key)
+	delete(d.active, key)
+	d.mu.Unlock()
+	for range queue {
+		<-d.pendingSlot
+		d.observeDepth()
+	}
+}
+
+func (d *keyedDispatcher) observeDepth() {
+	if d.metrics == nil || d.subject == "" || d.durable == "" {
+		return
+	}
+	d.metrics.observeLocalQueueDepth(d.subject, d.durable, len(d.pendingSlot))
 }
 
 func keyedShardIndex(key string, shardCount int) int {
@@ -209,12 +298,13 @@ func keyedShardIndex(key string, shardCount int) int {
 }
 
 // keepAckPendingAlive renews the JetStream acknowledgement deadline while a
-// message is waiting in a keyed shard or executing a slow handler. Without
-// this, queued messages can be redelivered after AckWait and overtake earlier
-// work for the same device.
+// message is waiting in a keyed queue or executing a slow handler. Without this,
+// queued messages can be redelivered after AckWait and overtake earlier work
+// for the same device.
 func (b *NATSEventBus) keepAckPendingAlive(
 	parent context.Context,
 	msg *nats.Msg,
+	durable string,
 	ackWait time.Duration,
 ) func() {
 	if parent == nil {
@@ -239,8 +329,10 @@ func (b *NATSEventBus) keepAckPendingAlive(
 				return
 			case <-ticker.C:
 				if err := msg.InProgress(); err != nil && ctx.Err() == nil {
+					b.observeAckFailure(msg.Subject, durable, "in_progress", err)
 					b.logger.Warn("renew keyed message ack deadline failed",
 						zap.String("subject", msg.Subject),
+						zap.String("durable", durable),
 						zap.Error(err))
 				}
 			}
@@ -265,6 +357,7 @@ type QueueStats struct {
 	OldestPendingAge    time.Duration
 	LastSequence        uint64
 	AckSequence         uint64
+	AckGap              uint64
 	DeliverySequence    uint64
 	AckConsumerSequence uint64
 	SampledAt           time.Time
@@ -368,6 +461,7 @@ func (b *NATSEventBus) QueueStats(ctx context.Context, subject, durable string) 
 		Redelivered:         consumer.NumRedelivered,
 		LastSequence:        streamInfo.State.LastSeq,
 		AckSequence:         consumer.AckFloor.Stream,
+		AckGap:              ackGap(consumer.Delivered.Consumer, consumer.AckFloor.Consumer),
 		DeliverySequence:    consumer.Delivered.Consumer,
 		AckConsumerSequence: consumer.AckFloor.Consumer,
 		SampledAt:           sampledAt,
@@ -380,6 +474,13 @@ func (b *NATSEventBus) QueueStats(ctx context.Context, subject, durable string) 
 	}
 
 	return stats, nil
+}
+
+func ackGap(delivered, acked uint64) uint64 {
+	if delivered <= acked {
+		return 0
+	}
+	return delivered - acked
 }
 
 // oldestRelevantPendingStart returns a safe lower bound for a single
@@ -429,6 +530,40 @@ func (b *NATSEventBus) PendingCount(subject, durable string) (uint64, error) {
 		return stats.Pending, nil
 	}
 	return stats.Pending + uint64(stats.AckPending), nil
+}
+
+func (b *NATSEventBus) runQueueStatsMetricSampler(ctx context.Context, subject, durable string, interval time.Duration) {
+	if b == nil || b.metrics == nil || !observableConsumerQueue(subject, durable) {
+		return
+	}
+	if interval <= 0 {
+		interval = QueueHealthSampleInterval
+	}
+	sample := func() {
+		sampleCtx, cancel := context.WithTimeout(ctx, defaultQueueHealthSampleTimeout)
+		defer cancel()
+		stats, err := b.QueueStats(sampleCtx, subject, durable)
+		if err != nil {
+			b.metrics.observeConsumerQueueSampleFailure(subject, durable)
+			b.logger.Warn("sample eventbus consumer queue health failed",
+				zap.String("subject", subject),
+				zap.String("durable", durable),
+				zap.Error(err))
+			return
+		}
+		b.metrics.observeQueueStats(subject, durable, stats)
+	}
+	sample()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sample()
+		}
+	}
 }
 
 // NewNATSEventBus creates an EventBus backed by NATS JetStream.
@@ -492,6 +627,7 @@ func (b *NATSEventBus) Publish(ctx context.Context, subject string, evt Event) e
 }
 
 func (b *NATSEventBus) Subscribe(subject string, handler EventHandler) (Subscription, error) {
+	b.metrics.initConsumerObservation(subject, "")
 	sub, err := b.js.Subscribe(subject, b.wrapHandler(handler, maxDeliveries),
 		nats.DeliverAll(),
 		nats.AckExplicit(),
@@ -515,8 +651,9 @@ func (b *NATSEventBus) QueueSubscribe(subject string, queue string, handler Even
 	if err != nil {
 		return nil, err
 	}
+	b.metrics.initConsumerObservation(subject, queue)
 
-	sub, err := b.js.QueueSubscribe(subject, queue, b.wrapHandler(handler, tuning.MaxDeliver),
+	sub, err := b.js.QueueSubscribe(subject, queue, b.wrapHandlerWithDurable(handler, tuning.MaxDeliver, queue),
 		nats.Bind(stream, queue),
 		nats.AckExplicit(),
 		nats.AckWait(tuning.AckWait),
@@ -605,8 +742,8 @@ func (b *NATSEventBus) ensureBoundQueueConsumer(
 
 // KeyedQueueSubscribe creates or binds a fixed push durable and dispatches its
 // messages by key. The single NATS callback preserves JetStream delivery order
-// while the bounded shard queues provide cross-key parallelism. A message is
-// settled only by the worker after handler completion; filling a shard queue
+// while bounded per-key queues provide cross-key parallelism. A message is
+// settled only by the worker after handler completion; filling local capacity
 // blocks the callback and lets MaxAckPending apply server-side backpressure.
 func (b *NATSEventBus) KeyedQueueSubscribe(
 	subject string,
@@ -700,28 +837,41 @@ func (b *NATSEventBus) KeyedQueueSubscribe(
 		// No delivery-policy option: bind without resetting consumer state.
 	}
 
-	dispatcher := newKeyedDispatcher(config.Concurrency, config.QueueDepth)
+	dispatcher := newObservedKeyedDispatcher(
+		config.Concurrency,
+		config.QueueDepth,
+		subject,
+		config.Durable,
+		b.metrics,
+	)
 	sub, err := b.js.QueueSubscribe(subject, config.Durable, func(msg *nats.Msg) {
-		stopProgress := b.keepAckPendingAlive(b.ctx, msg, tuning.AckWait)
+		stopProgress := b.keepAckPendingAlive(b.ctx, msg, config.Durable, tuning.AckWait)
 		evt, decodeErr := decodeEventBytes(msg.Data)
 		if decodeErr != nil {
 			stopProgress()
-			b.dropMalformedMsg(msg, decodeErr)
+			b.dropMalformedMsg(msg, config.Durable, decodeErr)
 			return
 		}
 		key, keyErr := keyFunc(evt)
 		if keyErr != nil {
 			stopProgress()
-			b.settleDecodedMsg(evt, msg, keyErr, tuning.MaxDeliver)
+			b.settleDecodedMsg(evt, msg, config.Durable, keyErr, tuning.MaxDeliver)
 			return
 		}
 		if submitErr := dispatcher.Submit(b.ctx, key, func() {
-			b.processKeyedMsg(b.ctx, evt, msg, tuning, handler)
+			b.processKeyedMsg(b.ctx, evt, msg, config.Durable, tuning, handler)
 			stopProgress()
 		}); submitErr != nil {
 			stopProgress()
 			b.metrics.inc(evt.Subject, deliveryOutcomeNak)
-			_ = msg.NakWithDelay(time.Second)
+			if err := msg.NakWithDelay(time.Second); err != nil {
+				b.observeAckFailure(evt.Subject, config.Durable, "nak", err)
+				b.logger.Error("nak keyed message after submit failure failed",
+					zap.String("subject", evt.Subject),
+					zap.String("durable", config.Durable),
+					zap.Error(err),
+					zap.NamedError("submit_error", submitErr))
+			}
 		}
 	}, options...)
 	if err != nil {
@@ -758,6 +908,7 @@ func (b *NATSEventBus) KeyedQueueSubscribe(
 		zap.Duration("ack_wait", tuning.AckWait),
 		zap.Int("max_deliver", tuning.MaxDeliver),
 		zap.Int("max_ack_pending", tuning.MaxAckPending))
+	go b.runQueueStatsMetricSampler(b.ctx, subject, config.Durable, QueueHealthSampleInterval)
 	return keyedSub, nil
 }
 
@@ -779,6 +930,7 @@ func (b *NATSEventBus) PullSubscribe(subject string, queue string, handler Event
 	if err := b.ensureBoundPullConsumer(stream, subject, durable, tuning, durableDeliveryPlan(info, 0)); err != nil {
 		return nil, err
 	}
+	b.metrics.initConsumerObservation(subject, durable)
 	options := []nats.SubOpt{
 		nats.Bind(stream, durable),
 		nats.AckExplicit(),
@@ -827,8 +979,8 @@ func (b *NATSEventBus) PullSubscribe(subject string, queue string, handler Event
 }
 
 // KeyedPullSubscribe preserves fetch order while dispatching different keys in
-// parallel. Messages are decoded and submitted to the hash shard sequentially
-// in JetStream delivery order; each shard then processes one key's events FIFO.
+// parallel. Messages are decoded and submitted sequentially in JetStream
+// delivery order; each key then processes its own events FIFO.
 func (b *NATSEventBus) KeyedPullSubscribe(
 	subject, queue string,
 	queueDepth int,
@@ -893,7 +1045,13 @@ func (b *NATSEventBus) KeyedPullSubscribe(
 
 	ctx, cancel := context.WithCancel(b.ctx)
 	ps := &pullSubscription{sub: sub, cancel: cancel, done: make(chan struct{})}
-	dispatcher := newKeyedDispatcher(tuning.Concurrency, queueDepth)
+	dispatcher := newObservedKeyedDispatcher(
+		tuning.Concurrency,
+		queueDepth,
+		subject,
+		durable,
+		b.metrics,
+	)
 	go b.runKeyedPullSubscription(
 		ctx,
 		ps,
@@ -919,6 +1077,7 @@ func (b *NATSEventBus) KeyedPullSubscribe(
 	if queue != durable {
 		b.cleanupLegacyPushConsumer(subject, queue)
 	}
+	go b.runQueueStatsMetricSampler(ctx, subject, durable, QueueHealthSampleInterval)
 	return ps, nil
 }
 
@@ -1321,7 +1480,7 @@ func (b *NATSEventBus) runPullSubscription(ctx context.Context, ps *pullSubscrip
 			go func(msg *nats.Msg) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				b.processMsg(handler, msg, tuning.MaxDeliver)
+				b.processMsgWithDurable(handler, msg, tuning.MaxDeliver, durable)
 			}(msg)
 		}
 	}
@@ -1363,30 +1522,30 @@ func (b *NATSEventBus) runKeyedPullSubscription(
 		}
 
 		// Fetch can return several messages at once. Start deadline renewal for
-		// the whole batch before a hot shard can block sequential submission.
+		// the whole batch before one hot key can block sequential submission.
 		stops := make([]func(), len(msgs))
 		for index, msg := range msgs {
-			stops[index] = b.keepAckPendingAlive(ctx, msg, tuning.AckWait)
+			stops[index] = b.keepAckPendingAlive(ctx, msg, durable, tuning.AckWait)
 		}
 		for index, msg := range msgs {
 			stopProgress := stops[index]
 			evt, decodeErr := decodeEventBytes(msg.Data)
 			if decodeErr != nil {
 				stopProgress()
-				b.dropMalformedMsg(msg, decodeErr)
+				b.dropMalformedMsg(msg, durable, decodeErr)
 				continue
 			}
 			key, keyErr := keyFunc(evt)
 			if keyErr != nil {
 				stopProgress()
-				b.settleDecodedMsg(evt, msg, keyErr, tuning.MaxDeliver)
+				b.settleDecodedMsg(evt, msg, durable, keyErr, tuning.MaxDeliver)
 				continue
 			}
 			currentMsg := msg
 			currentEvent := evt
 			currentStop := stopProgress
 			if submitErr := dispatcher.Submit(ctx, key, func() {
-				b.processKeyedMsg(ctx, currentEvent, currentMsg, QueueTuning{
+				b.processKeyedMsg(ctx, currentEvent, currentMsg, durable, QueueTuning{
 					AckWait:    tuning.AckWait,
 					MaxDeliver: tuning.MaxDeliver,
 				}, handler)
@@ -1394,7 +1553,14 @@ func (b *NATSEventBus) runKeyedPullSubscription(
 			}); submitErr != nil {
 				currentStop()
 				b.metrics.inc(currentEvent.Subject, deliveryOutcomeNak)
-				_ = currentMsg.NakWithDelay(time.Second)
+				if err := currentMsg.NakWithDelay(time.Second); err != nil {
+					b.observeAckFailure(currentEvent.Subject, durable, "nak", err)
+					b.logger.Error("nak keyed pull message after submit failure failed",
+						zap.String("subject", currentEvent.Subject),
+						zap.String("durable", durable),
+						zap.Error(err),
+						zap.NamedError("submit_error", submitErr))
+				}
 			}
 		}
 	}
@@ -1446,37 +1612,55 @@ func (b *NATSEventBus) Close() error {
 }
 
 func (b *NATSEventBus) wrapHandler(handler EventHandler, maxDelivery int) nats.MsgHandler {
+	return b.wrapHandlerWithDurable(handler, maxDelivery, "")
+}
+
+func (b *NATSEventBus) wrapHandlerWithDurable(handler EventHandler, maxDelivery int, durable string) nats.MsgHandler {
 	return func(msg *nats.Msg) {
-		b.processMsg(handler, msg, maxDelivery)
+		b.processMsgWithDurable(handler, msg, maxDelivery, durable)
 	}
 }
 
 func (b *NATSEventBus) processMsg(handler EventHandler, msg *nats.Msg, maxDelivery int) {
+	b.processMsgWithDurable(handler, msg, maxDelivery, "")
+}
+
+func (b *NATSEventBus) processMsgWithDurable(handler EventHandler, msg *nats.Msg, maxDelivery int, durable string) {
 	evt, parseErr := decodeEventBytes(msg.Data)
 	if parseErr != nil {
-		b.dropMalformedMsg(msg, parseErr)
+		b.dropMalformedMsg(msg, durable, parseErr)
 		return
 	}
 
+	startedAt := time.Now()
 	handlerErr := handler(b.ctx, evt)
-	b.settleDecodedMsg(evt, msg, handlerErr, maxDelivery)
+	b.metrics.observeHandlerDuration(evt.Subject, durable, time.Since(startedAt))
+	b.settleDecodedMsg(evt, msg, durable, handlerErr, maxDelivery)
 }
 
-func (b *NATSEventBus) dropMalformedMsg(msg *nats.Msg, parseErr error) {
+func (b *NATSEventBus) dropMalformedMsg(msg *nats.Msg, durable string, parseErr error) {
 	b.logger.Error("unmarshal event", zap.Error(parseErr))
 	// Permanent parse error — terminate to avoid infinite retry.
 	// subject 用 msg.Subject（已解出 evt 之前），保证 dropped 指标有 subject 维度。
 	b.metrics.inc(msg.Subject, deliveryOutcomeDropped)
-	_ = msg.Term()
+	if err := msg.Term(); err != nil {
+		b.observeAckFailure(msg.Subject, durable, "term", err)
+		b.logger.Error("terminate malformed event failed",
+			zap.String("subject", msg.Subject),
+			zap.String("durable", durable),
+			zap.Error(err),
+			zap.NamedError("parse_error", parseErr))
+	}
 }
 
 func (b *NATSEventBus) settleDecodedMsg(
 	evt Event,
 	msg *nats.Msg,
+	durable string,
 	handlerErr error,
 	maxDelivery int,
 ) {
-	b.settleDecodedMsgAtDelivery(evt, msg, handlerErr, messageDeliveryCount(msg), maxDelivery)
+	b.settleDecodedMsgAtDelivery(evt, msg, durable, handlerErr, messageDeliveryCount(msg), maxDelivery)
 }
 
 func messageDeliveryCount(msg *nats.Msg) uint64 {
@@ -1490,6 +1674,7 @@ func messageDeliveryCount(msg *nats.Msg) uint64 {
 func (b *NATSEventBus) settleDecodedMsgAtDelivery(
 	evt Event,
 	msg *nats.Msg,
+	durable string,
 	handlerErr error,
 	deliveries uint64,
 	maxDelivery int,
@@ -1498,7 +1683,14 @@ func (b *NATSEventBus) settleDecodedMsgAtDelivery(
 	switch decision.action {
 	case ackActionAck:
 		b.metrics.inc(evt.Subject, deliveryOutcomeAck)
-		_ = msg.Ack()
+		if err := msg.Ack(); err != nil {
+			b.observeAckFailure(evt.Subject, durable, "ack", err)
+			b.logger.Error("ack event failed",
+				zap.String("subject", evt.Subject),
+				zap.String("durable", durable),
+				zap.Uint64("delivery", deliveries),
+				zap.Error(err))
+		}
 	case ackActionTerm:
 		// 达到 maxDeliveries 后 Term 终止：消息被永久丢弃。此前只有 ERROR 日志，
 		// 无指标 → max-retries 终止"静默"。补 terminated 指标使其可告警。
@@ -1507,7 +1699,15 @@ func (b *NATSEventBus) settleDecodedMsgAtDelivery(
 			zap.String("subject", evt.Subject),
 			zap.Uint64("delivery", deliveries),
 			zap.Error(handlerErr))
-		_ = msg.Term()
+		if err := msg.Term(); err != nil {
+			b.observeAckFailure(evt.Subject, durable, "term", err)
+			b.logger.Error("terminate event failed",
+				zap.String("subject", evt.Subject),
+				zap.String("durable", durable),
+				zap.Uint64("delivery", deliveries),
+				zap.Error(err),
+				zap.NamedError("handler_error", handlerErr))
+		}
 	case ackActionNak:
 		b.metrics.inc(evt.Subject, deliveryOutcomeNak)
 		fields := []zap.Field{
@@ -1524,7 +1724,35 @@ func (b *NATSEventBus) settleDecodedMsgAtDelivery(
 		} else {
 			b.logger.Error("handle event (retrying)", fields...)
 		}
-		_ = msg.NakWithDelay(decision.backoff)
+		if err := msg.NakWithDelay(decision.backoff); err != nil {
+			b.observeAckFailure(evt.Subject, durable, "nak", err)
+			b.logger.Error("nak event failed",
+				zap.String("subject", evt.Subject),
+				zap.String("durable", durable),
+				zap.Uint64("delivery", deliveries),
+				zap.Duration("backoff", decision.backoff),
+				zap.Error(err),
+				zap.NamedError("handler_error", handlerErr))
+		}
+	}
+}
+
+func (b *NATSEventBus) observeAckFailure(subject, durable, action string, err error) {
+	b.metrics.incAckFailure(subject, durable, action, classifyAckError(err))
+}
+
+func classifyAckError(err error) string {
+	switch {
+	case err == nil:
+		return "none"
+	case errors.Is(err, context.Canceled):
+		return "context_canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline"
+	case errors.Is(err, io.EOF):
+		return "connection_closed"
+	default:
+		return "other"
 	}
 }
 
@@ -1536,6 +1764,7 @@ func (b *NATSEventBus) processKeyedMsg(
 	ctx context.Context,
 	evt Event,
 	msg *nats.Msg,
+	durable string,
 	tuning QueueTuning,
 	handler EventHandler,
 ) {
@@ -1547,13 +1776,16 @@ func (b *NATSEventBus) processKeyedMsg(
 	}
 	serverDelivery := messageDeliveryCount(msg)
 	for localAttempt := uint64(0); ; localAttempt++ {
+		startedAt := time.Now()
 		handlerErr := handler(ctx, evt)
+		b.metrics.observeHandlerDuration(evt.Subject, durable, time.Since(startedAt))
 		effectiveDelivery := serverDelivery + localAttempt
 		if handlerErr == nil || errors.Is(handlerErr, reliability.ErrPermanent) ||
 			effectiveDelivery >= uint64(tuning.MaxDeliver) {
 			b.settleDecodedMsgAtDelivery(
 				evt,
 				msg,
+				durable,
 				handlerErr,
 				effectiveDelivery,
 				tuning.MaxDeliver,
@@ -1567,7 +1799,15 @@ func (b *NATSEventBus) processKeyedMsg(
 			zap.Uint64("attempt", effectiveDelivery),
 			zap.Duration("backoff", backoff),
 			zap.Error(handlerErr))
-		_ = msg.InProgress()
+		if err := msg.InProgress(); err != nil {
+			b.observeAckFailure(evt.Subject, durable, "in_progress", err)
+			b.logger.Warn("mark keyed message in-progress failed",
+				zap.String("subject", evt.Subject),
+				zap.String("durable", durable),
+				zap.Uint64("attempt", effectiveDelivery),
+				zap.Error(err),
+				zap.NamedError("handler_error", handlerErr))
+		}
 		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
@@ -1575,7 +1815,13 @@ func (b *NATSEventBus) processKeyedMsg(
 				<-timer.C
 			}
 			b.metrics.inc(evt.Subject, deliveryOutcomeNak)
-			_ = msg.NakWithDelay(time.Second)
+			if err := msg.NakWithDelay(time.Second); err != nil {
+				b.observeAckFailure(evt.Subject, durable, "nak", err)
+				b.logger.Error("nak keyed message on shutdown failed",
+					zap.String("subject", evt.Subject),
+					zap.String("durable", durable),
+					zap.Error(err))
+			}
 			return
 		case <-timer.C:
 		}

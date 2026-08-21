@@ -1,0 +1,62 @@
+rule_files:
+  - omc-rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'omc_eventbus_ack_failures_total{subject="command.get_parameters.response",durable="device-rpc-gpv",action="ack",error_class="other"}'
+        values: '0 0 1 2 3 4 5 6 7'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: OMCCommandConsumerAckFailures
+        exp_alerts:
+          - exp_labels:
+              subject: command.get_parameters.response
+              durable: device-rpc-gpv
+              action: ack
+              error_class: other
+              severity: critical
+              domain: omc
+              subsystem: command
+
+  - interval: 1m
+    input_series:
+      - series: 'omc_eventbus_consumer_ack_pending{subject="command.get_parameters.response",durable="provision-gpv-pull"}'
+        values: '1x21'
+      - series: 'omc_eventbus_consumer_oldest_age_seconds{subject="command.get_parameters.response",durable="provision-gpv-pull"}'
+        values: '400x21'
+      - series: 'omc_eventbus_consumer_ack_gap{subject="command.get_parameters.response",durable="provision-gpv-pull"}'
+        values: '2x21'
+      - series: 'omc_eventbus_consumer_ack_sequence{subject="command.get_parameters.response",durable="provision-gpv-pull"}'
+        values: '10x21'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: OMCCommandConsumerAckFloorStalled
+        exp_alerts:
+          - exp_labels:
+              subject: command.get_parameters.response
+              durable: provision-gpv-pull
+              severity: critical
+              domain: omc
+              subsystem: command
+
+  - interval: 1m
+    input_series:
+      - series: 'omc_eventbus_consumer_ack_pending{subject="command.get_parameters.response",durable="device-rpc-gpv"}'
+        values: '5x21'
+      - series: 'omc_eventbus_consumer_delivery_sequence{subject="command.get_parameters.response",durable="device-rpc-gpv"}'
+        values: '0+10x21'
+      - series: 'omc_eventbus_consumer_ack_consumer_sequence{subject="command.get_parameters.response",durable="device-rpc-gpv"}'
+        values: '0+5x21'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: OMCCommandConsumerAckRateLagging
+        exp_alerts:
+          - exp_labels:
+              subject: command.get_parameters.response
+              durable: device-rpc-gpv
+              severity: critical
+              domain: omc
+              subsystem: command
