@@ -24,9 +24,10 @@ func TestRebootDevice_UPSProductClassQueuesReboot(t *testing.T) {
 	svc.taskSvc = taskSvc
 
 	devRepo.EXPECT().GetByID(gomock.Any(), deviceID).Return(&model.Device{
-		ID:           deviceID,
-		SerialNumber: "UPS-SN-001",
-		ProductClass: "UPS_M3_BMU",
+		ID:             deviceID,
+		SerialNumber:   "UPS-SN-001",
+		ProductClass:   "UPS_M3_BMU",
+		InformInterval: 300,
 	}, nil)
 
 	err := svc.RebootDevice(context.Background(), deviceID)
@@ -36,5 +37,31 @@ func TestRebootDevice_UPSProductClassQueuesReboot(t *testing.T) {
 	assert.Equal(t, "UPS-SN-001", taskSvc.lastReq.DeviceSN)
 	assert.Equal(t, "Reboot", taskSvc.lastReq.Method)
 	assert.Equal(t, task.TaskSourceAPI, taskSvc.lastReq.Source)
+	assert.Equal(t, 600, taskSvc.lastReq.ExpiresIn)
 	assert.NotEmpty(t, taskSvc.lastReq.CommandKey)
+}
+
+func TestRebootDevice_NonUPSUsesDefaultTaskExpiry(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	deviceID := uuid.New()
+	devRepo := NewMockDeviceRepository(ctrl)
+	taskSvc := &stubSuccessTaskSvc{taskID: "radio-reboot-task-1"}
+	svc := NewDeviceService(devRepo, nil, nil, nil, zap.NewNop())
+	svc.taskSvc = taskSvc
+
+	devRepo.EXPECT().GetByID(gomock.Any(), deviceID).Return(&model.Device{
+		ID:           deviceID,
+		SerialNumber: "RADIO-SN-001",
+		ProductClass: "FAP/BAIBLQ",
+	}, nil)
+
+	err := svc.RebootDevice(context.Background(), deviceID)
+
+	require.NoError(t, err)
+	require.NotNil(t, taskSvc.lastReq)
+	assert.Equal(t, "RADIO-SN-001", taskSvc.lastReq.DeviceSN)
+	assert.Equal(t, "Reboot", taskSvc.lastReq.Method)
+	assert.Equal(t, 0, taskSvc.lastReq.ExpiresIn)
 }

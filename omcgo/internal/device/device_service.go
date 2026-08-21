@@ -369,6 +369,7 @@ func (s *DeviceService) RebootDevice(ctx context.Context, id uuid.UUID) error {
 		DeviceSN:   device.SerialNumber,
 		Method:     "Reboot",
 		Priority:   0, // highest priority
+		ExpiresIn:  rebootTaskExpiresIn(device),
 		CommandKey: commandKey,
 		Source:     task.TaskSourceAPI,
 	})
@@ -395,6 +396,25 @@ func (s *DeviceService) RebootDevice(ctx context.Context, id uuid.UUID) error {
 	}
 
 	return nil
+}
+
+const (
+	defaultUPSRebootExpiresInSeconds = 10 * 60
+	minUPSRebootExpiresInSeconds     = 5 * 60
+)
+
+func rebootTaskExpiresIn(device *model.Device) int {
+	if device == nil || !isUPSProductClass(device.ProductClass) {
+		return 0
+	}
+	if device.InformInterval <= 0 {
+		return defaultUPSRebootExpiresInSeconds
+	}
+	expiresIn := device.InformInterval * 2
+	if expiresIn < minUPSRebootExpiresInSeconds {
+		return minUPSRebootExpiresInSeconds
+	}
+	return expiresIn
 }
 
 // SyncDeviceParamsManual T-0126: 手动触发设备参数 Path B 全量同步。

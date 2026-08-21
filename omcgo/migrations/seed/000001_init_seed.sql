@@ -11187,7 +11187,7 @@ INSERT INTO public.ufte_task_types VALUES
 	('ENB_PATCH_UPGRADE', 'enb_upgrade', '4G升级', '4G Patch 增量升级', '复用软件管理补丁升级任务链路，统一收口到 UFTE 任务入口。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_ENB_UPGRADE_PATCH', '["4G eNB", "QAFA", "QAFB", "PATCH"]', 'X {OUI} Software Upgrade Patch', 'X {OUI} Software Upgrade Patch', true, 'firmware/{patch_path}', '{patch_name}', '{patch_name}', 'firmware.fileSize', 'firmware.md5', 'true', 0, '/smallcell/FileDownloadService/firmware/patch/{path}', 'system', '2026-05-31 11:28:47.906664+08', '2026-06-12 18:16:52.42469+08', NULL, 15, '["BLQ", "BLX", "QRTB", "MLQ", "MLN", "BM", "CICT SC3400(L1821)", "Datang fBS3251 Series", "Third-party FDD-LTE-Enterprise", "Huawei TCELL Series", "Comba LTE-FDD_N Series", "Comba femto_au"]'),
 	('ENB_FPGA_UPGRADE', 'enb_upgrade', '4G升级', '4G FPGA 升级', '复用 4G 侧 FPGA 升级任务链路，统一到 UFTE 任务中心。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_ENB_UPGRADE_FPGA', '["4G eNB", "QAFA", "QAFB", "FPGA"]', 'Firmware Upgrade Fpga', 'Firmware Upgrade Fpga', true, 'firmware/{fpga_path}', '{fpga_name}', '{fpga_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/fpga/{path}', 'system', '2026-05-31 11:28:47.906664+08', '2026-06-12 18:16:52.42469+08', NULL, 18, '["BLQ", "BLX", "QRTB", "MLQ", "MLN", "BM", "CICT SC3400(L1821)", "Datang fBS3251 Series", "Third-party FDD-LTE-Enterprise", "Huawei TCELL Series", "Comba LTE-FDD_N Series", "Comba femto_au"]'),
 	('GSM_IMG_UPGRADE', 'gsm_upgrade', '2G升级', '2G 基站软件升级', '复用现网软件升级链路，统一承载 2G(GSM) 基站镜像升级任务。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_GSM_UPGRADE_IMAGE', '["2G BSC", "2G BTS", "BSC", "BTS", "PGSM"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true, 'firmware/{minio_path}', '{firmware_name}', '{firmware_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/img/{path}', 'system', '2026-06-17 20:08:35.602533+08', '2026-06-17 20:08:35.602533+08', NULL, 19, '["BSC", "BTS"]'),
-	('UPS_AP_UPGRADE', 'ups_upgrade', 'UPS升级', 'UPS 软件升级', '复用 TR-069 Download + TransferComplete + 1 BOOT 版本确认链路，统一承载 UPS AP 固件升级任务。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE", "WAIT_REBOOT_COMPLETE"]', '', 'CODE_UPS_UPGRADE_IMAGE', '["UPS"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true, 'firmware/{ap_path}', '{firmware_name}', '{firmware_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/ap/{path}', 'system', '2026-08-19 00:00:00+08', '2026-08-19 00:00:00+08', 5, 25, '["UPS"]') ON CONFLICT DO NOTHING;
+	('UPS_AP_UPGRADE', 'ups_upgrade', 'UPS升级', 'UPS 软件升级', '复用 TR-069 Download + TransferComplete + 1 BOOT 版本确认链路，统一承载 UPS 固件升级任务。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE", "WAIT_REBOOT_COMPLETE"]', '', 'CODE_UPS_UPGRADE_IMAGE', '["UPS"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true, 'firmware/{minio_path}', '{firmware_name}', '{firmware_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/img/{path}', 'system', '2026-08-19 00:00:00+08', '2026-08-19 00:00:00+08', 0, 25, '["UPS"]') ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.ufte_task_types ENABLE TRIGGER ALL;
@@ -26679,6 +26679,16 @@ ON CONFLICT (category, key) DO NOTHING;
 -- Consolidated pre-release geofence defaults and administrator permissions.
 
 -- +omcgo MainReconcileBegin
+UPDATE public.ufte_task_types
+SET description = '复用 TR-069 Download + TransferComplete + 1 BOOT 版本确认链路，统一承载 UPS 固件升级任务。',
+    firmware_file_type = 0,
+    url_template = 'firmware/{minio_path}',
+    transport_path = '/smallcell/FileDownloadService/firmware/img/{path}',
+    file_type = '1 Firmware Upgrade Image',
+    file_type_label = '1 Firmware Upgrade Image',
+    updated_at = now()
+WHERE type_code = 'UPS_AP_UPGRADE';
+
 INSERT INTO public.sys_configs (
     id, category, key, value, value_type, description, is_public,
     created_at, updated_at, description_i18n

@@ -73,6 +73,7 @@ import type {
   UnifiedFileTransferTask,
   UnifiedFileTransferTaskType,
 } from '@core/types/unifiedFileTransfer';
+import { firmwareLibraryFileTypeToFileManagerTab } from '@core/utils/firmwareFileType';
 import {
   mergeCandidatesIntoMap,
   removeFromMap,
@@ -444,6 +445,14 @@ export default function FileTransferCenter() {
   );
   const firmwareLibraryFileType = resolveFirmwareLibraryFileType(drawerTaskType);
   const isUPSUpgradeDrawer = drawerTaskType?.typeCode === 'UPS_AP_UPGRADE' || drawerTaskType?.category === 'ups_upgrade';
+  const firmwareManagerUrl = useMemo(() => {
+    const params = new URLSearchParams({
+      tab: 'version',
+      return: 'ufte',
+      fileType: firmwareLibraryFileTypeToFileManagerTab(firmwareLibraryFileType),
+    });
+    return `/transfer/file-management?${params.toString()}`;
+  }, [firmwareLibraryFileType]);
   const { data: firmwareData } = useSoftwareVersions({
     page: 1,
     pageSize: 200,
@@ -1802,9 +1811,7 @@ export default function FileTransferCenter() {
                         // 跳到新的"文件管理 → 版本文件" tab —— 老 /software/firmware
                         // 路由在菜单下线后被 PrivateRoute 路径守卫拦成 403，新入口在
                         // "文件传输 / 文件管理"菜单内，所有角色可达。
-                        onClick={() =>
-                          window.open('/transfer/file-management?tab=version&return=ufte', '_blank')
-                        }
+                        onClick={() => window.open(firmwareManagerUrl, '_blank')}
                       >
                         {t('ufte.form.openFirmwareManager')}
                       </Button>

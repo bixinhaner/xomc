@@ -50,7 +50,7 @@ func TestBuiltInTaskTypes_IncludesUPSAPUpgrade(t *testing.T) {
 	assert.Contains(t, item.StepChain, "WAIT_REBOOT_COMPLETE")
 	assert.Nil(t, item.techHint)
 	require.NotNil(t, item.FirmwareFileType)
-	assert.Equal(t, software.FileTypeAP, *item.FirmwareFileType)
+	assert.Equal(t, software.FileTypeIMG, *item.FirmwareFileType)
 }
 
 func TestDeviceUpgradeVirtualCategoryIncludesUPSUpgrade(t *testing.T) {

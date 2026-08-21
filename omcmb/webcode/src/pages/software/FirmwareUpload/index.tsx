@@ -48,12 +48,16 @@ import { useProductList } from '@core/hooks/api/useProducts';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import type { SoftwareVersion } from '@core/mock/data/software';
 import { formatSystemTime } from '@core/utils/systemTime';
+import {
+  parseFirmwareFileManagerTabParam,
+  type FirmwareFileManagerTab,
+} from '@core/utils/firmwareFileType';
 
 const { Dragger } = Upload;
 const { TextArea } = Input;
 
 // 文件类型枚举
-type FileType = 'upgrade' | 'patch' | 'ap' | 'fpga';
+type FileType = FirmwareFileManagerTab;
 
 // 文件类型 tab 到后端 fileType 的映射
 const fileTypeParamMap: Record<FileType, 0 | 1 | 5 | 6> = {
@@ -101,7 +105,9 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
   }, [productsData]);
 
   // 文件类型状态
-  const [fileType, setFileType] = useState<FileType>('upgrade');
+  const [fileType, setFileType] = useState<FileType>(() =>
+    parseFirmwareFileManagerTabParam(searchParams.get('fileType')),
+  );
   // 分页
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
