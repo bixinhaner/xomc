@@ -142,6 +142,7 @@ type ProvisioningEngine struct {
 	automaticPolicy     automaticPolicyExecutor
 	activationState     activationStateReader
 	activationRefresher activationStateRefresher
+	gpvHandoffRepo      event.GPVHandoffRepository
 
 	gpvWorkersOnce sync.Once
 	gpvWorkerChans []chan gpvWorkItem
@@ -263,6 +264,10 @@ func (e *ProvisioningEngine) throttleSetNX(
 // nil 表示关闭去重（向后兼容单进程内存 EventBus 场景）。
 func (e *ProvisioningEngine) SetDeduper(d *event.Deduper) {
 	e.deduper = d
+}
+
+func (e *ProvisioningEngine) SetGPVHandoffRepository(repo event.GPVHandoffRepository) {
+	e.gpvHandoffRepo = repo
 }
 
 // SetProductBinder 注入产品装配件路由 + 写回能力（B1 修复）。
@@ -492,9 +497,33 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 			MaxAckPending: gpvConfig.MaxAckPending,
 		})
 	}
-	e.ensureGPVWorkersStarted()
 	gpvHandler := func(ctx context.Context, evt event.Event) error {
 		return e.enqueueGPVResponseEvent(ctx, evt)
+	}
+	if e.gpvHandoffRepo != nil {
+		durable := provisionPullDurableName(gpvConfig.ProvisionQueue)
+		if err := event.RunGPVHandoffWorkers(
+			context.Background(),
+			e.gpvHandoffRepo,
+			event.GPVHandoffWorkerConfig{
+				Durable:     durable,
+				Concurrency: gpvConfig.ProvisionConcurrency,
+				BatchSize:   1,
+				Lease:       gpvHandoffLease(gpvConfig.AckWait),
+				MaxAttempts: gpvConfig.MaxDeliver,
+			},
+			e.handleGPVResponse,
+			e.logger.Named("gpv-handoff-worker"),
+		); err != nil {
+			return fmt.Errorf("start GPV handoff workers for %s: %w", durable, err)
+		}
+		gpvHandler = event.GPVHandoffEnqueueHandler(
+			e.gpvHandoffRepo,
+			durable,
+			provisionGPVDeviceKey,
+		)
+	} else {
+		e.ensureGPVWorkersStarted()
 	}
 	var gpvSub event.Subscription
 	if keyedBus, ok := bus.(interface {
@@ -1838,6 +1867,28 @@ func (e *ProvisioningEngine) handleDataModelFileReceived(ctx context.Context, ev
 	)
 
 	return nil
+}
+
+func gpvHandoffLease(ackWait time.Duration) time.Duration {
+	const minLease = 2 * time.Minute
+	if ackWait <= 0 {
+		return minLease
+	}
+	lease := ackWait * 4
+	if lease < minLease {
+		return minLease
+	}
+	return lease
+}
+
+func provisionPullDurableName(queue string) string {
+	if queue == "" {
+		return "pull"
+	}
+	if strings.HasSuffix(queue, "-pull") {
+		return queue
+	}
+	return queue + "-pull"
 }
 
 // gpvResponsePayload is the structured event payload for GetParameterValuesResponse.

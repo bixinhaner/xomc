@@ -685,11 +685,13 @@ func initProvisionModule(c *Container) error {
 	provisionRepo := provision.NewPgProvisioningTaskRepository(c.PgPool)
 	plugAndPlayRepo := provision.NewPgPlugAndPlayRepository(c.PgPool)
 	discoveryLogRepo := provision.NewPgParameterDiscoveryLogRepository(c.PgPool)
+	gpvHandoffRepo := event.NewPGGPVHandoffRepository(storage.NewPoolDB(c.PgPool))
 	provisionEngine := provision.NewProvisioningEngine(
 		provisionRepo, c.DeviceService, c.TemplateService,
 		c.Carriers, c.TaskSvc, c.EventBus, c.Cfg.Provision, logger,
 	)
 	provisionEngine.SetDeduper(c.Deduper)
+	provisionEngine.SetGPVHandoffRepository(gpvHandoffRepo)
 	provisionEngine.SetActivationStateReader(c.DeviceInfoRepo)
 	provisionEngine.SetActivationStateRefresher(device.NewInfoSyncer(
 		c.DeviceInfoRepo,
@@ -2360,6 +2362,7 @@ SELECT DISTINCT regexp_replace(parameter_path::text, '\.[0-9]+\.', '.{i}.', 'g')
 	// 本进程订阅 command.get_parameters.response，把 privatePath 翻译为
 	// standardPath 再写 device_parameters。
 	if c.EventBus != nil && c.DeviceService != nil && c.ParamRepo != nil {
+		gpvHandoffRepo := event.NewPGGPVHandoffRepository(storage.NewPoolDB(c.PgPool))
 		rpcRespSub := device.NewRPCResponseSubscriber(
 			c.EventBus,
 			c.ProductRegistry,
@@ -2372,6 +2375,7 @@ SELECT DISTINCT regexp_replace(parameter_path::text, '\.[0-9]+\.', '.{i}.', 'g')
 			c.Cfg.Provision.GPVResponse,
 			logger,
 		)
+		rpcRespSub.SetGPVHandoffRepository(gpvHandoffRepo)
 		if err := rpcRespSub.Start(); err != nil {
 			logger.Warn("start rpc response subscriber failed; uplink path translation disabled",
 				zap.Error(err))
