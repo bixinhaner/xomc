@@ -64,7 +64,7 @@ func TestBatchInformProcessor_PublishTransitionEvents_ClearsDisconnectedAlarmBef
 	require.Equal(t, []string{"clear", "firmware"}, recorder.calls)
 }
 
-func TestBatchInformProcessor_PublishTransitionEvents_ClearsDisconnectedAlarmWhenAlreadyActive(t *testing.T) {
+func TestBatchInformProcessor_PublishTransitionEvents_DoesNotClearDisconnectedAlarmWhenAlreadyActive(t *testing.T) {
 	recorder := &transitionPublisherRecorder{}
 	processor := &BatchInformProcessor{transitionPublisher: recorder}
 	update := &informUpdate{
@@ -79,5 +79,5 @@ func TestBatchInformProcessor_PublishTransitionEvents_ClearsDisconnectedAlarmWhe
 
 	processor.publishTransitionEvents(context.Background(), update)
 
-	require.Equal(t, []string{"clear"}, recorder.calls)
+	require.Empty(t, recorder.calls)
 }

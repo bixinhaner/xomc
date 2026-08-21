@@ -136,9 +136,11 @@ func (m *mockDeviceRepo) CountByStatus(ctx context.Context, carrier *model.Carri
 type mockDisconnectedAlarmCleaner struct {
 	active  map[string]*model.Alarm
 	cleared []*model.Alarm
+	lookups int
 }
 
 func (m *mockDisconnectedAlarmCleaner) GetActiveByDeviceAndIdentifier(_ context.Context, deviceSN string, alarmIdentifier string) (*model.Alarm, error) {
+	m.lookups++
 	return m.active[deviceSN+":"+alarmIdentifier], nil
 }
 
@@ -1673,6 +1675,7 @@ func TestUpdateFromInform_OfflineToActive_ClearsDisconnectedAlarm(t *testing.T) 
 
 	require.NoError(t, err)
 	require.NotNil(t, dev)
+	require.Equal(t, 1, cleaner.lookups)
 	require.Len(t, cleaner.cleared, 1)
 	assert.Equal(t, disconnectedAlarm.ID, cleaner.cleared[0].ID)
 	require.NotNil(t, cleaner.cleared[0].ClearedBy)
@@ -1681,7 +1684,7 @@ func TestUpdateFromInform_OfflineToActive_ClearsDisconnectedAlarm(t *testing.T) 
 	assert.Equal(t, "device reported online", *cleaner.cleared[0].ClearNote)
 }
 
-func TestUpdateFromInform_ActiveStaysActive_ClearsDisconnectedAlarm(t *testing.T) {
+func TestUpdateFromInform_ActiveStaysActive_DoesNotQueryDisconnectedAlarm(t *testing.T) {
 	cleaner := &mockDisconnectedAlarmCleaner{active: map[string]*model.Alarm{
 		"SN-STILL-ACTIVE-ALARM:7": {ID: uuid.New(), DeviceSN: "SN-STILL-ACTIVE-ALARM", AlarmIdentifier: "7"},
 	}}
@@ -1704,8 +1707,8 @@ func TestUpdateFromInform_ActiveStaysActive_ClearsDisconnectedAlarm(t *testing.T
 	_, err := svc.UpdateFromInform(context.Background(), sampleInform("SN-STILL-ACTIVE-ALARM"))
 
 	require.NoError(t, err)
-	require.Len(t, cleaner.cleared, 1)
-	assert.Equal(t, "SN-STILL-ACTIVE-ALARM", cleaner.cleared[0].DeviceSN)
+	require.Zero(t, cleaner.lookups)
+	require.Empty(t, cleaner.cleared)
 }
 
 func TestUpdateFromInform_FirmwareChangedSuppressesOnlineEvent(t *testing.T) {
