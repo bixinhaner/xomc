@@ -6,18 +6,27 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"go.uber.org/zap"
 )
 
+type aggregationOutboxRelayRepository interface {
+	ClaimBatch(context.Context, uint64, time.Time, time.Duration) ([]*OutboxRecord, error)
+	MarkPublished(context.Context, uuid.UUID, uuid.UUID, time.Time) (bool, error)
+	MarkFailed(context.Context, uuid.UUID, uuid.UUID, error, time.Time, time.Duration) (bool, error)
+	RequeueStaleUnconsumed(context.Context, time.Time) (int64, error)
+}
+
 type OutboxRelay struct {
-	repo            *OutboxRepository
+	repo            aggregationOutboxRelayRepository
 	bus             event.EventBus
 	interval        time.Duration
 	logger          *zap.Logger
 	metrics         *Metrics
 	batch           int
+	claimLease      time.Duration
+	retryAfter      time.Duration
 	redeliveryAfter time.Duration
 	redeliveryEvery time.Duration
 }
@@ -34,6 +43,8 @@ func NewOutboxRelay(repo *OutboxRepository, bus event.EventBus, logger *zap.Logg
 	return &OutboxRelay{
 		repo: repo, bus: bus, interval: 200 * time.Millisecond,
 		logger: logger, batch: 100,
+		claimLease:      30 * time.Second,
+		retryAfter:      time.Second,
 		redeliveryAfter: 5 * time.Minute, redeliveryEvery: time.Minute,
 	}
 }
@@ -119,18 +130,13 @@ func (r *OutboxRelay) RelayOnce(ctx context.Context) (bool, error) {
 }
 
 func (r *OutboxRelay) publishBatch(ctx context.Context) (bool, error) {
-	tx, err := r.repo.pool.Begin(ctx)
-	if err != nil {
-		return false, fmt.Errorf("begin PM aggregation outbox tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	rows, err := r.repo.lockBatch(ctx, tx, uint64(r.batch))
-	if errors.Is(err, pgx.ErrNoRows) || len(rows) == 0 {
-		return false, nil
-	}
+	now := time.Now().UTC()
+	rows, err := r.repo.ClaimBatch(ctx, uint64(r.batch), now, r.claimLease)
 	if err != nil {
 		return false, err
+	}
+	if len(rows) == 0 {
+		return false, nil
 	}
 	var publishErrors []error
 	for _, row := range rows {
@@ -140,21 +146,28 @@ func (r *OutboxRelay) publishBatch(ctx context.Context) (bool, error) {
 		}
 		envelope.ID = row.EventID.String()
 		if publishErr := r.bus.Publish(ctx, event.SubjectPMAggregationNormalized, envelope); publishErr != nil {
-			if markErr := markOutboxFailed(ctx, tx, row.EventID, publishErr); markErr != nil {
+			ok, markErr := r.repo.MarkFailed(
+				ctx, row.EventID, row.ClaimToken, publishErr, time.Now().UTC(), r.retryAfter,
+			)
+			if markErr != nil {
 				return false, errors.Join(publishErr, markErr)
+			}
+			if !ok {
+				return false, errors.Join(publishErr, fmt.Errorf("PM aggregation outbox claim ownership lost for %s", row.EventID))
 			}
 			publishErrors = append(publishErrors, publishErr)
 			continue
 		}
-		if err := markOutboxPublished(ctx, tx, row.EventID); err != nil {
+		ok, err := r.repo.MarkPublished(ctx, row.EventID, row.ClaimToken, time.Now().UTC())
+		if err != nil {
 			return false, err
+		}
+		if !ok {
+			return false, fmt.Errorf("PM aggregation outbox claim ownership lost for %s", row.EventID)
 		}
 		if r.metrics != nil {
 			r.metrics.OutboxPublishedTotal.Inc()
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("commit PM aggregation outbox publish: %w", err)
 	}
 	if len(publishErrors) > 0 {
 		return true, errors.Join(publishErrors...)
