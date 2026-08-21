@@ -574,8 +574,11 @@ func TestGeofenceControlMonitorSkipsExistingDeactivation(t *testing.T) {
 }
 
 type orderedControlTaskHistoryStub struct {
-	locked   bool
-	released bool
+	locked              bool
+	released            bool
+	partitionedDeviceSN string
+	partitionedCommand  string
+	unpartitionedCalls  int
 }
 
 func (s *orderedControlTaskHistoryStub) AcquireCommandKeyLock(
@@ -590,9 +593,23 @@ func (s *orderedControlTaskHistoryStub) GetByCommandKey(
 	context.Context,
 	string,
 ) (*task.Task, error) {
+	s.unpartitionedCalls++
 	if !s.locked || s.released {
 		return nil, fmt.Errorf("command history checked outside lock")
 	}
+	return nil, nil
+}
+
+func (s *orderedControlTaskHistoryStub) GetByDeviceAndCommandKey(
+	_ context.Context,
+	deviceSN string,
+	commandKey string,
+) (*task.Task, error) {
+	if !s.locked || s.released {
+		return nil, fmt.Errorf("command history checked outside lock")
+	}
+	s.partitionedDeviceSN = deviceSN
+	s.partitionedCommand = commandKey
 	return nil, nil
 }
 
@@ -620,6 +637,9 @@ func TestGeofenceControlMonitorLocksCommandKeyDuringCreate(t *testing.T) {
 	require.NotNil(t, tasks.request)
 	require.True(t, history.locked)
 	require.True(t, history.released)
+	require.Equal(t, "SN-CONTROL-1", history.partitionedDeviceSN)
+	require.Contains(t, history.partitionedCommand, ":deactivate")
+	require.Zero(t, history.unpartitionedCalls)
 }
 
 func TestGeofenceControlMonitorRetriesPendingActionAfterQueueFailure(t *testing.T) {

@@ -79,13 +79,21 @@ func TestMainBaselineReconcileSectionsAreAdditiveAndIdempotent(t *testing.T) {
 		"main baseline reconcile missing alarm email run snapshots",
 		"main baseline reconcile missing legacy alarm email linkage",
 		"main baseline reconcile missing device_tasks.admission_class",
+		"CREATE TABLE IF NOT EXISTS public.device_task_locations",
+		"CREATE OR REPLACE FUNCTION public.sync_device_task_location",
+		"trg_device_tasks_location_sync",
 	} {
 		require.Contains(t, schemaSQL, contract)
 	}
 	require.NotContains(t, schemaSQL, "DROP TABLE")
 	require.NotContains(t, schemaSQL, "DROP COLUMN")
 	require.NotContains(t, schemaSQL, "TRUNCATE")
-	require.NotContains(t, schemaSQL, "DELETE FROM")
+	schemaSQLWithoutLocationTriggerCleanup := strings.ReplaceAll(
+		schemaSQL,
+		"DELETE FROM public.device_task_locations WHERE task_id = OLD.id;",
+		"",
+	)
+	require.NotContains(t, schemaSQLWithoutLocationTriggerCleanup, "DELETE FROM")
 
 	seedContents, err := os.ReadFile(seedPath)
 	require.NoError(t, err)

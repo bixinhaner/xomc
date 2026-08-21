@@ -74,6 +74,10 @@ type conditionalTaskRepairer interface {
 	GetByID(ctx context.Context, id string) (*Task, error)
 }
 
+type partitionedTaskGetter interface {
+	GetByDeviceAndID(ctx context.Context, deviceSN, id string) (*Task, error)
+}
+
 type pendingTransitionStore interface {
 	listPendingTransitions(ctx context.Context, limit int64) ([]pendingTransitionRef, error)
 	loadPendingTransition(ctx context.Context, taskID, token string) (*preparedTaskTransition, error)
@@ -322,7 +326,7 @@ func (r *Reconciler) reconcilePendingTransitions(ctx context.Context) ReconcileS
 			continue
 		}
 		if prepared.Task.Status == TaskStatusSent {
-			durable, loadErr := repairer.GetByID(ctx, id)
+			durable, loadErr := loadDurableTaskForRepair(ctx, repairer, prepared.Task, id)
 			if loadErr != nil {
 				stats.RepairFailed++
 				_ = store.deferPendingTransition(ctx, id, token)
@@ -350,7 +354,7 @@ func (r *Reconciler) reconcilePendingTransitions(ctx context.Context) ReconcileS
 				continue
 			}
 			if !changed {
-				durable, loadErr := repairer.GetByID(ctx, id)
+				durable, loadErr := loadDurableTaskForRepair(ctx, repairer, prepared.Task, id)
 				if loadErr != nil || durable == nil {
 					stats.RepairFailed++
 					_ = store.deferPendingTransition(ctx, id, token)
@@ -383,4 +387,16 @@ func (r *Reconciler) reconcilePendingTransitions(ctx context.Context) ReconcileS
 		stats.Repaired++
 	}
 	return stats
+}
+
+func loadDurableTaskForRepair(
+	ctx context.Context,
+	repairer conditionalTaskRepairer,
+	prepared *Task,
+	id string,
+) (*Task, error) {
+	if getter, ok := repairer.(partitionedTaskGetter); ok && prepared != nil && prepared.DeviceSN != "" {
+		return getter.GetByDeviceAndID(ctx, prepared.DeviceSN, id)
+	}
+	return repairer.GetByID(ctx, id)
 }

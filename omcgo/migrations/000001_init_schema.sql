@@ -2685,7 +2685,6 @@ CREATE TABLE public.device_tasks (
 )
 PARTITION BY HASH (device_sn);
 
-
 --
 -- Name: COLUMN device_tasks.retry_interval_seconds; Type: COMMENT; Schema: public; Owner: -
 --
@@ -22582,6 +22581,53 @@ BEGIN
     END IF;
 END
 $$;
+
+CREATE TABLE IF NOT EXISTS public.device_task_locations (
+    task_id uuid PRIMARY KEY,
+    device_sn character varying(64) NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE OR REPLACE FUNCTION public.sync_device_task_location()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        DELETE FROM public.device_task_locations WHERE task_id = OLD.id;
+        RETURN OLD;
+    END IF;
+
+    INSERT INTO public.device_task_locations (task_id, device_sn, updated_at)
+    VALUES (NEW.id, NEW.device_sn, now())
+    ON CONFLICT (task_id) DO UPDATE
+        SET device_sn = EXCLUDED.device_sn,
+            updated_at = EXCLUDED.updated_at;
+    RETURN NEW;
+END;
+$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'trg_device_tasks_location_sync'
+          AND tgrelid = 'public.device_tasks'::regclass
+    ) THEN
+        CREATE TRIGGER trg_device_tasks_location_sync
+            AFTER INSERT OR UPDATE OF device_sn OR DELETE ON public.device_tasks
+            FOR EACH ROW EXECUTE FUNCTION public.sync_device_task_location();
+    END IF;
+END
+$$;
+
+INSERT INTO public.device_task_locations (task_id, device_sn)
+SELECT id, device_sn
+FROM public.device_tasks
+ON CONFLICT (task_id) DO UPDATE
+    SET device_sn = EXCLUDED.device_sn,
+        updated_at = now();
 -- +omcgo MainReconcileEnd
 
 -- +goose Down

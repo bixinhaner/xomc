@@ -10,6 +10,9 @@ type TaskReader interface {
 	// GetByID 根据 ID 获取任务
 	GetByID(ctx context.Context, id string) (*Task, error)
 
+	// GetByIDAndDeviceSN 根据 ID 和分区键获取任务
+	GetByIDAndDeviceSN(ctx context.Context, id, deviceSN string) (*Task, error)
+
 	// GetByCWMPID 根据 CWMP ID 获取任务
 	GetByCWMPID(ctx context.Context, cwmpID string) (*Task, error)
 

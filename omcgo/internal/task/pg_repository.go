@@ -112,6 +112,13 @@ func (r *PgTaskRepository) AcquireCommandKeyLock(
 	)
 }
 
+func taskIdentityWhere(id, deviceSN string) sq.Sqlizer {
+	if strings.TrimSpace(deviceSN) != "" {
+		return sq.Eq{"id": id, "device_sn": deviceSN}
+	}
+	return sq.Expr("id = ? AND false", id)
+}
+
 // nilUUID converts an empty string to nil for nullable UUID columns.
 func nilUUID(s string) any {
 	if s == "" {
@@ -168,6 +175,12 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 
 // Update 更新任务记录
 func (r *PgTaskRepository) Update(ctx context.Context, task *Task) error {
+	if task == nil {
+		return fmt.Errorf("task is nil")
+	}
+	if strings.TrimSpace(task.DeviceSN) == "" {
+		return fmt.Errorf("update task %s: device_sn is required for partition routing", task.ID)
+	}
 	builder := storage.Psql.Update("device_tasks").
 		Set("method", task.Method).
 		Set("params", task.Params).
@@ -186,7 +199,7 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *Task) error {
 		Set("error_code", task.ErrorCode).
 		Set("error_message", task.ErrorMessage).
 		Set("admission_class", admissionClassOrDefault(task.AdmissionClass)).
-		Where(sq.Eq{"id": task.ID})
+		Where(taskIdentityWhere(task.ID, task.DeviceSN))
 	if task.Status == TaskStatusSent {
 		// A fast CPE can complete before the sent-state PG sync returns. The
 		// late sent write must not downgrade a terminal row already written by
@@ -223,6 +236,9 @@ func (r *PgTaskRepository) TransitionIfStatus(
 	if task == nil {
 		return false, fmt.Errorf("task is nil")
 	}
+	if strings.TrimSpace(task.DeviceSN) == "" {
+		return false, fmt.Errorf("transition task %s: device_sn is required for partition routing", task.ID)
+	}
 	query, args, err := storage.Psql.Update("device_tasks").
 		Set("method", task.Method).
 		Set("params", task.Params).
@@ -240,7 +256,8 @@ func (r *PgTaskRepository) TransitionIfStatus(
 		Set("result", task.Result).
 		Set("error_code", task.ErrorCode).
 		Set("error_message", task.ErrorMessage).
-		Where(sq.Eq{"id": task.ID, "status": from}).
+		Where(taskIdentityWhere(task.ID, task.DeviceSN)).
+		Where(sq.Eq{"status": from}).
 		ToSql()
 	if err != nil {
 		return false, fmt.Errorf("build conditional task transition: %w", err)
@@ -256,17 +273,48 @@ func (r *PgTaskRepository) TransitionIfStatus(
 // ACS sends an RPC. A cancelled/expired/terminal task can never be revived to
 // sent, even when a stale copy is still present in Redis.
 func (r *PgTaskRepository) MarkSentIfPending(ctx context.Context, taskID, cwmpID string, sentAt time.Time) (bool, error) {
-	const query = `UPDATE device_tasks SET status=$2, cwmp_id=$3, sent_at=$4
-WHERE id=$1 AND status='pending' AND (
-  expires_at IS NULL OR expires_at > $4
-) AND (
-  COALESCE(source, '') <> 'param_sync' OR EXISTS (
+	deviceSN, ok, err := r.LocateDeviceSNByID(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, ErrTaskNotFound
+	}
+	return r.MarkSentIfPendingByDevice(ctx, deviceSN, taskID, cwmpID, sentAt)
+}
+
+func (r *PgTaskRepository) MarkSentIfPendingByDevice(
+	ctx context.Context,
+	deviceSN, taskID, cwmpID string,
+	sentAt time.Time,
+) (bool, error) {
+	if strings.TrimSpace(deviceSN) == "" {
+		return false, fmt.Errorf("mark task %s sent: device_sn is required for partition routing", taskID)
+	}
+	builder := storage.Psql.Update("device_tasks").
+		Set("status", TaskStatusSent).
+		Set("cwmp_id", cwmpID).
+		Set("sent_at", sentAt).
+		Where(taskIdentityWhere(taskID, deviceSN)).
+		Where(sq.Eq{"status": TaskStatusPending}).
+		Where(sq.Or{
+			sq.Eq{"expires_at": nil},
+			sq.Gt{"expires_at": sentAt},
+		}).
+		Where(sq.Or{
+			sq.NotEq{"source": TaskSourceParamSync},
+			sq.Expr("source IS NULL"),
+			sq.Expr(`EXISTS (
 SELECT 1 FROM parameter_sync_runs r
 WHERE r.id=device_tasks.source_id
   AND r.status IN ('planning','enqueuing','waiting_device','executing','processing')
-  )
-)`
-	tag, err := r.pool.Exec(ctx, query, taskID, TaskStatusSent, cwmpID, sentAt)
+)`),
+		})
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build task send fence: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return false, fmt.Errorf("execute task send fence: %w", err)
 	}
@@ -278,9 +326,34 @@ WHERE r.id=device_tasks.source_id
 // status and CWMP ID prevents an old failure path from reviving a terminal task
 // or releasing a newer send claim.
 func (r *PgTaskRepository) ReleaseSentClaimIfUnwritten(ctx context.Context, taskID, cwmpID string) (bool, error) {
-	const query = `UPDATE device_tasks SET status='pending', cwmp_id=NULL, sent_at=NULL
-WHERE id=$1 AND status='sent' AND cwmp_id=$2`
-	tag, err := r.pool.Exec(ctx, query, taskID, cwmpID)
+	deviceSN, ok, err := r.LocateDeviceSNByID(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, ErrTaskNotFound
+	}
+	return r.ReleaseSentClaimIfUnwrittenByDevice(ctx, deviceSN, taskID, cwmpID)
+}
+
+func (r *PgTaskRepository) ReleaseSentClaimIfUnwrittenByDevice(
+	ctx context.Context,
+	deviceSN, taskID, cwmpID string,
+) (bool, error) {
+	if strings.TrimSpace(deviceSN) == "" {
+		return false, fmt.Errorf("release task %s send claim: device_sn is required for partition routing", taskID)
+	}
+	query, args, err := storage.Psql.Update("device_tasks").
+		Set("status", TaskStatusPending).
+		Set("cwmp_id", nil).
+		Set("sent_at", nil).
+		Where(taskIdentityWhere(taskID, deviceSN)).
+		Where(sq.Eq{"status": TaskStatusSent, "cwmp_id": cwmpID}).
+		ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build release unwritten task send claim: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return false, fmt.Errorf("release unwritten task send claim: %w", err)
 	}
@@ -289,15 +362,51 @@ WHERE id=$1 AND status='sent' AND cwmp_id=$2`
 
 // GetByID 根据 ID 获取任务
 func (r *PgTaskRepository) GetByID(ctx context.Context, id string) (*Task, error) {
+	deviceSN, ok, err := r.LocateDeviceSNByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	return r.GetByIDAndDeviceSN(ctx, id, deviceSN)
+}
+
+func (r *PgTaskRepository) GetByDeviceAndID(ctx context.Context, deviceSN, id string) (*Task, error) {
+	if strings.TrimSpace(deviceSN) == "" {
+		return r.GetByID(ctx, id)
+	}
+	return r.GetByIDAndDeviceSN(ctx, id, deviceSN)
+}
+
+func (r *PgTaskRepository) GetByIDAndDeviceSN(ctx context.Context, id, deviceSN string) (*Task, error) {
+	if strings.TrimSpace(deviceSN) == "" {
+		return nil, fmt.Errorf("get task %s: device_sn is required for partition routing", id)
+	}
 	query, args, err := storage.Psql.Select(taskColumns()...).
 		From("device_tasks").
-		Where(sq.Eq{"id": id}).
+		Where(taskIdentityWhere(id, deviceSN)).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
 	}
 
 	return r.scanTask(ctx, query, args...)
+}
+
+func (r *PgTaskRepository) LocateDeviceSNByID(ctx context.Context, id string) (string, bool, error) {
+	var deviceSN string
+	err := r.pool.QueryRow(ctx,
+		"SELECT device_sn FROM device_task_locations WHERE task_id=$1",
+		id,
+	).Scan(&deviceSN)
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("locate task device_sn: %w", err)
+	}
+	return deviceSN, true, nil
 }
 
 // TaskStatusRow 是 LookupStatusesByIDs 的轻量返回（只取 stale sync 反查需要的字段，
@@ -309,7 +418,8 @@ type TaskStatusRow struct {
 }
 
 // LookupStatusesByIDs 批量反查多个 task 的当前状态（#16 消除 notification stale sync 的 N+1）。
-// 一条 WHERE id = ANY(...) 查询替代逐 ID 的 GetByID；结果按 id 去重映射，缺失的 id 不在返回 map 中。
+// 先从 device_task_locations 批量解析 ID→device_sn，再按 device_sn 分组查询 device_tasks，
+// 让每个状态查询都携带 HASH 分区键。结果按 id 去重映射，缺失的 id 不在返回 map 中。
 // ids 为空时直接返回空 map，不打 DB。
 func (r *PgTaskRepository) LookupStatusesByIDs(ctx context.Context, ids []string) (map[string]TaskStatusRow, error) {
 	out := make(map[string]TaskStatusRow, len(ids))
@@ -317,29 +427,58 @@ func (r *PgTaskRepository) LookupStatusesByIDs(ctx context.Context, ids []string
 		return out, nil
 	}
 
-	query, args, err := storage.Psql.Select("id", "status", "error_message").
-		From("device_tasks").
-		Where(sq.Eq{"id": ids}).
+	locQuery, locArgs, err := storage.Psql.Select("task_id", "device_sn").
+		From("device_task_locations").
+		Where(sq.Eq{"task_id": ids}).
 		ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("build lookup statuses query: %w", err)
+		return nil, fmt.Errorf("build task location lookup query: %w", err)
 	}
 
-	rows, err := r.pool.Query(ctx, query, args...)
+	locRows, err := r.pool.Query(ctx, locQuery, locArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("query task statuses: %w", err)
+		return nil, fmt.Errorf("query task locations: %w", err)
 	}
-	defer rows.Close()
+	defer locRows.Close()
 
-	for rows.Next() {
-		var row TaskStatusRow
-		if err := rows.Scan(&row.ID, &row.Status, &row.ErrorMessage); err != nil {
-			return nil, fmt.Errorf("scan task status: %w", err)
+	idsByDevice := make(map[string][]string)
+	for locRows.Next() {
+		var taskID, deviceSN string
+		if err := locRows.Scan(&taskID, &deviceSN); err != nil {
+			return nil, fmt.Errorf("scan task location: %w", err)
 		}
-		out[row.ID] = row
+		idsByDevice[deviceSN] = append(idsByDevice[deviceSN], taskID)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate task statuses: %w", err)
+	if err := locRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate task locations: %w", err)
+	}
+
+	for deviceSN, taskIDs := range idsByDevice {
+		query, args, err := storage.Psql.Select("id", "status", "error_message").
+			From("device_tasks").
+			Where(sq.Eq{"device_sn": deviceSN, "id": taskIDs}).
+			ToSql()
+		if err != nil {
+			return nil, fmt.Errorf("build lookup statuses query: %w", err)
+		}
+
+		rows, err := r.pool.Query(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("query task statuses: %w", err)
+		}
+		var row TaskStatusRow
+		for rows.Next() {
+			if err := rows.Scan(&row.ID, &row.Status, &row.ErrorMessage); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan task status: %w", err)
+			}
+			out[row.ID] = row
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate task statuses: %w", err)
+		}
+		rows.Close()
 	}
 
 	return out, nil
@@ -946,6 +1085,32 @@ func (r *PgTaskRepository) GetByCommandKey(
 	return item, nil
 }
 
+func (r *PgTaskRepository) GetByDeviceAndCommandKey(
+	ctx context.Context,
+	deviceSN, commandKey string,
+) (*Task, error) {
+	if strings.TrimSpace(deviceSN) == "" {
+		return nil, fmt.Errorf("get task by command key %s: device_sn is required for partition routing", commandKey)
+	}
+	query, args, err := storage.Psql.Select(taskColumns()...).
+		From("device_tasks").
+		Where(sq.Eq{"device_sn": deviceSN, "command_key": commandKey}).
+		OrderBy("created_at DESC").
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build geofence command task query: %w", err)
+	}
+	item, err := r.scanTaskRow(r.pool.QueryRow(ctx, query, args...))
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query geofence command task: %w", err)
+	}
+	return item, nil
+}
+
 // defaultPendingBatchLimit 是 ListPendingAllDevices 在调用方未给上界（limit<=0）时
 // 的兜底批大小。百万设备下 device_tasks 的 pending 行可能极多，一次性 SELECT 全量
 // 入内存会 OOM（#11）。RestorePendingQueues 走 ListPendingPage 流式分批恢复，本兜底
@@ -1185,14 +1350,21 @@ func (r *PgTaskRepository) ListActiveTasksAfter(
 
 // Delete 删除任务
 func (r *PgTaskRepository) Delete(ctx context.Context, id string) error {
-	query, args, err := storage.Psql.Delete("device_tasks").
-		Where(sq.Eq{"id": id}).
-		ToSql()
-	if err != nil {
-		return fmt.Errorf("build delete query: %w", err)
-	}
-
-	_, err = r.pool.Exec(ctx, query, args...)
+	const query = `
+WITH located AS (
+  SELECT task_id, device_sn
+  FROM device_task_locations
+  WHERE task_id = $1
+),
+deleted_task AS (
+  DELETE FROM device_tasks t
+  USING located l
+  WHERE t.id = l.task_id AND t.device_sn = l.device_sn
+  RETURNING t.id
+)
+DELETE FROM device_task_locations
+WHERE task_id = $1`
+	_, err := r.pool.Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("delete task: %w", err)
 	}
@@ -1267,6 +1439,10 @@ type PathTranslationMissStats struct {
 // AggregatePathTranslationMissBySourceID 聚合特定 source_id (mml_task.id) 下
 // 所有 device_tasks 的 has_path_translation_miss / path_translation_miss_count，
 // 用于 MML 任务详情聚合显示（Stage 3 — 整改方案 UI 警告标签）。
+//
+// 这是 MML 详情页的跨设备汇总视图，查询语义本身就是"同一来源任务下的全部设备"，
+// 不能携带单个 device_sn 做分区裁剪；执行面按任务 ID 读写、状态流转和 CWMP 下发
+// 仍必须走 device_task_locations 或显式 device_sn 的单分区路径。
 func (r *PgTaskRepository) AggregatePathTranslationMissBySourceID(
 	ctx context.Context, sourceID string,
 ) (PathTranslationMissStats, error) {
@@ -1311,6 +1487,9 @@ type DeviceTaskResultRow struct {
 
 // ListResultsBySourceID 返回某个 source_id（典型为 mml_task.id）下所有 device_tasks
 // 的执行结果，按 (command_index, device_index, created_at) 升序稳定排序。
+//
+// 这是分页的 MML 结果列表，业务上需要跨设备展示同一来源任务的全部结果；因此这里保留
+// source/source_id 查询，不作为高频执行面任务 ID 查询使用。
 //
 // total 取自全量 COUNT；items 分页。pageSize <= 0 时退化为 20，page <= 0 退化为 1。
 func (r *PgTaskRepository) ListResultsBySourceID(
@@ -1388,6 +1567,9 @@ type DeviceTaskSourceStats struct {
 
 // AggregateStatusBySourceID 统计某 (source, source_id) 下 device_tasks 的终态分布。
 // 终态 = completed / failed / expired；其余（pending 等）计入 Active。
+//
+// 这是来源任务完成判定的跨设备聚合，不属于按 task_id 处理单条任务的执行面路径；
+// 单条任务路径继续要求 device_sn 或 device_task_locations 定位后再访问分区表。
 func (r *PgTaskRepository) AggregateStatusBySourceID(
 	ctx context.Context, source TaskSource, sourceID string,
 ) (DeviceTaskSourceStats, error) {
