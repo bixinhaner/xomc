@@ -950,9 +950,11 @@ func TestServeHTTP_RPCResponse_CompletesSessionWhenNoMoreCommands(t *testing.T) 
 	defer bus.mu.Unlock()
 	require.GreaterOrEqual(t, len(bus.published), 1)
 	assert.Equal(t, event.SubjectCommandGetParamsResponse, bus.published[0].Subject)
+	assert.Equal(t, deviceSN, bus.published[0].Event.Metadata[event.MetadataDeviceSN])
+	assert.Equal(t, event.GPVOwnerDeviceRPC, bus.published[0].Event.Metadata[event.MetadataGPVOwner])
 	var payload map[string]any
 	require.NoError(t, bus.published[0].Event.DecodePayload(&payload))
-	assert.Equal(t, "device_rpc", payload["gpv_owner"])
+	assert.Equal(t, event.GPVOwnerDeviceRPC, payload["gpv_owner"])
 }
 
 func TestServeHTTP_ParamSyncRPCResponseDoesNotPublishDuplicateCanonicalResult(t *testing.T) {
@@ -1019,9 +1021,29 @@ func TestPublishRPCFaultEventKeepsGenericGPVOwnersRouted(t *testing.T) {
 
 	require.Len(t, bus.published, 1)
 	assert.Equal(t, event.SubjectCommandGetParamsResponse, bus.published[0].Subject)
+	assert.Equal(t, "TEST-SN-001", bus.published[0].Event.Metadata[event.MetadataDeviceSN])
+	assert.Equal(t, event.GPVOwnerSoftwareRollback, bus.published[0].Event.Metadata[event.MetadataGPVOwner])
 	var payload map[string]any
 	require.NoError(t, bus.published[0].Event.DecodePayload(&payload))
-	assert.Equal(t, "software_rollback", payload["gpv_owner"])
+	assert.Equal(t, event.GPVOwnerSoftwareRollback, payload["gpv_owner"])
+}
+
+func TestPublishRPCFaultEventMarksAlarmSyncOwnerInEnvelope(t *testing.T) {
+	bus := &acsHEventBus{}
+	h := newTestACSHandlerWithDeps(newAcsHSessionStore(), bus)
+
+	h.publishRPCFaultEvent(context.Background(), "TEST-SN-001", &task.Task{
+		ID: "alarm-sync-task-001", DeviceSN: "TEST-SN-001",
+		Method: "GetParameterValues", Source: task.TaskSourceSystem,
+		CommandKey: "alarm-sync-1234",
+	}, 9005, "Client", "Invalid parameter", zap.NewNop())
+
+	require.Len(t, bus.published, 1)
+	assert.Equal(t, event.SubjectCommandGetParamsResponse, bus.published[0].Subject)
+	assert.Equal(t, event.GPVOwnerAlarmSync, bus.published[0].Event.Metadata[event.MetadataGPVOwner])
+	var payload map[string]any
+	require.NoError(t, bus.published[0].Event.DecodePayload(&payload))
+	assert.Equal(t, event.GPVOwnerAlarmSync, payload["gpv_owner"])
 }
 
 func TestServeHTTP_RPCResponse_ChainsNextCommand(t *testing.T) {

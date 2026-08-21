@@ -35,6 +35,24 @@ func (m *svcMockFirmwareRepo) Create(ctx context.Context, fw *FirmwareVersion) e
 	fw.ID = uuid.New()
 	return nil
 }
+
+func TestSoftwareRollbackGPVRouteSkipsNonRollbackOwner(t *testing.T) {
+	evt := event.Event{
+		Subject:  event.SubjectCommandGetParamsResponse,
+		Metadata: map[string]string{event.MetadataGPVOwner: event.GPVOwnerProvision},
+		Payload:  json.RawMessage(`{"device_sn":`),
+	}
+
+	require.False(t, softwareRollbackOwnsGPVResponse(evt))
+	executor := &UpgradeExecutor{}
+	require.NoError(t, executor.HandleGetParamsResponseForRollback(context.Background(), evt, nil))
+}
+
+func TestSoftwareRollbackGPVRouteKeepsLegacyEvents(t *testing.T) {
+	evt := event.Event{Subject: event.SubjectCommandGetParamsResponse}
+
+	require.True(t, softwareRollbackOwnsGPVResponse(evt))
+}
 func (m *svcMockFirmwareRepo) GetByID(ctx context.Context, id uuid.UUID) (*FirmwareVersion, error) {
 	if m.getByIDFn != nil {
 		return m.getByIDFn(ctx, id)

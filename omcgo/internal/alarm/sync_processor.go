@@ -102,6 +102,9 @@ type gpvResponsePayload struct {
 // handleGPVResponse processes a GPV response event.
 // It only handles responses that contain FaultMgmt.CurrentAlarm parameters.
 func (p *AlarmSyncProcessor) handleGPVResponse(ctx context.Context, evt event.Event) error {
+	if !alarmSyncOwnsGPVResponse(evt) {
+		return nil
+	}
 	var payload gpvResponsePayload
 	if err := evt.DecodePayload(&payload); err != nil {
 		p.logger.Error("decode GPV response event", zap.Error(err))
@@ -145,6 +148,17 @@ func (p *AlarmSyncProcessor) handleGPVResponse(ctx context.Context, evt event.Ev
 		zap.Int("failed_clear", result.FailedClear))
 
 	return nil
+}
+
+func alarmSyncOwnsGPVResponse(evt event.Event) bool {
+	if evt.Metadata == nil {
+		return true
+	}
+	owner := evt.Metadata[event.MetadataGPVOwner]
+	if owner == "" {
+		return true
+	}
+	return owner == event.GPVOwnerAlarmSync
 }
 
 // processSync executes the full sync pipeline: parse → diff → apply.

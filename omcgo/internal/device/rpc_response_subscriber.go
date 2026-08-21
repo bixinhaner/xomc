@@ -233,13 +233,24 @@ func gpvHandoffLease(ackWait time.Duration) time.Duration {
 }
 
 func gpvResponseDeviceKey(evt event.Event) (string, error) {
+	if deviceSN := strings.TrimSpace(evt.Metadata[event.MetadataDeviceSN]); deviceSN != "" {
+		return deviceSN, nil
+	}
 	var payload struct {
 		DeviceSN string `json:"device_sn"`
 	}
 	if err := evt.DecodePayload(&payload); err != nil {
 		return "", fmt.Errorf("decode GPV device key: %w", err)
 	}
-	return payload.DeviceSN, nil
+	return strings.TrimSpace(payload.DeviceSN), nil
+}
+
+type gpvResponseEnvelope struct {
+	DeviceSN        string          `json:"device_sn"`
+	TaskSource      string          `json:"task_source"`
+	CommandKey      string          `json:"command_key"`
+	Owner           string          `json:"gpv_owner"`
+	ParameterValues json.RawMessage `json:"parameter_values"`
 }
 
 // handleSyncTaskFailed 处理 task.failed (包含 failed/expired/cancelled)。
@@ -445,28 +456,32 @@ func (s *RPCResponseSubscriber) Stop() {
 //  3. 对每个参数：ToStandard(privatePath) → standardPath（fallback 用原 path）
 //  4. BatchUpsert device_parameters（parameter_path = standardPath）
 func (s *RPCResponseSubscriber) handleGPVResponse(ctx context.Context, evt event.Event) error {
-	// Payload schema 见 acs/handler.go:publishRPCResponseEvent —
-	// map[string]interface{}{device_sn, method, path?, parameter_values}.
-	var payload map[string]interface{}
+	// Payload schema 见 acs/handler.go:publishRPCResponseEvent。这里先只解析
+	// device_sn/task_source/command_key/gpv_owner 这些轻量路由字段；param-sync 的
+	// 大 GPV 响应由 paramsync.ResultConsumer 处理，本 consumer 不再展开完整参数列表。
+	if evt.Metadata[event.MetadataGPVOwner] == event.GPVOwnerParamSync {
+		return nil
+	}
+	var payload gpvResponseEnvelope
 	if err := evt.DecodePayload(&payload); err != nil {
 		s.logger.Warn("decode payload", zap.Error(err))
 		return nil
 	}
-	deviceSN, _ := payload["device_sn"].(string)
+	deviceSN := strings.TrimSpace(payload.DeviceSN)
 	if deviceSN == "" {
 		return nil
 	}
-	if source, _ := payload["task_source"].(string); source == string(task.TaskSourceParamSync) {
+	if payload.TaskSource == string(task.TaskSourceParamSync) ||
+		payload.Owner == event.GPVOwnerParamSync ||
+		strings.HasPrefix(payload.CommandKey, "param-sync-") {
 		// paramsync.ResultConsumer is the sole writer for durable sync runs.
 		return nil
 	}
 
-	rawParams, ok := payload["parameter_values"]
-	if !ok {
+	if len(payload.ParameterValues) == 0 {
 		return nil
 	}
-	commandKey, _ := payload["command_key"].(string)
-	paramValues, err := decodeParameterValues(rawParams)
+	paramValues, err := decodeParameterValues(payload.ParameterValues)
 	if err != nil {
 		s.logger.Warn("decode parameter_values from event",
 			zap.String("device_sn", deviceSN),
@@ -524,8 +539,8 @@ func (s *RPCResponseSubscriber) handleGPVResponse(ctx context.Context, evt event
 		device,
 		persistParams,
 		translated,
-		!isPathBSyncCommandKey(commandKey),
-		strings.HasPrefix(commandKey, "geofence:"),
+		!isPathBSyncCommandKey(payload.CommandKey),
+		strings.HasPrefix(payload.CommandKey, "geofence:"),
 	)
 }
 
@@ -646,6 +661,17 @@ func decodeParameterValues(raw interface{}) ([]tr069.ParameterValueStruct, error
 			return nil, fmt.Errorf("unmarshal into ParameterValueStruct: %w", err)
 		}
 		return out, nil
+	case json.RawMessage:
+		if len(v) == 0 || string(v) == "null" {
+			return []tr069.ParameterValueStruct{}, nil
+		}
+		var out []tr069.ParameterValueStruct
+		if err := json.Unmarshal(v, &out); err != nil {
+			return nil, fmt.Errorf("unmarshal raw message into ParameterValueStruct: %w", err)
+		}
+		return out, nil
+	case []byte:
+		return decodeParameterValues(json.RawMessage(v))
 	default:
 		return nil, fmt.Errorf("unexpected type %T", raw)
 	}

@@ -146,6 +146,9 @@ func (e *UpgradeExecutor) SetParamPathTranslator(t ParamPathTranslator) {
 //	  "parameter_values": [{"name": "...", "value": "1|true|0|false", "type": "..."}]
 //	}
 func (e *UpgradeExecutor) HandleGetParamsResponseForRollback(ctx context.Context, evt event.Event, rb *RollbackExecutor) error {
+	if !softwareRollbackOwnsGPVResponse(evt) {
+		return nil
+	}
 	var payload struct {
 		DeviceSN        string                   `json:"device_sn"`
 		CommandKey      string                   `json:"command_key"`
@@ -158,6 +161,11 @@ func (e *UpgradeExecutor) HandleGetParamsResponseForRollback(ctx context.Context
 	}
 	rb.HandleEnableCheckResponse(ctx, payload.DeviceSN, payload.CommandKey, payload.FaultCode, payload.FaultStr, payload.ParameterValues)
 	return nil
+}
+
+func softwareRollbackOwnsGPVResponse(evt event.Event) bool {
+	owner := evt.Metadata[event.MetadataGPVOwner]
+	return owner == "" || owner == event.GPVOwnerSoftwareRollback
 }
 
 // NewUpgradeExecutor creates a new UpgradeExecutor.

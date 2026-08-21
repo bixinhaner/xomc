@@ -385,11 +385,12 @@ func (s *AlarmSyncService) TriggerSync(ctx context.Context, deviceSN string) (*t
 	params := json.RawMessage(`{"names":["Device.FaultMgmt.CurrentAlarm."]}`)
 	maxRetries := 2 // CreateTaskRequest.MaxRetries 为 *int（区分未设置/显式 0）
 	syncTask, err := s.taskService.CreateTask(ctx, &task.CreateTaskRequest{
-		DeviceSN:  deviceSN,
-		Method:    "GetParameterValues",
-		Params:    params,
-		Source:    task.TaskSourceSystem,
-		CreatorID: "", // 系统任务：空串表示非用户发起，与其它 TaskSourceSystem 任务
+		DeviceSN:   deviceSN,
+		Method:     "GetParameterValues",
+		Params:     params,
+		Source:     task.TaskSourceSystem,
+		CommandKey: "alarm-sync-" + uuid.NewString()[:8],
+		CreatorID:  "", // 系统任务：空串表示非用户发起，与其它 TaskSourceSystem 任务
 		// （见 pm/online_subscriber.go、notification/task_subscriber.go 等）保持一致。
 		// 之前误用 uuid.Nil.String()（"00000000-...-000000000000"）——该值能被
 		// uuid.Parse 成功解析，导致 taskLogObserver.parseOperatorID 把它当成合法

@@ -197,6 +197,31 @@ func TestRPCResponseSubscriberStartUsesConfiguredLosslessKeyedGPVConsumer(t *tes
 	}, bus.subscribeCalls)
 }
 
+func TestGPVResponseDeviceKeyPrefersMetadataEnvelope(t *testing.T) {
+	evt := event.Event{
+		Subject:  event.SubjectCommandGetParamsResponse,
+		Metadata: map[string]string{event.MetadataDeviceSN: " SN-META "},
+		Payload:  json.RawMessage(`{"device_sn":`),
+	}
+
+	key, err := gpvResponseDeviceKey(evt)
+
+	require.NoError(t, err)
+	require.Equal(t, "SN-META", key)
+}
+
+func TestGPVResponseDeviceKeyFallsBackToPayloadForLegacyEvents(t *testing.T) {
+	evt, err := event.NewEvent(event.SubjectCommandGetParamsResponse, map[string]any{
+		"device_sn": " SN-PAYLOAD ",
+	})
+	require.NoError(t, err)
+
+	key, err := gpvResponseDeviceKey(evt)
+
+	require.NoError(t, err)
+	require.Equal(t, "SN-PAYLOAD", key)
+}
+
 type rpcRespTrackingParamRepo struct {
 	stubDeviceParamRepo
 	rows []model.DeviceParameter
@@ -225,6 +250,48 @@ func (r *rpcRespTrackingInfoRefresher) SyncFromParameters(
 ) ([]string, error) {
 	r.calls++
 	return nil, r.err
+}
+
+func TestRPCResponseSubscriber_ParamSyncGPVResponseIsIgnoredByGenericRPCWriter(t *testing.T) {
+	paramRepo := &rpcRespTrackingParamRepo{}
+	infoRefresher := &rpcRespTrackingInfoRefresher{}
+	lookupErr := errors.New("generic RPC writer must not look up param-sync GPV device")
+	s := &RPCResponseSubscriber{
+		deviceLookup:  rpcRespDeviceLookupStub{err: lookupErr},
+		paramRepo:     paramRepo,
+		infoRefresher: infoRefresher,
+		logger:        zap.NewNop(),
+	}
+	evt, err := event.NewEvent(event.SubjectCommandGetParamsResponse, map[string]interface{}{
+		"device_sn":        "SN-PARAM-SYNC",
+		"method":           "GetParameterValuesResponse",
+		"task_source":      string(task.TaskSourceParamSync),
+		"task_source_id":   uuid.NewString(),
+		"parameter_values": []tr069.ParameterValueStruct{{Name: "Device.DeviceInfo.SerialNumber", Value: "SN-PARAM-SYNC"}},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, s.handleGPVResponse(context.Background(), evt))
+	require.Empty(t, paramRepo.rows)
+	require.Zero(t, infoRefresher.calls)
+}
+
+func TestRPCResponseSubscriber_ParamSyncOwnerSkipsBeforeParameterValueDecode(t *testing.T) {
+	core, logs := observer.New(zapcore.WarnLevel)
+	s := &RPCResponseSubscriber{
+		logger: zap.New(core).Named("device-rpc-resp-sub"),
+	}
+	evt := event.Event{
+		Subject:  event.SubjectCommandGetParamsResponse,
+		Metadata: map[string]string{event.MetadataGPVOwner: event.GPVOwnerParamSync},
+		Payload:  json.RawMessage(`{"device_sn":`),
+	}
+
+	require.NoError(t, s.handleGPVResponse(context.Background(), evt))
+	require.Equal(t, 0, logs.FilterMessage("decode payload").Len(),
+		"param_sync-owned GPV responses must route away before payload decode")
+	require.Equal(t, 0, logs.FilterMessage("decode parameter_values from event").Len(),
+		"param_sync-owned GPV responses must route away before full parameter_values decode")
 }
 
 func TestRPCResponseSubscriber_UECountResponsePersistsStandardPathsAndRefreshesInfo(t *testing.T) {
@@ -306,9 +373,9 @@ func TestRPCResponseSubscriber_GeofenceRFReadbackPersistsCanonicalValueAndRequir
 		paramRepo: paramRepo, infoRefresher: infoRefresher, logger: zap.NewNop(),
 	}
 	evt, err := event.NewEvent(event.SubjectCommandGetParamsResponse, map[string]interface{}{
-		"device_sn":  "SN-GEOFENCE-RF",
-		"method":     "GetParameterValuesResponse",
-		"command_key": "geofence:device:12:deactivate:verify:0",
+		"device_sn":        "SN-GEOFENCE-RF",
+		"method":           "GetParameterValuesResponse",
+		"command_key":      "geofence:device:12:deactivate:verify:0",
 		"parameter_values": []tr069.ParameterValueStruct{{Name: privatePath, Value: "false"}},
 	})
 	require.NoError(t, err)
@@ -361,6 +428,17 @@ func TestDecodeParameterValues_NullPayloadIsAnEmptyResult(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Empty(t, values)
+}
+
+func TestDecodeParameterValues_RawMessagePayload(t *testing.T) {
+	values, err := decodeParameterValues(json.RawMessage(`[
+		{"Name":"Device.DeviceInfo.SerialNumber","Value":"SN-1","Type":"xsd:string"}
+	]`))
+
+	require.NoError(t, err)
+	require.Equal(t, []tr069.ParameterValueStruct{{
+		Name: "Device.DeviceInfo.SerialNumber", Value: "SN-1", Type: "xsd:string",
+	}}, values)
 }
 
 func TestDecodeParameterValues_RejectsMalformedScalar(t *testing.T) {

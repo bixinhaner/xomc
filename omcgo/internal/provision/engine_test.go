@@ -58,6 +58,46 @@ func TestHandleXMLTransferCompleteWaitsForStartupStageReport(t *testing.T) {
 	assert.Equal(t, "wait_startup_stage", taskItem.CurrentStepName)
 }
 
+func TestProvisionGPVDeviceKeyPrefersMetadataEnvelope(t *testing.T) {
+	evt := event.Event{
+		Subject:  event.SubjectCommandGetParamsResponse,
+		Metadata: map[string]string{event.MetadataDeviceSN: " SN-PROVISION-META "},
+		Payload:  json.RawMessage(`{"device_sn":`),
+	}
+
+	key, err := provisionGPVDeviceKey(evt)
+
+	require.NoError(t, err)
+	require.Equal(t, "SN-PROVISION-META", key)
+}
+
+func TestProvisionGPVRouteGuardSkipsNonProvisionOwnerBeforePayloadDecode(t *testing.T) {
+	called := false
+	handler := provisionGPVRouteGuard(func(context.Context, event.Event) error {
+		called = true
+		return nil
+	})
+	evt := event.Event{
+		Subject:  event.SubjectCommandGetParamsResponse,
+		Metadata: map[string]string{event.MetadataGPVOwner: event.GPVOwnerAlarmSync},
+		Payload:  json.RawMessage(`{"device_sn":`),
+	}
+
+	require.NoError(t, handler(context.Background(), evt))
+	require.False(t, called)
+}
+
+func TestProvisionGPVResponseSkipsNonProvisionOwnerBeforePayloadDecode(t *testing.T) {
+	engine := &ProvisioningEngine{logger: zap.NewNop()}
+	evt := event.Event{
+		Subject:  event.SubjectCommandGetParamsResponse,
+		Metadata: map[string]string{event.MetadataGPVOwner: event.GPVOwnerSoftwareRollback},
+		Payload:  json.RawMessage(`{"device_sn":`),
+	}
+
+	require.NoError(t, engine.handleGPVResponse(context.Background(), evt))
+}
+
 func TestHandleXMLTransferCompleteRebootsLTEAndGSMBeforeActivationTimer(t *testing.T) {
 	for _, technology := range []model.Technology{model.TechLTE, model.TechGSM} {
 		t.Run(string(technology), func(t *testing.T) {
