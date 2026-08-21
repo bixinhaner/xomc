@@ -1641,7 +1641,7 @@ CREATE INDEX idx_pm_windows_recovery_cleanup_pending
 -- column in one partial index so PostgreSQL can scan it in either direction
 -- without sorting the full due hour again for every claimed batch.
 CREATE INDEX idx_pm_windows_due_claim_order
-    ON public.pm_aggregation_windows (granularity, window_end, entity_key, task_version_id, window_start)
+    ON public.pm_aggregation_windows (granularity, window_end, task_version_id, entity_key, window_start)
     INCLUDE (finalize_next_attempt_at, finalize_lease_until)
     WHERE status IN ('open', 'failed');
 
