@@ -950,6 +950,9 @@ func TestServeHTTP_RPCResponse_CompletesSessionWhenNoMoreCommands(t *testing.T) 
 	defer bus.mu.Unlock()
 	require.GreaterOrEqual(t, len(bus.published), 1)
 	assert.Equal(t, event.SubjectCommandGetParamsResponse, bus.published[0].Subject)
+	var payload map[string]any
+	require.NoError(t, bus.published[0].Event.DecodePayload(&payload))
+	assert.Equal(t, "device_rpc", payload["gpv_owner"])
 }
 
 func TestServeHTTP_ParamSyncRPCResponseDoesNotPublishDuplicateCanonicalResult(t *testing.T) {
@@ -983,9 +986,42 @@ func TestServeHTTP_ParamSyncRPCResponseDoesNotPublishDuplicateCanonicalResult(t 
 	assert.Equal(t, http.StatusNoContent, w.Code)
 	assert.Equal(t, task.TaskStatusCompleted, taskItem.Status)
 	for _, published := range bus.published {
+		assert.NotEqual(t, event.SubjectCommandGetParamsResponse, published.Subject,
+			"durable parameter-sync GPV results use task.completed -> param_sync.task.result, not generic COMMAND fan-out")
 		assert.NotEqual(t, event.SubjectParamSyncTaskResult, published.Subject,
 			"TaskTerminalBridge owns the single canonical parameter-sync result")
 	}
+}
+
+func TestPublishRPCFaultEventSkipsDurableParamSyncGPVFanout(t *testing.T) {
+	bus := &acsHEventBus{}
+	h := newTestACSHandlerWithDeps(newAcsHSessionStore(), bus)
+
+	h.publishRPCFaultEvent(context.Background(), "TEST-SN-001", &task.Task{
+		ID: "param-sync-task-001", DeviceSN: "TEST-SN-001",
+		Method: "GetParameterValues", Source: task.TaskSourceParamSync,
+		SourceID: uuid.NewString(), CommandKey: "param-sync-run-1",
+	}, 9005, "Client", "Invalid parameter", zap.NewNop())
+
+	require.Empty(t, bus.published,
+		"durable parameter-sync GPV faults use task.failed -> param_sync.task.result, not generic COMMAND fan-out")
+}
+
+func TestPublishRPCFaultEventKeepsGenericGPVOwnersRouted(t *testing.T) {
+	bus := &acsHEventBus{}
+	h := newTestACSHandlerWithDeps(newAcsHSessionStore(), bus)
+
+	h.publishRPCFaultEvent(context.Background(), "TEST-SN-001", &task.Task{
+		ID: "rollback-task-001", DeviceSN: "TEST-SN-001",
+		Method: "GetParameterValues", Source: task.TaskSourceSystem,
+		CommandKey: "rollback-enable-check-123",
+	}, 9005, "Client", "Invalid parameter", zap.NewNop())
+
+	require.Len(t, bus.published, 1)
+	assert.Equal(t, event.SubjectCommandGetParamsResponse, bus.published[0].Subject)
+	var payload map[string]any
+	require.NoError(t, bus.published[0].Event.DecodePayload(&payload))
+	assert.Equal(t, "software_rollback", payload["gpv_owner"])
 }
 
 func TestServeHTTP_RPCResponse_ChainsNextCommand(t *testing.T) {

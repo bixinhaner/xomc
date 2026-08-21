@@ -1779,6 +1779,33 @@ func isToleratedDurableGPVBadPath(taskItem *task.Task, badPath string, faultCode
 		taskItem.Source == task.TaskSourceParamSync && strings.HasPrefix(taskItem.CommandKey, "param-sync-")
 }
 
+func isDurableParamSyncGPVTask(taskItem *task.Task) bool {
+	return taskItem != nil &&
+		taskItem.Method == "GetParameterValues" &&
+		(taskItem.Source == task.TaskSourceParamSync || strings.HasPrefix(taskItem.CommandKey, "param-sync-"))
+}
+
+func gpvResponseOwner(taskItem *task.Task) string {
+	if isDurableParamSyncGPVTask(taskItem) {
+		return "param_sync"
+	}
+	if taskItem == nil {
+		return "device_rpc"
+	}
+	switch {
+	case taskItem.Source == task.TaskSourceDeviceAccess:
+		return "device_access"
+	case strings.HasPrefix(taskItem.CommandKey, "rollback-enable-check-"):
+		return "software_rollback"
+	case strings.HasPrefix(taskItem.CommandKey, "provision-") ||
+		strings.HasPrefix(taskItem.CommandKey, "PNP") ||
+		strings.HasPrefix(taskItem.CommandKey, "model-upload-"):
+		return "provision"
+	default:
+		return "device_rpc"
+	}
+}
+
 func isRecoverableGPVBadPath(badPath string, faultCode int) bool {
 	if faultCode != 9005 {
 		return false
@@ -2117,6 +2144,13 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 	var subject string
 	switch method {
 	case soap.MethodGetParameterValuesResp:
+		if isDurableParamSyncGPVTask(taskItem) {
+			log.Info("skip generic GPV response event for durable parameter-sync task",
+				zap.String("device_sn", deviceSN),
+				zap.String("task_id", taskItem.ID),
+				zap.String("task_source_id", taskItem.SourceID))
+			return
+		}
 		subject = event.SubjectCommandGetParamsResponse
 	case soap.MethodSetParameterValuesResp:
 		subject = event.SubjectCommandSetParamsResponse
@@ -2157,6 +2191,9 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 	// 触发对象级 reconcile 误删兄弟实例。
 	if taskItem != nil && taskItem.CommandKey != "" {
 		payload["command_key"] = taskItem.CommandKey
+	}
+	if method == soap.MethodGetParameterValuesResp {
+		payload["gpv_owner"] = gpvResponseOwner(taskItem)
 	}
 
 	// 从 lastCmdParams 提取原始命令路径（用于 GPN/GPV 关联）+ object_name（AddObject/DeleteObject）。
@@ -2237,6 +2274,14 @@ func (h *Handler) publishRPCFaultEvent(ctx context.Context, deviceSN string, tas
 	var subject string
 	switch taskItem.Method {
 	case "GetParameterValues":
+		if isDurableParamSyncGPVTask(taskItem) {
+			log.Info("skip generic GPV fault event for durable parameter-sync task",
+				zap.String("device_sn", deviceSN),
+				zap.String("task_id", taskItem.ID),
+				zap.String("task_source_id", taskItem.SourceID),
+				zap.Int("fault_code", faultCode))
+			return
+		}
 		subject = event.SubjectCommandGetParamsResponse
 	case "SetParameterValues":
 		subject = event.SubjectCommandSetParamsResponse
@@ -2272,6 +2317,9 @@ func (h *Handler) publishRPCFaultEvent(ctx context.Context, deviceSN string, tas
 		"fault_code":      faultCode,     // 数值：cwmp:FaultCode（标准 CWMP），无则 0
 		"fault_code_text": soapFaultCode, // 字符串：soap:faultcode（SOAP 1.1 outer，如 "Server.Internal"）
 		"fault_string":    faultMsg,      // 已含 [soapFaultCode] 前缀的人类可读消息
+	}
+	if taskItem.Method == "GetParameterValues" {
+		payload["gpv_owner"] = gpvResponseOwner(taskItem)
 	}
 	evt, err := event.NewEvent(subject, payload)
 	if err != nil {
