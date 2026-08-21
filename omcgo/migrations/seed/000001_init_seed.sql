@@ -27088,13 +27088,28 @@ INSERT INTO public.menus (
      '{"en-US":"Publish Policies","zh-CN":"策略发布"}'::jsonb),
     ('da000001-0000-0000-0000-000000000006', '接入控制开关', 'button', 'device:access-control:settings',
      'da000001-0000-0000-0000-000000000001', 5, NULL, NULL, NULL, 'show', 'normal',
-     '{"en-US":"Access-control Switch","zh-CN":"接入控制开关"}'::jsonb)
+     '{"en-US":"Access-control Switch","zh-CN":"接入控制开关"}'::jsonb),
+    ('da000001-0000-0000-0000-000000000007', '接入审计归档', 'button', 'device:access-control:audit',
+     'da000001-0000-0000-0000-000000000001', 6, NULL, NULL, NULL, 'show', 'normal',
+     '{"en-US":"Archive Access Audit","zh-CN":"接入审计归档"}'::jsonb)
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name, type = EXCLUDED.type, permission_key = EXCLUDED.permission_key,
     parent_id = EXCLUDED.parent_id, sort_order = EXCLUDED.sort_order,
     route_path = EXCLUDED.route_path, component_path = EXCLUDED.component_path,
     icon = EXCLUDED.icon, show_status = EXCLUDED.show_status, status = EXCLUDED.status,
     name_i18n = EXCLUDED.name_i18n, updated_at = NOW();
+
+-- Reconcile pre-release grants before applying the least-privilege matrix.
+-- Operators retain list/candidate operational controls; policy publication,
+-- RF repair, the global switch and audit archival are administrator-only.
+DELETE FROM public.role_menus
+WHERE role_id = '10000000-0000-0000-0000-000000000002'::uuid
+  AND menu_id IN (
+    'da000001-0000-0000-0000-000000000004'::uuid,
+    'da000001-0000-0000-0000-000000000005'::uuid,
+    'da000001-0000-0000-0000-000000000006'::uuid,
+    'da000001-0000-0000-0000-000000000007'::uuid
+  );
 
 INSERT INTO public.role_menus (role_id, menu_id)
 SELECT role_id, menu_id
@@ -27108,10 +27123,8 @@ FROM (VALUES
     ('10000000-0000-0000-0000-000000000001'::uuid, 'da000001-0000-0000-0000-000000000005'::uuid),
     ('10000000-0000-0000-0000-000000000002'::uuid, 'da000001-0000-0000-0000-000000000002'::uuid),
     ('10000000-0000-0000-0000-000000000002'::uuid, 'da000001-0000-0000-0000-000000000003'::uuid),
-    ('10000000-0000-0000-0000-000000000002'::uuid, 'da000001-0000-0000-0000-000000000004'::uuid),
-    ('10000000-0000-0000-0000-000000000002'::uuid, 'da000001-0000-0000-0000-000000000005'::uuid),
     ('10000000-0000-0000-0000-000000000001'::uuid, 'da000001-0000-0000-0000-000000000006'::uuid),
-    ('10000000-0000-0000-0000-000000000002'::uuid, 'da000001-0000-0000-0000-000000000006'::uuid)
+    ('10000000-0000-0000-0000-000000000001'::uuid, 'da000001-0000-0000-0000-000000000007'::uuid)
 ) AS assignments(role_id, menu_id)
 ON CONFLICT (role_id, menu_id) DO NOTHING;
 
@@ -27133,20 +27146,70 @@ INSERT INTO public.api_endpoints (
     ('da000002-0000-0000-0000-000000000015', '/api/v1/device-access/actions/:actionID/retry', 'POST', 'POST /api/v1/device-access/actions/:actionID/retry', '重试 RF 动作', 'device-access', false, now(), now(), false),
     ('da000002-0000-0000-0000-000000000016', '/api/v1/device-access/policies/:versionID', 'DELETE', 'DELETE /api/v1/device-access/policies/:versionID', '删除未发布接入策略草稿', 'device-access', false, now(), now(), false),
     ('da000002-0000-0000-0000-000000000017', '/api/v1/device-access/settings', 'GET', 'GET /api/v1/device-access/settings', '查询接入控制业务开关', 'device-access', false, now(), now(), false),
-    ('da000002-0000-0000-0000-000000000018', '/api/v1/device-access/settings', 'PUT', 'PUT /api/v1/device-access/settings', '更新接入控制业务开关', 'device-access', false, now(), now(), false)
+    ('da000002-0000-0000-0000-000000000018', '/api/v1/device-access/settings', 'PUT', 'PUT /api/v1/device-access/settings', '更新接入控制业务开关', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000019', '/api/v1/device-access/access-list/batch-disable', 'POST', 'POST /api/v1/device-access/access-list/batch-disable', '批量停用接入名单', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000020', '/api/v1/device-access/access-list/template', 'GET', 'GET /api/v1/device-access/access-list/template', '下载接入名单模板', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000021', '/api/v1/device-access/imports/preview', 'POST', 'POST /api/v1/device-access/imports/preview', '预览接入控制导入', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000022', '/api/v1/device-access/imports/:batchID/commit', 'POST', 'POST /api/v1/device-access/imports/:batchID/commit', '提交接入控制导入', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000023', '/api/v1/device-access/imports/:batchID/rollback', 'POST', 'POST /api/v1/device-access/imports/:batchID/rollback', '回滚接入控制导入', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000024', '/api/v1/device-access/imports/:batchID', 'GET', 'GET /api/v1/device-access/imports/:batchID', '查询接入控制导入批次', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000025', '/api/v1/device-access/imports/:batchID/errors', 'GET', 'GET /api/v1/device-access/imports/:batchID/errors', '查询接入控制导入错误', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000026', '/api/v1/device-access/imports', 'GET', 'GET /api/v1/device-access/imports', '查询接入控制导入批次', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000027', '/api/v1/device-access/import-templates/:importType', 'GET', 'GET /api/v1/device-access/import-templates/:importType', '下载规则维度模板', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000028', '/api/v1/device-access/policies/:versionID/rules/:ruleID/dimensions/:dimension/export', 'GET', 'GET /api/v1/device-access/policies/:versionID/rules/:ruleID/dimensions/:dimension/export', '导出规则维度', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000029', '/api/v1/device-access/policies/:versionID/rules/:ruleID/dimensions/:dimension', 'DELETE', 'DELETE /api/v1/device-access/policies/:versionID/rules/:ruleID/dimensions/:dimension', '清空规则维度', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000030', '/api/v1/device-access/policies/:versionID', 'PUT', 'PUT /api/v1/device-access/policies/:versionID', '编辑接入策略草稿', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000031', '/api/v1/device-access/actions/:actionID/attempts', 'GET', 'GET /api/v1/device-access/actions/:actionID/attempts', '查询 RF 动作尝试', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000033', '/api/v1/device-access/states/summary', 'GET', 'GET /api/v1/device-access/states/summary', '汇总接入状态', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000034', '/api/v1/device-access/states/:serialNumber/decisions', 'GET', 'GET /api/v1/device-access/states/:serialNumber/decisions', '分页查询接入决定', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000035', '/api/v1/device-access/decisions/:decisionID/archive', 'POST', 'POST /api/v1/device-access/decisions/:decisionID/archive', '归档历史接入决定', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000036', '/api/v1/device-access/decisions/:decisionID/restore', 'POST', 'POST /api/v1/device-access/decisions/:decisionID/restore', '恢复历史接入决定', 'device-access', false, now(), now(), false),
+	('da000002-0000-0000-0000-000000000037', '/api/v1/device-access/states/:serialNumber/identity-snapshots', 'GET', 'GET /api/v1/device-access/states/:serialNumber/identity-snapshots', '分页查询接入身份快照', 'device-access', false, now(), now(), false),
+		('da000002-0000-0000-0000-000000000038', '/api/v1/device-access/states/:serialNumber/evidence', 'GET', 'GET /api/v1/device-access/states/:serialNumber/evidence', '分页查询接入证据', 'device-access', false, now(), now(), false),
+		('da000002-0000-0000-0000-000000000039', '/api/v1/device-access/states/:serialNumber/notifications', 'GET', 'GET /api/v1/device-access/states/:serialNumber/notifications', '分页查询接入通知状态', 'device-access', false, now(), now(), false),
+		('da000002-0000-0000-0000-000000000040', '/api/v1/device-access/states/:serialNumber/manual-operations', 'GET', 'GET /api/v1/device-access/states/:serialNumber/manual-operations', '分页查询接入人工操作', 'device-access', false, now(), now(), false),
+		('da000002-0000-0000-0000-000000000041', '/api/v1/device-access/policies/:versionID/difference', 'GET', 'GET /api/v1/device-access/policies/:versionID/difference', '查询接入策略版本差异', 'device-access', false, now(), now(), false),
+		('da000002-0000-0000-0000-000000000042', '/api/v1/device-access/policies/:versionID/rollback', 'POST', 'POST /api/v1/device-access/policies/:versionID/rollback', '回滚并发布接入策略历史版本', 'device-access', false, now(), now(), false)
 ON CONFLICT (path, method) DO UPDATE SET
     name = EXCLUDED.name, description = EXCLUDED.description, api_group = EXCLUDED.api_group,
     is_auto = EXCLUDED.is_auto, updated_at = NOW();
 
+DELETE FROM public.role_api_permissions
+WHERE role_id IN (
+    '10000000-0000-0000-0000-000000000002'::uuid,
+    '10000000-0000-0000-0000-000000000003'::uuid
+)
+AND endpoint_id IN (
+    SELECT id FROM public.api_endpoints WHERE api_group = 'device-access'
+);
+
 INSERT INTO public.role_api_permissions (role_id, endpoint_id)
-SELECT role_id, endpoint_id
-FROM (VALUES
-    ('10000000-0000-0000-0000-000000000001'::uuid),
-    ('10000000-0000-0000-0000-000000000002'::uuid)
-) AS roles(role_id)
-CROSS JOIN (
-    SELECT id AS endpoint_id FROM public.api_endpoints WHERE api_group = 'device-access'
-) AS endpoints
+SELECT '10000000-0000-0000-0000-000000000001'::uuid, id
+FROM public.api_endpoints
+WHERE api_group = 'device-access'
+ON CONFLICT (role_id, endpoint_id) DO NOTHING;
+
+-- Operator: read access plus scoped day-to-day governance. Destructive global
+-- controls, publication, rollback, archival and manual RF repair stay admin-only.
+INSERT INTO public.role_api_permissions (role_id, endpoint_id)
+SELECT '10000000-0000-0000-0000-000000000002'::uuid, id
+FROM public.api_endpoints
+WHERE api_group = 'device-access'
+  AND (
+    method = 'GET'
+    OR id IN (
+      'da000002-0000-0000-0000-000000000001'::uuid,
+      'da000002-0000-0000-0000-000000000004'::uuid,
+      'da000002-0000-0000-0000-000000000006'::uuid,
+      'da000002-0000-0000-0000-000000000012'::uuid,
+      'da000002-0000-0000-0000-000000000016'::uuid,
+      'da000002-0000-0000-0000-000000000019'::uuid,
+      'da000002-0000-0000-0000-000000000021'::uuid,
+      'da000002-0000-0000-0000-000000000022'::uuid,
+      'da000002-0000-0000-0000-000000000029'::uuid,
+      'da000002-0000-0000-0000-000000000030'::uuid
+    )
+  )
 ON CONFLICT (role_id, endpoint_id) DO NOTHING;
 
 INSERT INTO public.role_api_permissions (role_id, endpoint_id)

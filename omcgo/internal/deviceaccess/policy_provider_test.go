@@ -45,6 +45,34 @@ func TestDecodeConditionExpected(t *testing.T) {
 		require.NoError(t, decodeConditionExpected(&condition, json.RawMessage(`{"center":{"latitude":31.2,"longitude":121.5},"radius_meters":100}`)))
 		require.Equal(t, 100.0, condition.GeoFence.RadiusMeters)
 	})
+
+	t.Run("ip range", func(t *testing.T) {
+		condition := CompiledCondition{Operator: ConditionOperatorIPRange}
+		require.NoError(t, decodeConditionExpected(&condition, json.RawMessage(`{"start":"10.0.0.1","end":"10.0.0.20"}`)))
+		require.Equal(t, "10.0.0.1", condition.IPRange.Start)
+		require.Equal(t, "10.0.0.20", condition.IPRange.End)
+	})
+
+	t.Run("ip range alternatives", func(t *testing.T) {
+		condition := CompiledCondition{Operator: ConditionOperatorIPRange}
+		require.NoError(t, decodeConditionExpected(&condition, json.RawMessage(`[{"start":"10.0.0.1","end":"10.0.0.20"},{"start":"192.0.2.1","end":"192.0.2.20"}]`)))
+		require.Len(t, condition.IPRanges, 2)
+		require.Equal(t, "192.0.2.1", condition.IPRanges[1].Start)
+	})
+
+	t.Run("gps bounds", func(t *testing.T) {
+		condition := CompiledCondition{Operator: ConditionOperatorWithinBounds}
+		require.NoError(t, decodeConditionExpected(&condition, json.RawMessage(`{"min_latitude":30,"max_latitude":32,"min_longitude":120,"max_longitude":122}`)))
+		require.Equal(t, 30.0, condition.GeoBounds.MinLatitude)
+		require.Equal(t, 122.0, condition.GeoBounds.MaxLongitude)
+	})
+
+	t.Run("gps bounds alternatives", func(t *testing.T) {
+		condition := CompiledCondition{Operator: ConditionOperatorWithinBounds}
+		require.NoError(t, decodeConditionExpected(&condition, json.RawMessage(`[{"min_latitude":30,"max_latitude":32,"min_longitude":120,"max_longitude":122},{"min_latitude":39,"max_latitude":41,"min_longitude":115,"max_longitude":117}]`)))
+		require.Len(t, condition.GeoBoundsAny, 2)
+		require.Equal(t, 115.0, condition.GeoBoundsAny[1].MinLongitude)
+	})
 }
 
 func TestPgPolicyProviderActiveVersionScopesCarrierWithParameterizedQuery(t *testing.T) {

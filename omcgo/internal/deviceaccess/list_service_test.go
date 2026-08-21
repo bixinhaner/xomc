@@ -9,8 +9,26 @@ import (
 )
 
 type listStoreStub struct {
-	carrier string
-	entry   CompiledListEntry
+	carrier         string
+	entry           CompiledListEntry
+	entries         []CompiledListEntry
+	disabledType    ListEntryType
+	disabledSerials []string
+	disableReason   string
+}
+
+func (s *listStoreStub) DisableListEntriesAndQueue(_ context.Context, carrier string, entryType ListEntryType, serialNumbers []string, reason string) error {
+	s.carrier = carrier
+	s.disabledType = entryType
+	s.disabledSerials = append([]string(nil), serialNumbers...)
+	s.disableReason = reason
+	return nil
+}
+
+func (s *listStoreStub) UpsertListEntriesAndQueue(_ context.Context, carrier string, entries []CompiledListEntry) error {
+	s.carrier = carrier
+	s.entries = append([]CompiledListEntry(nil), entries...)
+	return nil
 }
 
 func (s *listStoreStub) UpsertListEntryAndQueue(_ context.Context, carrier string, entry CompiledListEntry) error {
@@ -95,4 +113,75 @@ func TestListServiceEnforcesTargetIdentityScope(t *testing.T) {
 	require.Error(t, err)
 	require.Empty(t, entries.entry.IdentityValue)
 	require.Equal(t, []uuid.UUID{groupID}, checker.groups)
+}
+
+func TestListServicePersistsMultiSerialBatchAtomically(t *testing.T) {
+	store := &listStoreStub{}
+	service := NewListService(store)
+
+	err := service.UpsertManyAndReevaluate(context.Background(), PolicyActor{
+		Carrier: "cmcc", SubjectID: "operator-1",
+	}, []CompiledListEntry{
+		{Type: ListEntryTypeDeny, IdentityType: IdentityTypeSerialNumber, IdentityValue: " SN-1 "},
+		{Type: ListEntryTypeDeny, IdentityType: IdentityTypeSerialNumber, IdentityValue: "SN-2"},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "cmcc", store.carrier)
+	require.Len(t, store.entries, 2)
+	require.Equal(t, "SN-1", store.entries[0].IdentityValue)
+	require.Equal(t, ListEntryStatusActive, store.entries[0].Status)
+}
+
+func TestListServiceRejectsInvalidMultiSerialBatchBeforePersistence(t *testing.T) {
+	tests := []struct {
+		name    string
+		entries []CompiledListEntry
+	}{
+		{
+			name: "duplicate serial",
+			entries: []CompiledListEntry{
+				{Type: ListEntryTypeDeny, IdentityType: IdentityTypeSerialNumber, IdentityValue: "SN-1"},
+				{Type: ListEntryTypeDeny, IdentityType: IdentityTypeSerialNumber, IdentityValue: " SN-1 "},
+			},
+		},
+		{
+			name: "mixed list types",
+			entries: []CompiledListEntry{
+				{Type: ListEntryTypeDeny, IdentityType: IdentityTypeSerialNumber, IdentityValue: "SN-1"},
+				{Type: ListEntryTypeAllow, IdentityType: IdentityTypeSerialNumber, IdentityValue: "SN-2"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &listStoreStub{}
+			service := NewListService(store)
+			err := service.UpsertManyAndReevaluate(context.Background(), PolicyActor{
+				Carrier: "cmcc", SubjectID: "operator-1",
+			}, tt.entries)
+			require.Error(t, err)
+			require.Empty(t, store.entries)
+		})
+	}
+}
+
+func TestListServiceValidatesBatchDisableBeforePersistence(t *testing.T) {
+	store := &listStoreStub{}
+	service := NewListService(store)
+	actor := PolicyActor{Carrier: "cmcc", SubjectID: "operator-1"}
+
+	err := service.DisableManyAndReevaluate(context.Background(), actor, ListEntryTypeDeny, []string{" SN-1 ", "SN-2"}, "expired approval")
+
+	require.NoError(t, err)
+	require.Equal(t, "cmcc", store.carrier)
+	require.Equal(t, ListEntryTypeDeny, store.disabledType)
+	require.Equal(t, []string{"SN-1", "SN-2"}, store.disabledSerials)
+	require.Equal(t, "expired approval", store.disableReason)
+
+	err = service.DisableManyAndReevaluate(context.Background(), actor, ListEntryTypeDeny, []string{"SN-1", " SN-1 "}, "duplicate")
+	require.Error(t, err)
+	err = service.DisableManyAndReevaluate(context.Background(), actor, ListEntryTypeDeny, []string{"SN-1"}, "")
+	require.Error(t, err)
 }

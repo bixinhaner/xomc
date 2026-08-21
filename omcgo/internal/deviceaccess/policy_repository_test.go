@@ -3,6 +3,7 @@ package deviceaccess
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -28,6 +29,22 @@ func TestBuildListEntryUpsertUsesParameterizedIdentityConflict(t *testing.T) {
 	require.Contains(t, args, "SN-LIST")
 }
 
+func TestBuildListBatchDisableUsesParameterizedTenantScope(t *testing.T) {
+	query, args, err := buildListBatchDisable(
+		"cmcc", ListEntryTypeDeny, []string{"SN-1", "SN-2"}, "expired approval", time.Now().UTC(),
+	)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "UPDATE device_access_list_entries")
+	require.Contains(t, query, "RETURNING identity_value")
+	require.Contains(t, query, "carrier")
+	require.Contains(t, query, "entry_type")
+	require.NotContains(t, query, "SN-1")
+	require.Contains(t, args, "cmcc")
+	require.Contains(t, args, "SN-1")
+	require.Contains(t, args, "SN-2")
+}
+
 func TestPgPolicyStoreWritesEntryAndOutboxInOneTransaction(t *testing.T) {
 	tx := &repositoryTestTx{}
 	store := NewPgPolicyStore(&repositoryTestDB{tx: tx})
@@ -42,6 +59,24 @@ func TestPgPolicyStoreWritesEntryAndOutboxInOneTransaction(t *testing.T) {
 	require.Len(t, tx.execSQL, 2)
 	require.Contains(t, tx.execSQL[0], "device_access_list_entries")
 	require.Contains(t, tx.execSQL[1], "device_access_outbox")
+}
+
+func TestPgPolicyStoreWritesMultiEntryBatchAndOutboxesInOneTransaction(t *testing.T) {
+	tx := &repositoryTestTx{}
+	store := NewPgPolicyStore(&repositoryTestDB{tx: tx})
+
+	err := store.UpsertListEntriesAndQueue(context.Background(), "cmcc", []CompiledListEntry{
+		{Type: ListEntryTypeDeny, IdentityType: IdentityTypeSerialNumber, IdentityValue: "SN-1", Status: ListEntryStatusActive},
+		{Type: ListEntryTypeDeny, IdentityType: IdentityTypeSerialNumber, IdentityValue: "SN-2", Status: ListEntryStatusActive},
+	})
+
+	require.NoError(t, err)
+	require.True(t, tx.committed)
+	require.Len(t, tx.execSQL, 4)
+	require.Contains(t, tx.execSQL[0], "device_access_list_entries")
+	require.Contains(t, tx.execSQL[1], "device_access_outbox")
+	require.Contains(t, tx.execSQL[2], "device_access_list_entries")
+	require.Contains(t, tx.execSQL[3], "device_access_outbox")
 }
 
 func TestFindOrCreatePolicySetReturnsPersistedFamilyName(t *testing.T) {

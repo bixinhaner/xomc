@@ -13,6 +13,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/carrier/cucc"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -83,6 +84,64 @@ func realCarrierRegistry(t *testing.T) *carrier.CarrierRegistry {
 	r.Register(ctcc.New())
 	r.Register(cucc.New())
 	return r
+}
+
+func TestCandidateRFIdentitySnapshotPersistsReportedControlSurface(t *testing.T) {
+	technology, paths := CandidateRFIdentitySnapshot(AccessObservation{
+		ProductClass: "FAP/LTE",
+		Inform: &tr069.InformMessage{ParameterList: []tr069.ParameterValueStruct{
+			{Name: "Device.Services.FAPService.1.FAPControl.LTE.AdminState", Value: "1"},
+		}},
+	})
+
+	require.Equal(t, model.TechLTE, technology)
+	require.Equal(t, []string{"Device.Services.FAPService.1.FAPControl.LTE.AdminState"}, paths)
+}
+
+func TestQueueCandidateRFSwitchAllowsAuditedContainmentOnly(t *testing.T) {
+	enq := &fakeEnqueuer{}
+	svc := newTestDeviceService(&mockDeviceRepo{}, &mockParamRepo{})
+	svc.SetTaskService(enq)
+	svc.SetCarrierRegistry(realCarrierRegistry(t))
+	target := CandidateRFTarget{
+		CandidateID: uuid.New(), Carrier: model.CarrierCMCC, SerialNumber: "SN-CANDIDATE",
+		ProductClass: "FAP/LTE", Technology: model.TechLTE,
+		RFControlPaths: []string{"Device.Services.FAPService.1.FAPControl.LTE.AdminState"},
+	}
+	options := RFSwitchTaskOptions{
+		Source: task.TaskSourceDeviceAccess, SourceID: uuid.NewString(),
+		CommandKey: "candidate-containment", AdmissionClass: task.AdmissionClassSecurityAction,
+	}
+
+	created, err := svc.QueueCandidateRFSwitch(context.Background(), target, false, options)
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.Len(t, enq.calls, 1)
+	require.Equal(t, "SN-CANDIDATE", enq.calls[0].DeviceSN)
+	require.Equal(t, "SetParameterValues", enq.calls[0].Method)
+	require.Equal(t, "Device.Services.FAPService.1.FAPControl.LTE.AdminState", rfSwitchEmittedPath(t, enq.calls[0]))
+
+	_, err = svc.QueueCandidateRFSwitch(context.Background(), target, true, options)
+	require.Error(t, err)
+	require.Len(t, enq.calls, 1)
+}
+
+func TestQueueCandidateRFRejectsUnreportedMBS31001Control(t *testing.T) {
+	svc := newTestDeviceService(&mockDeviceRepo{}, &mockParamRepo{})
+	svc.SetTaskService(&fakeEnqueuer{})
+	svc.SetCarrierRegistry(realCarrierRegistry(t))
+	target := CandidateRFTarget{
+		CandidateID: uuid.New(), Carrier: model.CarrierCMCC, SerialNumber: "SN-MBS",
+		ProductClass: "FAP/mBS31001/DC", Technology: model.TechLTE,
+	}
+	options := RFSwitchTaskOptions{
+		Source: task.TaskSourceDeviceAccess, SourceID: uuid.NewString(),
+		CommandKey: "candidate-mbs", AdmissionClass: task.AdmissionClassSecurityAction,
+	}
+
+	_, err := svc.QueueCandidateRFReadback(context.Background(), target, options)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "did not report Device.DeviceInfo.SAS.RadioEnable")
 }
 
 // V1 — CMCC LTE → standard FAPControl.LTE.AdminState

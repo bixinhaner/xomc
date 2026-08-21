@@ -13,6 +13,7 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/task"
 )
 
 // Handler provides HTTP handlers for the MML console REST API.
@@ -431,11 +432,22 @@ func (h *Handler) runExecute(c *gin.Context, req ExecuteHTTPRequest) {
 
 	task, err := h.service.ExecuteCommand(c.Request.Context(), execReq)
 	if err != nil {
-		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		commonerrors.AbortWithError(c, mmlHTTPStatusFromError(err), err)
 		return
 	}
 
 	response.OKWithStatus(c, http.StatusCreated, task)
+}
+
+func isTaskAdmissionDenied(err error) bool {
+	return errors.Is(err, task.ErrTaskAdmissionDenied)
+}
+
+func mmlHTTPStatusFromError(err error) int {
+	if isTaskAdmissionDenied(err) {
+		return http.StatusConflict
+	}
+	return commonerrors.HTTPStatusFromError(err)
 }
 
 // nonEmptyParamPathCount 统计 trim 后非空的参数路径数量（空白路径不算可执行 PATH）。
@@ -800,7 +812,7 @@ func (h *Handler) StartTask(c *gin.Context) {
 
 	task, err := h.service.StartTask(c.Request.Context(), id)
 	if err != nil {
-		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		commonerrors.AbortWithError(c, mmlHTTPStatusFromError(err), err)
 		return
 	}
 

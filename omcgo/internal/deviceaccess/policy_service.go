@@ -1,6 +1,7 @@
 package deviceaccess
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -38,14 +40,57 @@ type PolicyVersion struct {
 type PolicyActor struct {
 	Carrier       string
 	SubjectID     string
+	Username      string
 	VisibleGroups []uuid.UUID
 }
 
 type PolicyStore interface {
 	CreateDraft(ctx context.Context, version PolicyVersion) (PolicyVersion, error)
+	UpdateDraft(ctx context.Context, version PolicyVersion) (PolicyVersion, error)
 	GetVersion(ctx context.Context, versionID string) (PolicyVersion, error)
 	Publish(ctx context.Context, versionID, subjectID string) (PolicyVersion, error)
 	DeleteDraft(ctx context.Context, versionID string) error
+}
+
+type PolicyHistoryStore interface {
+	PreviousVersion(ctx context.Context, versionID string) (PolicyVersion, error)
+}
+
+func (s *PolicyService) UpdateDraft(ctx context.Context, actor PolicyActor, versionID string, policy CompiledPolicy) (PolicyVersion, error) {
+	if err := validatePolicyActor(actor); err != nil {
+		return PolicyVersion{}, err
+	}
+	versionID = strings.TrimSpace(versionID)
+	if versionID == "" {
+		return PolicyVersion{}, fmt.Errorf("%w: policy version id is required", ErrInvalidAccessInput)
+	}
+	current, err := s.store.GetVersion(ctx, versionID)
+	if err != nil {
+		return PolicyVersion{}, fmt.Errorf("load policy draft: %w", err)
+	}
+	if current.Carrier != actor.Carrier {
+		return PolicyVersion{}, ErrPolicyCarrierScope
+	}
+	if current.Status != PolicyVersionDraft {
+		return PolicyVersion{}, ErrPolicyVersionImmutable
+	}
+	policy = normalizeCompiledPolicy(policy)
+	if err := validateCompiledPolicy(policy); err != nil {
+		return PolicyVersion{}, fmt.Errorf("%w: %v", ErrInvalidAccessInput, err)
+	}
+	policy = normalizeUpdatedDraftEntityIDs(policy, current.Policy)
+	policy.VersionID = ""
+	payload, err := json.Marshal(policy)
+	if err != nil {
+		return PolicyVersion{}, fmt.Errorf("encode policy draft update: %w", err)
+	}
+	current.Policy = policy
+	current.ContentHash = contentHash(payload)
+	updated, err := s.store.UpdateDraft(ctx, current)
+	if err != nil {
+		return PolicyVersion{}, fmt.Errorf("update policy draft: %w", err)
+	}
+	return updated, nil
 }
 
 type ReevaluationRequest struct {
@@ -86,6 +131,7 @@ func (s *PolicyService) CreateDraft(ctx context.Context, actor PolicyActor, name
 	if err := validateCompiledPolicy(policy); err != nil {
 		return PolicyVersion{}, fmt.Errorf("%w: %v", ErrInvalidAccessInput, err)
 	}
+	policy = regenerateDraftEntityIDs(policy)
 	policy.VersionID = ""
 	payload, err := json.Marshal(policy)
 	if err != nil {
@@ -140,9 +186,62 @@ func (s *PolicyService) Publish(ctx context.Context, actor PolicyActor, versionI
 	if version.Status != PolicyVersionDraft {
 		return PolicyVersion{}, fmt.Errorf("publish policy version %s: %w", versionID, ErrPolicyVersionImmutable)
 	}
+	policy := normalizeCompiledPolicy(version.Policy)
+	if err := validateCompiledPolicy(policy); err != nil {
+		return PolicyVersion{}, fmt.Errorf("%w: %v", ErrInvalidAccessInput, err)
+	}
 	published, err := s.store.Publish(ctx, versionID, actor.SubjectID)
 	if err != nil {
 		return PolicyVersion{}, fmt.Errorf("publish policy version: %w", err)
+	}
+	return published, nil
+}
+
+func (s *PolicyService) Difference(ctx context.Context, actor PolicyActor, targetVersionID, baseVersionID string) (PolicyDifference, error) {
+	target, err := s.GetVersion(ctx, actor, targetVersionID)
+	if err != nil {
+		return PolicyDifference{}, err
+	}
+	var base PolicyVersion
+	if strings.TrimSpace(baseVersionID) != "" {
+		base, err = s.GetVersion(ctx, actor, baseVersionID)
+	} else {
+		history, ok := s.store.(PolicyHistoryStore)
+		if !ok {
+			return PolicyDifference{}, fmt.Errorf("load previous policy version: %w", ErrAccessGateDependencyMissing)
+		}
+		base, err = history.PreviousVersion(ctx, target.ID)
+		if err == nil && base.Carrier != actor.Carrier {
+			err = ErrPolicyCarrierScope
+		}
+	}
+	if err != nil {
+		return PolicyDifference{}, fmt.Errorf("load policy difference baseline: %w", err)
+	}
+	return comparePolicyVersions(base, target), nil
+}
+
+// Rollback publishes historical content as a new immutable version. The source
+// version is never edited. If publication fails, the newly-created draft is
+// intentionally retained so the operator can inspect or retry it.
+func (s *PolicyService) Rollback(ctx context.Context, actor PolicyActor, sourceVersionID string) (PolicyVersion, error) {
+	source, err := s.GetVersion(ctx, actor, sourceVersionID)
+	if err != nil {
+		return PolicyVersion{}, err
+	}
+	if source.Status != PolicyVersionRetired {
+		return PolicyVersion{}, fmt.Errorf("rollback policy version %s: %w", sourceVersionID, ErrPolicyRollbackSource)
+	}
+	draft, err := s.CreateDraft(ctx, actor, source.Name, source.Policy)
+	if err != nil {
+		return PolicyVersion{}, fmt.Errorf("create policy rollback draft: %w", err)
+	}
+	if _, err := s.Publish(ctx, actor, draft.ID); err != nil {
+		return PolicyVersion{}, fmt.Errorf("publish policy rollback draft %s: %w", draft.ID, err)
+	}
+	published, err := s.GetVersion(ctx, actor, draft.ID)
+	if err != nil {
+		return PolicyVersion{}, fmt.Errorf("reload published rollback version: %w", err)
 	}
 	return published, nil
 }
@@ -190,7 +289,7 @@ func (s *PolicyService) ReevaluateOne(ctx context.Context, actor PolicyActor, se
 	if err := s.queue.Enqueue(ctx, ReevaluationRequest{
 		Carrier:      actor.Carrier,
 		SerialNumber: serialNumber,
-		TriggerType:  "manual",
+		TriggerType:  TriggerManualReevaluation,
 	}); err != nil {
 		return fmt.Errorf("enqueue manual device access reevaluation: %w", err)
 	}
@@ -200,6 +299,7 @@ func (s *PolicyService) ReevaluateOne(ctx context.Context, actor PolicyActor, se
 var (
 	ErrPolicyCarrierScope     = errors.New("policy carrier scope violation")
 	ErrPolicyVersionImmutable = errors.New("published policy version is immutable")
+	ErrPolicyRollbackSource   = errors.New("policy rollback source must be retired")
 	ErrInvalidAccessInput     = errors.New("invalid device access input")
 )
 
@@ -215,12 +315,67 @@ func validatePolicyActor(actor PolicyActor) error {
 
 func validateCompiledPolicy(policy CompiledPolicy) error {
 	if policy.DefaultAction != PolicyDefaultActionReject {
-		return fmt.Errorf("unsupported policy default action %q", policy.DefaultAction)
+		return fmt.Errorf("policy default action must be %q", PolicyDefaultActionReject)
+	}
+	if policy.FailureMode != FailureModeFailClosed {
+		return fmt.Errorf("policy failure mode must be %q", FailureModeFailClosed)
+	}
+	if policy.CollectionTimeout < time.Minute || policy.CollectionTimeout > 24*time.Hour {
+		return fmt.Errorf("policy collection timeout must be between 1 minute and 24 hours")
 	}
 	if len(policy.ListEntries) > 0 {
 		return errors.New("policy list entries must be managed through the access-list API")
 	}
+	if len(policy.BypassProfiles) > 100 {
+		return errors.New("policy has more than 100 bypass profiles")
+	}
+	profileIDs := make(map[string]struct{}, len(policy.BypassProfiles))
+	profilePriorities := make(map[int]string, len(policy.BypassProfiles))
+	for _, profile := range policy.BypassProfiles {
+		if _, err := uuid.Parse(profile.ID); err != nil {
+			return fmt.Errorf("bypass profile id %q is invalid", profile.ID)
+		}
+		if _, exists := profileIDs[profile.ID]; exists {
+			return fmt.Errorf("bypass profile id %q is duplicated", profile.ID)
+		}
+		profileIDs[profile.ID] = struct{}{}
+		if strings.TrimSpace(profile.Name) == "" || strings.TrimSpace(profile.Reason) == "" {
+			return fmt.Errorf("bypass profile %s requires name and reason", profile.ID)
+		}
+		if len(profile.Name) > 128 || len(profile.Reason) > 512 {
+			return fmt.Errorf("bypass profile %s name or reason is too long", profile.ID)
+		}
+		if profile.ValidUntil == nil {
+			return fmt.Errorf("bypass profile %s requires valid-until", profile.ID)
+		}
+		if profile.Priority <= 0 {
+			return fmt.Errorf("bypass profile %s has invalid priority %d", profile.ID, profile.Priority)
+		}
+		if existing, exists := profilePriorities[profile.Priority]; exists {
+			return fmt.Errorf("bypass profile priority %d is duplicated by %s and %s", profile.Priority, existing, profile.ID)
+		}
+		profilePriorities[profile.Priority] = profile.ID
+		hasBoundedSerialScope := profile.SerialScope != nil && profile.SerialScope.Type != SerialScopeAll
+		if !hasBoundedSerialScope && len(profile.OUIs) == 0 && len(profile.ProductClasses) == 0 {
+			return fmt.Errorf("bypass profile %s has no match selector", profile.ID)
+		}
+		if profile.SerialScope != nil {
+			if err := validateSerialScope(profile.ID, *profile.SerialScope); err != nil {
+				return fmt.Errorf("bypass profile scope: %w", err)
+			}
+		}
+		if err := validateBypassSelectorValues(profile.ID, "OUI", profile.OUIs); err != nil {
+			return err
+		}
+		if err := validateBypassSelectorValues(profile.ID, "ProductClass", profile.ProductClasses); err != nil {
+			return err
+		}
+		if profile.ValidFrom != nil && profile.ValidUntil != nil && !profile.ValidFrom.Before(*profile.ValidUntil) {
+			return fmt.Errorf("bypass profile %s valid-until must be after valid-from", profile.ID)
+		}
+	}
 	ruleIDs := make(map[string]struct{}, len(policy.Rules))
+	priorities := make(map[int]string, len(policy.Rules))
 	conditionIDs := make(map[string]struct{})
 	for _, rule := range policy.Rules {
 		ruleID := strings.TrimSpace(rule.ID)
@@ -231,6 +386,13 @@ func validateCompiledPolicy(policy CompiledPolicy) error {
 			return fmt.Errorf("policy rule id %q is duplicated", ruleID)
 		}
 		ruleIDs[ruleID] = struct{}{}
+		if rule.Priority <= 0 {
+			return fmt.Errorf("policy rule %s has invalid priority %d", ruleID, rule.Priority)
+		}
+		if existingRuleID, exists := priorities[rule.Priority]; exists {
+			return fmt.Errorf("policy rule priority %d is duplicated by %s and %s", rule.Priority, existingRuleID, ruleID)
+		}
+		priorities[rule.Priority] = ruleID
 		if err := validateSerialScope(ruleID, rule.SerialScope); err != nil {
 			return err
 		}
@@ -254,18 +416,146 @@ func validateCompiledPolicy(policy CompiledPolicy) error {
 	return nil
 }
 
+func validateBypassSelectorValues(profileID, field string, values []string) error {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || len(value) > 128 {
+			return fmt.Errorf("bypass profile %s has an invalid %s selector", profileID, field)
+		}
+		key := strings.ToUpper(value)
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("bypass profile %s has duplicate %s selector %q", profileID, field, value)
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
+}
+
 func normalizeCompiledPolicy(policy CompiledPolicy) CompiledPolicy {
 	if policy.DefaultAction == "" {
 		policy.DefaultAction = PolicyDefaultActionReject
 	}
+	if policy.FailureMode == "" {
+		policy.FailureMode = FailureModeFailClosed
+	}
+	if policy.CollectionTimeout == 0 {
+		policy.CollectionTimeout = 15 * time.Minute
+	}
+	for index := range policy.BypassProfiles {
+		profile := &policy.BypassProfiles[index]
+		profile.ID = strings.TrimSpace(profile.ID)
+		profile.Name = strings.TrimSpace(profile.Name)
+		profile.Reason = strings.TrimSpace(profile.Reason)
+		for valueIndex := range profile.OUIs {
+			profile.OUIs[valueIndex] = strings.ToUpper(strings.TrimSpace(profile.OUIs[valueIndex]))
+		}
+		for valueIndex := range profile.ProductClasses {
+			profile.ProductClasses[valueIndex] = strings.TrimSpace(profile.ProductClasses[valueIndex])
+		}
+		if profile.ValidFrom != nil {
+			value := profile.ValidFrom.UTC()
+			profile.ValidFrom = &value
+		}
+		if profile.ValidUntil != nil {
+			value := profile.ValidUntil.UTC()
+			profile.ValidUntil = &value
+		}
+	}
 	for index := range policy.Rules {
-		policy.Rules[index].ID = strings.TrimSpace(policy.Rules[index].ID)
-		policy.Rules[index].Name = strings.TrimSpace(policy.Rules[index].Name)
-		if policy.Rules[index].Name == "" {
-			policy.Rules[index].Name = policy.Rules[index].ID
+		rule := &policy.Rules[index]
+		rule.ID = strings.TrimSpace(rule.ID)
+		rule.Name = strings.TrimSpace(rule.Name)
+		if rule.Priority == 0 {
+			// Preserve the legacy API contract where rule order was represented by
+			// array position. New clients send an explicit positive priority.
+			rule.Priority = (index + 1) * 100
+		}
+		if rule.Name == "" {
+			rule.Name = rule.ID
+		}
+		for conditionIndex := range rule.Conditions {
+			condition := &rule.Conditions[conditionIndex]
+			if condition.Type != ConditionTypeObservedIP {
+				continue
+			}
+			switch condition.Operator {
+			case ConditionOperatorEqual:
+				condition.Expected = normalizeObservedHost(condition.Expected)
+			case ConditionOperatorIn:
+				for valueIndex := range condition.ExpectedAny {
+					condition.ExpectedAny[valueIndex] = normalizeObservedHost(condition.ExpectedAny[valueIndex])
+				}
+			}
 		}
 	}
 	return policy
+}
+
+// PostgreSQL inet values are commonly rendered with a host prefix (/32 or
+// /128). Equality and IN conditions represent hosts, so accept that lossless
+// representation while leaving network prefixes to the CIDR operator.
+func normalizeObservedHost(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if prefix, err := netip.ParsePrefix(trimmed); err == nil && prefix.Bits() == prefix.Addr().BitLen() {
+		return prefix.Addr().Unmap().String()
+	}
+	if address, err := netip.ParseAddr(trimmed); err == nil {
+		return address.Unmap().String()
+	}
+	return trimmed
+}
+
+// Rule and condition IDs are global database keys, not stable business IDs
+// across immutable policy versions. New drafts therefore always receive fresh
+// server-owned IDs so cloning or rolling back an older version cannot collide
+// with the historical rows it copies. UpdateDraft deliberately does not call
+// this helper and preserves the IDs of the draft being edited.
+func regenerateDraftEntityIDs(policy CompiledPolicy) CompiledPolicy {
+	for index := range policy.BypassProfiles {
+		policy.BypassProfiles[index].ID = uuid.NewString()
+	}
+	for ruleIndex := range policy.Rules {
+		policy.Rules[ruleIndex].ID = uuid.NewString()
+		for conditionIndex := range policy.Rules[ruleIndex].Conditions {
+			policy.Rules[ruleIndex].Conditions[conditionIndex].ID = uuid.NewString()
+		}
+	}
+	return policy
+}
+
+func normalizeUpdatedDraftEntityIDs(incoming, current CompiledPolicy) CompiledPolicy {
+	existingProfiles := make(map[string]struct{}, len(current.BypassProfiles))
+	for _, profile := range current.BypassProfiles {
+		existingProfiles[profile.ID] = struct{}{}
+	}
+	for index := range incoming.BypassProfiles {
+		if _, exists := existingProfiles[incoming.BypassProfiles[index].ID]; !exists {
+			incoming.BypassProfiles[index].ID = uuid.NewString()
+		}
+	}
+	existingRules := make(map[string]map[string]struct{}, len(current.Rules))
+	for _, rule := range current.Rules {
+		conditions := make(map[string]struct{}, len(rule.Conditions))
+		for _, condition := range rule.Conditions {
+			conditions[condition.ID] = struct{}{}
+		}
+		existingRules[rule.ID] = conditions
+	}
+	for ruleIndex := range incoming.Rules {
+		rule := &incoming.Rules[ruleIndex]
+		existingConditions, ruleExists := existingRules[rule.ID]
+		if !ruleExists {
+			rule.ID = uuid.NewString()
+			existingConditions = nil
+		}
+		for conditionIndex := range rule.Conditions {
+			if _, exists := existingConditions[rule.Conditions[conditionIndex].ID]; !exists {
+				rule.Conditions[conditionIndex].ID = uuid.NewString()
+			}
+		}
+	}
+	return incoming
 }
 
 func validateSerialScope(ruleID string, scope SerialScope) error {
@@ -317,11 +607,12 @@ func validatePolicyCondition(ruleID string, condition CompiledCondition) error {
 			return unsupportedPolicyOperator(ruleID, condition)
 		}
 	case ConditionTypeObservedIP:
-		if condition.Operator != ConditionOperatorEqual && condition.Operator != ConditionOperatorIn && condition.Operator != ConditionOperatorCIDR {
+		if condition.Operator != ConditionOperatorEqual && condition.Operator != ConditionOperatorIn &&
+			condition.Operator != ConditionOperatorCIDR && condition.Operator != ConditionOperatorIPRange {
 			return unsupportedPolicyOperator(ruleID, condition)
 		}
 	case ConditionTypeGPS:
-		if condition.Operator != ConditionOperatorWithinRadius {
+		if condition.Operator != ConditionOperatorWithinRadius && condition.Operator != ConditionOperatorWithinBounds {
 			return unsupportedPolicyOperator(ruleID, condition)
 		}
 	default:
@@ -357,6 +648,21 @@ func validatePolicyCondition(ruleID string, condition CompiledCondition) error {
 		if _, _, err := net.ParseCIDR(condition.Expected); err != nil {
 			return fmt.Errorf("policy condition %s in rule %s has an invalid CIDR: %w", conditionID, ruleID, err)
 		}
+	case ConditionOperatorIPRange:
+		ranges := condition.IPRanges
+		if condition.IPRange != nil {
+			ranges = append(ranges, *condition.IPRange)
+		}
+		if len(ranges) == 0 {
+			return fmt.Errorf("policy condition %s in rule %s requires an IP range", conditionID, ruleID)
+		}
+		for _, value := range ranges {
+			start, startBits := comparableIP(value.Start)
+			end, endBits := comparableIP(value.End)
+			if start == nil || end == nil || startBits != endBits || bytes.Compare(start, end) > 0 {
+				return fmt.Errorf("policy condition %s in rule %s has an invalid IP range", conditionID, ruleID)
+			}
+		}
 	case ConditionOperatorWithinRadius:
 		if condition.GeoFence == nil || condition.GeoFence.RadiusMeters <= 0 {
 			return fmt.Errorf("policy condition %s in rule %s requires a positive geofence radius", conditionID, ruleID)
@@ -364,6 +670,19 @@ func validatePolicyCondition(ruleID string, condition CompiledCondition) error {
 		if condition.GeoFence.Center.Latitude < -90 || condition.GeoFence.Center.Latitude > 90 ||
 			condition.GeoFence.Center.Longitude < -180 || condition.GeoFence.Center.Longitude > 180 {
 			return fmt.Errorf("policy condition %s in rule %s has an invalid geofence center", conditionID, ruleID)
+		}
+	case ConditionOperatorWithinBounds:
+		bounds := condition.GeoBoundsAny
+		if condition.GeoBounds != nil {
+			bounds = append(bounds, *condition.GeoBounds)
+		}
+		if len(bounds) == 0 {
+			return fmt.Errorf("policy condition %s in rule %s has invalid GPS bounds", conditionID, ruleID)
+		}
+		for _, value := range bounds {
+			if !validGeoBounds(value) {
+				return fmt.Errorf("policy condition %s in rule %s has invalid GPS bounds", conditionID, ruleID)
+			}
 		}
 	}
 	return nil

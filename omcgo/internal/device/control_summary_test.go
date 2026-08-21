@@ -95,6 +95,24 @@ func TestResolveDeviceControlPhase(t *testing.T) {
 	}
 }
 
+func TestAccessActionEvidenceMapsRealGPVAndSPVValues(t *testing.T) {
+	baseline := accessResponseParameterStates([]byte(`{"result":{"standard_parameter_values":[{"name":"Device.Cell.1.RF.Enable","value":"true"}]}}`))
+	requested := accessRequestParameterStates([]byte(`{"parameters":{"values":[{"name":"Device.Cell.1.RF.Enable","value":"false"}]}}`))
+	readback := accessResponseParameterStates([]byte(`{"result":{"standard_parameter_values":[{"name":"Device.Cell.1.RF.Enable","value":"false"}]}}`))
+
+	require.Equal(t, []DeviceControlParameterState{{Path: "Device.Cell.1.RF.Enable", Value: "true"}}, baseline)
+	require.Equal(t, []DeviceControlParameterState{{Path: "Device.Cell.1.RF.Enable", Value: "false"}}, requested)
+	require.Equal(t, requested, readback)
+	require.Equal(t, "verified", mapAccessActionStatus("succeeded", len(readback) > 0))
+}
+
+func TestAccessActionSuccessWithoutGPVEvidenceIsNotPresentedAsVerified(t *testing.T) {
+	require.Equal(t, "evidence_missing", mapAccessActionStatus("succeeded", false))
+	require.Equal(t, "pending", mapAccessActionStatus("retry_wait", false))
+	require.Equal(t, "deactivate", mapAccessActionType("rf_off"))
+	require.Equal(t, "activate", mapAccessActionType("rf_on"))
+}
+
 func TestListDevicesWithInfoDegradesWhenControlSummaryFails(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	infoRepo := NewMockDeviceInfoRepository(ctrl)

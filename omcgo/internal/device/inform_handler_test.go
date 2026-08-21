@@ -434,6 +434,54 @@ func TestResolveCarrier_DefaultFallback(t *testing.T) {
 	assert.Equal(t, model.CarrierCMCC, result)
 }
 
+func TestResolveCarrier_AccessControlRoutesUnknownIdentityToDefaultCandidateScope(t *testing.T) {
+	svc := newInfTestDeviceService(&infMockDeviceRepo{}, &infMockParamRepo{})
+	registry := carrier.NewRegistry()
+	registry.Register(&infMockCarrier{
+		code: model.CarrierCTCC, technologies: []model.Technology{model.TechLTE},
+		ouiProducts: map[model.Technology][]carrier.OUIProductClassInfo{
+			model.TechLTE: {{OUI: "AABBCC", ProductClass: "SmallCell"}},
+		},
+	})
+	h := NewInformHandler(svc, registry, model.CarrierCMCC, zap.NewNop())
+	h.SetAccessGate(&recordingAccessGate{})
+
+	result, err := h.resolveCarrier("UNKNOWN_OUI", "Unknown")
+
+	require.NoError(t, err)
+	assert.Equal(t, model.CarrierCMCC, result)
+}
+
+func TestEvaluateInformAccess_PreservesUnknownIdentityForCandidateReview(t *testing.T) {
+	svc := newInfTestDeviceService(&infMockDeviceRepo{}, &infMockParamRepo{})
+	registry := carrier.NewRegistry()
+	registry.Register(&infMockCarrier{
+		code: model.CarrierCTCC, technologies: []model.Technology{model.TechLTE},
+		ouiProducts: map[model.Technology][]carrier.OUIProductClassInfo{
+			model.TechLTE: {{OUI: "AABBCC", ProductClass: "SmallCell"}},
+		},
+	})
+	h := NewInformHandler(svc, registry, model.CarrierCMCC, zap.NewNop())
+	gate := &recordingAccessGate{decision: AccessDecision{
+		State: AccessDecisionReviewRequired, ReasonCode: "identity_unverified",
+	}}
+	h.SetAccessGate(gate)
+	payload := sampleInformPayload("SN-UNKNOWN-CANDIDATE")
+	payload.DeviceId.OUI = "UNKNOWN_OUI"
+	payload.DeviceId.ProductClass = "Unknown"
+	inform := payloadToInform(payload)
+
+	decision, err := h.evaluateInformAccess(
+		context.Background(), payload, inform, model.CarrierCMCC, "evt-unknown", AccessTriggerInformFirstSeen,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, AccessDecisionReviewRequired, decision.State)
+	assert.Equal(t, model.CarrierCMCC, gate.observation.Carrier)
+	assert.Equal(t, "SN-UNKNOWN-CANDIDATE", gate.observation.SerialNumber)
+	assert.False(t, gate.observation.CarrierIdentityResolved)
+}
+
 func TestResolveCarrier_NilRegistry(t *testing.T) {
 	svc := newInfTestDeviceService(&infMockDeviceRepo{}, &infMockParamRepo{})
 	h := NewInformHandler(svc, nil, model.CarrierCUCC, zap.NewNop())
@@ -1389,6 +1437,10 @@ func TestHandlePeriodic_ReevaluatesExistingDeviceWithoutFalsifyingHeartbeat(t *t
 	payload.Authenticated = true
 	payload.AuthMethod = "digest"
 	payload.CredentialID = "cpe"
+	payload.ParameterList = append(payload.ParameterList,
+		tr069.ParameterValueStruct{Name: "Device.DeviceInfo.SiteId", Value: "SITE-104"},
+		tr069.ParameterValueStruct{Name: "Device.DeviceInfo.X_COM_CloudKey", Value: "CMCC-CLOUD"},
+	)
 	evt, err := event.NewEvent(event.SubjectDevicePeriodic, payload)
 	require.NoError(t, err)
 
@@ -1402,6 +1454,10 @@ func TestHandlePeriodic_ReevaluatesExistingDeviceWithoutFalsifyingHeartbeat(t *t
 	assert.True(t, gate.observation.Authenticated)
 	assert.Equal(t, "digest", gate.observation.AuthMethod)
 	assert.Equal(t, "cpe", gate.observation.CredentialID)
+	assert.Equal(t, "SITE-104", gate.observation.DeviceCode)
+	assert.Equal(t, "CMCC-CLOUD", gate.observation.CloudKey)
+	assert.Equal(t, AccessTriggerInformReconnected, gate.observation.TriggerType)
+	assert.Equal(t, "2 PERIODIC", gate.observation.InformEvent)
 }
 
 type recordingHeartbeatGroupAssigner struct {

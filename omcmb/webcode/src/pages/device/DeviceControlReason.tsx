@@ -82,6 +82,10 @@ function ruleTypeLabel(ruleType: string, t: ReturnType<typeof useT>): string {
   }
 }
 
+function controlSourceLabel(sourceType: DeviceControlActionHistory['sourceType'], sourceName: string, t: ReturnType<typeof useT>): string {
+  return sourceName || t(`device.control.source.${sourceType}`);
+}
+
 function mergeParameterEvidence(action: DeviceControlActionHistory, t: ReturnType<typeof useT>): ParameterEvidenceRow[] {
   const rows = new Map<string, ParameterEvidenceRow>();
   const merge = (items: DeviceControlParameterState[], key: 'before' | 'requested' | 'verified') => {
@@ -161,7 +165,7 @@ export function DeviceControlReasonContent({ device, enabled = true, mode = 'ful
             {t(`device.control.action.${action.actionType}`)}
           </Descriptions.Item>
           <Descriptions.Item label={t('table.status')}>
-            <Tag color={action.status === 'verified' ? 'success' : action.status.includes('failed') ? 'warning' : 'processing'}>
+            <Tag color={action.status === 'verified' ? 'success' : action.status.includes('failed') || action.status === 'evidence_missing' ? 'warning' : 'processing'}>
               {t(`device.control.status.${action.status}`)}
             </Tag>
           </Descriptions.Item>
@@ -267,7 +271,7 @@ export function DeviceControlReasonContent({ device, enabled = true, mode = 'ful
                     {t(`device.control.action.${action.actionType}`)}
                   </Tag>
                   <Tag>{t(`device.control.status.${action.status}`)}</Tag>
-                  <span>{action.sourceName || t('device.control.source.geofence')}</span>
+                  <span>{controlSourceLabel(action.sourceType, action.sourceName, t)}</span>
                   <Typography.Text type="secondary">{formatSystemTime(action.createdAt)}</Typography.Text>
                 </Space>
               ),

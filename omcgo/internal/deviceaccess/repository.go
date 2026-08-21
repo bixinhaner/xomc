@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 var (
@@ -19,15 +20,38 @@ var (
 	ErrAccessEvidenceUnavailable = errors.New("required device access evidence unavailable")
 )
 
+const (
+	TriggerInformFirstSeen     = "inform_first_seen"
+	TriggerInformBoot          = "inform_boot"
+	TriggerInformReconnected   = "inform_reconnected"
+	TriggerInformPeriodic      = "inform_periodic"
+	TriggerAccessListChanged   = "access_list_changed"
+	TriggerPolicyPublished     = "policy_published"
+	TriggerCandidateReviewed   = "candidate_reviewed"
+	TriggerIdentityChanged     = "identity_changed"
+	TriggerManualReevaluation  = "manual_reevaluation"
+	TriggerAccessProbeEvidence = "access_probe_evidence"
+	TriggerCollectionDeadline  = "collection_deadline_expired"
+)
+
 type Observation struct {
 	Carrier         string
 	SerialNumber    string
+	DeviceID        *uuid.UUID
 	OUI             string
 	ProductClass    string
 	SoftwareVersion string
+	Technology      model.Technology
+	RFControlPaths  []string
 	RemoteIP        netip.Addr
 	ObservedAt      time.Time
 	ExpiresAt       time.Time
+}
+
+type PolicyPublishedEvent struct {
+	Carrier         string `json:"carrier"`
+	PolicyVersionID string `json:"policy_version_id"`
+	TriggerEventID  string `json:"trigger_event_id"`
 }
 
 type Candidate struct {
@@ -37,6 +61,8 @@ type Candidate struct {
 	OUI             string
 	ProductClass    string
 	SoftwareVersion string
+	Technology      model.Technology
+	RFControlPaths  []string
 	RemoteIP        netip.Addr
 	FirstSeenAt     time.Time
 	LastSeenAt      time.Time
@@ -78,6 +104,7 @@ type AccessStateProjection struct {
 	EvidenceVersion   int64
 	DecisionVersion   int64
 	NormalTasksFrozen bool
+	DecisionExpiresAt *time.Time
 }
 
 type EvaluationContext struct {
@@ -102,8 +129,10 @@ type DecisionChange struct {
 	PolicyVersionID         *uuid.UUID
 	EvidenceVersion         int64
 	OccurredAt              time.Time
+	DecisionExpiresAt       *time.Time
 	Decision                Decision
 	Evidence                *EvidenceBatch
+	IdentitySnapshot        *IdentitySnapshot
 	Outbox                  OutboxEvent
 }
 
@@ -119,4 +148,5 @@ type Repository interface {
 	SaveDecision(ctx context.Context, change DecisionChange) (SavedDecision, error)
 	UpsertCandidateObservation(ctx context.Context, observation Observation) (Candidate, error)
 	AppendEvidence(ctx context.Context, evidence EvidenceBatch) (int64, error)
+	SaveIdentitySnapshot(ctx context.Context, snapshot IdentitySnapshot) error
 }

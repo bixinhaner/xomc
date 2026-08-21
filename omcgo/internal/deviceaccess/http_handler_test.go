@@ -68,6 +68,46 @@ func TestPolicyHTTPHandlerCreateDraftUsesActorCarrier(t *testing.T) {
 	require.Equal(t, "cmcc", store.created.Carrier)
 }
 
+func TestApplyManagementAuditQueryMapsExternalRuleDimensionNames(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, test := range []struct {
+		raw  string
+		want ConditionType
+	}{
+		{raw: "sn", want: ConditionTypeIdentity},
+		{raw: "ip", want: ConditionTypeObservedIP},
+		{raw: "gps", want: ConditionTypeGPS},
+	} {
+		t.Run(test.raw, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/?dimension="+test.raw, nil)
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = request
+			var filter ManagementFilter
+
+			require.NoError(t, applyManagementAuditQuery(ctx, &filter))
+			require.Equal(t, test.want, filter.Dimension)
+		})
+	}
+}
+
+func TestApplyManagementAuditQueryRejectsInvalidUUIDAndTime(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, rawQuery := range []string{
+		"policy_version_id=not-a-uuid",
+		"matched_rule_id=not-a-uuid",
+		"started_at=not-a-time",
+		"ended_at=not-a-time",
+	} {
+		t.Run(rawQuery, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/?"+rawQuery, nil)
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = request
+
+			require.Error(t, applyManagementAuditQuery(ctx, &ManagementFilter{}))
+		})
+	}
+}
+
 func TestPolicyHTTPHandlerRejectsMissingActorResolver(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewPolicyHTTPHandler(NewPolicyService(&policyStoreStub{}, nil), nil, nil)
@@ -96,6 +136,45 @@ func TestPolicyHTTPHandlerReturnsBadRequestForInvalidPolicy(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, response.Code)
 }
 
+func TestPolicyHTTPHandlerAcceptsMultiSerialListMutation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := &listStoreStub{}
+	handler := NewPolicyHTTPHandler(nil, NewListService(store), actorResolverStub{
+		actor: PolicyActor{Carrier: "cmcc", SubjectID: "user-1"},
+	})
+	router := gin.New()
+	router.POST("/access-list", handler.UpsertList)
+	body := `{"entries":[{"type":"deny","identity_type":"serial_number","identity_value":"SN-1"},{"type":"deny","identity_type":"serial_number","identity_value":"SN-2"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/access-list", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, req)
+
+	require.Equal(t, http.StatusAccepted, response.Code)
+	require.Len(t, store.entries, 2)
+	require.Equal(t, "cmcc", store.carrier)
+}
+
+func TestManagementFilterPreservesSupportedServerSideFilters(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodGet,
+		"/device-access/access-list?page=2&page_size=50&serial_number=SN-1&product_name=QRTB&state=rejected&status=active&entry_type=deny", nil)
+
+	filter := managementFilter(context, PolicyActor{Carrier: "cmcc", VisibleGroups: []uuid.UUID{uuid.MustParse("00000000-0000-0000-0000-000000000001")}})
+
+	require.Equal(t, "cmcc", filter.Carrier)
+	require.Equal(t, "SN-1", filter.SerialNumber)
+	require.Equal(t, "QRTB", filter.ProductName)
+	require.Equal(t, AccessStateRejected, filter.State)
+	require.Equal(t, "active", filter.Status)
+	require.Equal(t, ListEntryTypeDeny, filter.EntryType)
+	require.Equal(t, 2, filter.Page)
+	require.Equal(t, 50, filter.PageSize)
+	require.Len(t, filter.VisibleGroups, 1)
+}
+
 func TestPolicyHTTPHandlerRegisterRoutesUsesNonConflictingResourcePaths(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewPolicyHTTPHandler(nil, nil, nil)
@@ -112,12 +191,58 @@ func TestPolicyHTTPHandlerRegisterRoutesUsesNonConflictingResourcePaths(t *testi
 	sort.Strings(paths)
 	require.Equal(t, []string{
 		"DELETE /api/v1/device-access/policies/:versionID",
+		"GET /api/v1/device-access/access-list/template",
+		"GET /api/v1/device-access/import-templates/:importType",
 		"GET /api/v1/device-access/policies/:versionID",
+		"GET /api/v1/device-access/policies/:versionID/difference",
 		"POST /api/v1/device-access/access-list",
+		"POST /api/v1/device-access/access-list/batch-disable",
 		"POST /api/v1/device-access/devices/:serialNumber/reevaluate",
 		"POST /api/v1/device-access/policies/:versionID/publish",
+		"POST /api/v1/device-access/policies/:versionID/rollback",
 		"POST /api/v1/device-access/policies/drafts",
+		"PUT /api/v1/device-access/policies/:versionID",
 	}, paths)
+}
+
+func TestPolicyHTTPHandlerDownloadsReusableListTemplate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewPolicyHTTPHandler(nil, nil, actorResolverStub{
+		actor: PolicyActor{Carrier: "cmcc", SubjectID: "user-1"},
+	})
+	router := gin.New()
+	router.GET("/access-list/template", handler.DownloadListTemplate)
+	req := httptest.NewRequest(http.MethodGet, "/access-list/template", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, req)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", response.Header().Get("Content-Type"))
+	require.Contains(t, response.Header().Get("Content-Disposition"), "device-access-list-template.xlsx")
+	records, err := readImportRecords(response.Body.Bytes(), "template.xlsx")
+	require.NoError(t, err)
+	require.Equal(t, [][]string{accessListImportHeaders}, records)
+}
+
+func TestPolicyHTTPHandlerBatchDisableUsesActorCarrier(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := &listStoreStub{}
+	handler := NewPolicyHTTPHandler(nil, NewListService(store), actorResolverStub{
+		actor: PolicyActor{Carrier: "cmcc", SubjectID: "user-1"},
+	})
+	router := gin.New()
+	router.POST("/access-list/batch-disable", handler.DisableListBatch)
+	body := `{"carrier":"ctcc","entry_type":"deny","serial_numbers":["SN-1","SN-2"],"reason":"expired"}`
+	req := httptest.NewRequest(http.MethodPost, "/access-list/batch-disable", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, req)
+
+	require.Equal(t, http.StatusAccepted, response.Code)
+	require.Equal(t, "cmcc", store.carrier)
+	require.Equal(t, []string{"SN-1", "SN-2"}, store.disabledSerials)
 }
 
 func TestPolicyHTTPHandlerReadOnlyActionsDoNotExposeMutationRoutes(t *testing.T) {
@@ -133,7 +258,10 @@ func TestPolicyHTTPHandlerReadOnlyActionsDoNotExposeMutationRoutes(t *testing.T)
 			paths = append(paths, route.Method+" "+route.Path)
 		}
 	}
-	require.Equal(t, []string{"GET /api/v1/device-access/actions"}, paths)
+	require.Equal(t, []string{
+		"GET /api/v1/device-access/actions",
+		"GET /api/v1/device-access/actions/:actionID/attempts",
+	}, paths)
 }
 
 func TestPolicyHTTPHandlerRuntimeSettingsUseActorOperatorScope(t *testing.T) {

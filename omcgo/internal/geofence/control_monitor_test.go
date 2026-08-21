@@ -30,6 +30,21 @@ type controlMappingReaderStub struct {
 	err      error
 }
 
+type rfActivationAdmissionStub struct {
+	allowed bool
+	reason  string
+	err     error
+}
+
+func (s rfActivationAdmissionStub) AllowRFActivation(
+	context.Context,
+	string,
+	string,
+	uuid.UUID,
+) (bool, string, error) {
+	return s.allowed, s.reason, s.err
+}
+
 func (s controlParameterReaderStub) GetByDevice(context.Context, uuid.UUID) ([]model.DeviceParameter, error) {
 	return s.parameters, nil
 }
@@ -668,6 +683,31 @@ func TestGeofenceControlMonitorRetriesPendingActionAfterQueueFailure(t *testing.
 	require.Equal(t, ControlActionExecuting, actions.updatedStatus)
 }
 
+func TestGeofenceControlMonitorFailsClosedWhenAdmissionReaderIsMissing(t *testing.T) {
+	deviceID := uuid.New()
+	actions := newControlActionRepositoryStub()
+	actions.recoverable = &ControlAction{
+		ID: uuid.New(), ActionKey: "geofence:device:missing-admission:deactivate",
+		DeviceID: deviceID, DeviceSN: "SN-NO-ADMISSION", ActionType: ControlActionDeactivate,
+		Status: ControlActionVerified, ContractVersion: GeofenceControlContractVersion,
+	}
+	monitor := NewGeofenceControlMonitor(
+		controlDeviceReaderStub{device: &model.Device{
+			ID: deviceID, SerialNumber: "SN-NO-ADMISSION", Carrier: model.CarrierCMCC,
+		}}, controlCarrierRegistry(), &controlTaskStub{}, zap.NewNop(),
+	)
+	monitor.SetActionRepository(actions)
+	payload, err := json.Marshal(event.GeofenceDeviceStatePayload{
+		DeviceID: deviceID, SerialNumber: "SN-NO-ADMISSION",
+		EffectiveState: string(EffectiveStateInside), EffectiveStateVersion: 1,
+	})
+	require.NoError(t, err)
+
+	err = monitor.handleEntered(context.Background(), event.Event{Payload: payload})
+
+	require.ErrorContains(t, err, "admission reader is required")
+}
+
 func TestGeofenceControlMonitorQueuesLifecycleDeactivation(t *testing.T) {
 	tasks := &controlTaskStub{}
 	deviceID := uuid.MustParse("00000000-0000-0000-0000-000000000008")
@@ -1038,6 +1078,7 @@ func TestGeofenceControlMonitorQueuesActivationOnlyAfterCompletedDeactivation(t 
 	}})
 	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
 	monitor.SetActionRepository(actions)
+	monitor.SetRFActivationAdmissionReader(rfActivationAdmissionStub{allowed: true})
 	payload, err := json.Marshal(event.GeofenceDeviceStatePayload{
 		DeviceID: uuid.MustParse("00000000-0000-0000-0000-000000000008"), SerialNumber: "SN-CONTROL-1",
 		EffectiveState: string(EffectiveStateInside), EffectiveStateVersion: 9,
@@ -1051,6 +1092,51 @@ func TestGeofenceControlMonitorQueuesActivationOnlyAfterCompletedDeactivation(t 
 	require.Contains(t, string(tasks.request.Params), `"value":"1"`)
 	require.Contains(t, string(tasks.request.Params), "Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus")
 	require.NotContains(t, string(tasks.request.Params), "IPSEC_ENABLE")
+}
+
+func TestGeofenceControlMonitorBlocksActivationWhenDeviceAccessRejectsIt(t *testing.T) {
+	deviceID := uuid.New()
+	tasks := &controlTaskStub{}
+	actions := newControlActionRepositoryStub()
+	actions.recoverable = &ControlAction{
+		ID: uuid.New(), ActionKey: "geofence:device:12:deactivate",
+		DeviceID: deviceID, DeviceSN: "SN-BLOCKED", ActionType: ControlActionDeactivate,
+		Status: ControlActionVerified, ContractVersion: GeofenceControlContractVersion,
+		BeforeState: []ControlParameterState{{
+			Path: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", Value: "1", Role: carrier.GeofenceRoleRF,
+		}},
+		VerifiedState: []ControlParameterState{{
+			Path: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", Value: "0", Role: carrier.GeofenceRoleRF,
+		}},
+		TerminalState: []ControlParameterState{{
+			Path: "Device.Services.FAPService.1.FAPControl.LTE.OpState", Value: "0", Role: carrier.GeofenceRoleOpState,
+		}},
+	}
+	monitor := NewGeofenceControlMonitor(
+		controlDeviceReaderStub{device: &model.Device{
+			ID: deviceID, SerialNumber: "SN-BLOCKED", ProductClass: "BLQ",
+			Carrier: model.CarrierCMCC, Technology: model.TechLTE,
+		}},
+		controlCarrierRegistry(), tasks, zap.NewNop(),
+	)
+	monitor.SetParameterReader(controlParameterReader(1))
+	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
+	monitor.SetActionRepository(actions)
+	monitor.SetRFActivationAdmissionReader(rfActivationAdmissionStub{
+		allowed: false, reason: "device_access_owned_isolation",
+	})
+	payload, err := json.Marshal(event.GeofenceDeviceStatePayload{
+		DeviceID: deviceID, SerialNumber: "SN-BLOCKED",
+		EffectiveState: string(EffectiveStateInside), EffectiveStateVersion: 13,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, monitor.handleEntered(context.Background(), event.Event{Payload: payload}))
+	require.Nil(t, tasks.request)
+	blocked := actions.actions["geofence:device:12:activate"]
+	require.NotNil(t, blocked)
+	require.Equal(t, ControlActionFailed, blocked.Status)
+	require.Contains(t, blocked.LastError, "device_access_owned_isolation")
 }
 
 func TestGeofenceControlMonitorDoesNotActivateWithoutCompletedDeactivation(t *testing.T) {
@@ -1107,6 +1193,7 @@ func TestGeofenceControlMonitorRestoresEveryOwnedRFAndIPSecChange(t *testing.T) 
 	}})
 	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
 	monitor.SetActionRepository(actions)
+	monitor.SetRFActivationAdmissionReader(rfActivationAdmissionStub{allowed: true})
 	payload, err := json.Marshal(event.GeofenceDeviceStatePayload{
 		DeviceID: uuid.New(), SerialNumber: "SN-RESTORE-ALL",
 		EffectiveState:        string(EffectiveStateInside),

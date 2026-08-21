@@ -38,6 +38,7 @@ func TestContextActorResolverUsesServerContextAndIgnoresBodyScope(t *testing.T) 
 	c.Request = httptest.NewRequest("GET", "/", nil)
 	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	c.Set("user_id", userID)
+	c.Set("username", "system-admin")
 	c.Set("operator_code", "cmcc")
 	c.Request.Header.Set("X-Operator-Code", "ctcc")
 
@@ -48,7 +49,7 @@ func TestContextActorResolverUsesServerContextAndIgnoresBodyScope(t *testing.T) 
 
 	require.NoError(t, err)
 	require.Equal(t, PolicyActor{
-		Carrier: "cmcc", SubjectID: userID.String(), VisibleGroups: []uuid.UUID{groupID},
+		Carrier: "cmcc", SubjectID: userID.String(), Username: "system-admin", VisibleGroups: []uuid.UUID{groupID},
 	}, actor)
 }
 

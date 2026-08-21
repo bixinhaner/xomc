@@ -32,6 +32,7 @@ type GeofenceControlMonitor struct {
 	tasks      task.Enqueuer
 	history    GeofenceControlTaskReader
 	actions    ControlActionRepository
+	admission  RFActivationAdmissionReader
 	logger     *zap.Logger
 }
 
@@ -54,6 +55,14 @@ type GeofenceControlParameterReader interface {
 
 type GeofenceControlMappingReader interface {
 	GetByProductClass(context.Context, string, string) ([]carrier.GeofenceControlMapping, error)
+}
+
+type RFActivationAdmissionReader interface {
+	AllowRFActivation(
+		ctx context.Context,
+		carrier, serialNumber string,
+		deviceID uuid.UUID,
+	) (allowed bool, reason string, err error)
 }
 
 func NewGeofenceControlMonitor(
@@ -89,6 +98,10 @@ func (m *GeofenceControlMonitor) SetTaskHistoryReader(
 
 func (m *GeofenceControlMonitor) SetActionRepository(actions ControlActionRepository) {
 	m.actions = actions
+}
+
+func (m *GeofenceControlMonitor) SetRFActivationAdmissionReader(reader RFActivationAdmissionReader) {
+	m.admission = reader
 }
 
 // RunVerificationLoop durably resumes OpState polling after worker restarts.
@@ -585,6 +598,33 @@ func (m *GeofenceControlMonitor) handleEntered(
 	}
 	if deviceRecord == nil {
 		return fmt.Errorf("geofence activation device %q not found", payload.SerialNumber)
+	}
+	if m.admission == nil {
+		return fmt.Errorf("check device access admission before geofence activation: admission reader is required")
+	}
+	allowed, reason, admissionErr := m.admission.AllowRFActivation(
+		ctx, string(deviceRecord.Carrier), deviceRecord.SerialNumber, deviceRecord.ID,
+	)
+	if admissionErr != nil {
+		return fmt.Errorf("check device access admission before geofence activation: %w", admissionErr)
+	}
+	if !allowed {
+		now := time.Now().UTC()
+		_, _, createErr := m.actions.Create(ctx, &ControlAction{
+			ID: uuid.New(), ActionKey: activationKey, ParentActionID: &deactivation.ID,
+			DeviceID: deviceRecord.ID, DeviceSN: deviceRecord.SerialNumber,
+			EffectiveStateVersion: payload.EffectiveStateVersion,
+			ActionType:            ControlActionActivate, Status: ControlActionFailed,
+			ContractVersion: GeofenceControlContractVersion,
+			LastError:       "device access admission denied: " + reason,
+			CreatedAt:       now, UpdatedAt: now, CompletedAt: &now,
+		})
+		if createErr != nil {
+			return fmt.Errorf("persist access-denied geofence activation: %w", createErr)
+		}
+		m.logger.Warn("block geofence activation by device access state",
+			zap.String("serial_number", payload.SerialNumber), zap.String("reason", reason))
+		return nil
 	}
 	parameterSnapshot, err := m.parameters.GetByDevice(ctx, deviceRecord.ID)
 	if err != nil {

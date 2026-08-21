@@ -126,12 +126,39 @@ type TaskService struct {
 // guards need to validate. Checking only the class is unsafe because a caller
 // could otherwise label an arbitrary RPC as an access probe.
 type TaskAdmissionRequest struct {
+	// TaskID is populated for an already-durable task at ACS dequeue time. It is
+	// empty during pre-create admission because the task has not been allocated.
+	TaskID         string
 	DeviceSN       string
 	AdmissionClass AdmissionClass
 	Source         TaskSource
 	SourceID       string
 	Method         string
 	Params         json.RawMessage
+	SessionID      string
+	RequestID      string
+	DeviceOUI      string
+	ProductClass   string
+	Authenticated  bool
+}
+
+type ExecutionSession struct {
+	SessionID     string
+	RequestID     string
+	DeviceOUI     string
+	ProductClass  string
+	Authenticated bool
+}
+
+type executionSessionContextKey struct{}
+
+func WithExecutionSession(ctx context.Context, session ExecutionSession) context.Context {
+	return context.WithValue(ctx, executionSessionContextKey{}, session)
+}
+
+func executionSessionFromContext(ctx context.Context) ExecutionSession {
+	session, _ := ctx.Value(executionSessionContextKey{}).(ExecutionSession)
+	return session
 }
 
 type TaskAdmissionGuard interface {
@@ -537,6 +564,7 @@ func (s *TaskService) PopTask(ctx context.Context, deviceSN string) (*Task, erro
 		maxAttempts = int(depth)
 	}
 
+	executionSession := executionSessionFromContext(ctx)
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		t, err := s.queue.Pop(ctx, deviceSN)
 		if err != nil {
@@ -559,12 +587,18 @@ func (s *TaskService) PopTask(ctx context.Context, deviceSN string) (*Task, erro
 			admissionClass = AdmissionClassNormal
 		}
 		allowed, reason, guardErr := s.admissionGuard.Allow(ctx, TaskAdmissionRequest{
+			TaskID:         t.ID,
 			DeviceSN:       t.DeviceSN,
 			AdmissionClass: admissionClass,
 			Source:         t.Source,
 			SourceID:       t.SourceID,
 			Method:         t.Method,
 			Params:         t.Params,
+			SessionID:      executionSession.SessionID,
+			RequestID:      executionSession.RequestID,
+			DeviceOUI:      executionSession.DeviceOUI,
+			ProductClass:   executionSession.ProductClass,
+			Authenticated:  executionSession.Authenticated,
 		})
 		if guardErr != nil {
 			if pushErr := s.queue.Push(ctx, t); pushErr != nil {

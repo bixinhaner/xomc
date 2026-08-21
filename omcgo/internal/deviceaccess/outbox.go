@@ -109,7 +109,10 @@ func (q *PgReevaluationQueue) Enqueue(ctx context.Context, request ReevaluationR
 		return fmt.Errorf("encode device access reevaluation request: %w", err)
 	}
 	now := q.now()
-	eventKey := fmt.Sprintf("device-access-reevaluation:%s:%s", request.SerialNumber, id)
+	eventKey := fmt.Sprintf(
+		"device-access-reevaluation:%s:%s:%s",
+		request.Carrier, request.SerialNumber, request.TriggerEventID,
+	)
 	query, args, err := storage.Psql.Insert("device_access_outbox").
 		Columns(
 			"aggregate_type", "aggregate_id", "event_type", "event_key", "payload",

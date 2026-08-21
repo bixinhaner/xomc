@@ -2650,6 +2650,7 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	)
 	actionService.SetRuntimeSettingsReader(deviceaccess.NewPgRuntimeSettingsStore(c.PgPool))
 	actionService.SetGroupReader(device.NewPgDeviceGroupReader(c.PgPool))
+	actionService.SetIdentityVisibilityChecker(deviceaccess.NewPgCarrierVisibilityChecker(c.PgPool))
 	if c.DeviceAccessHTTPHandler != nil {
 		c.DeviceAccessHTTPHandler.SetActionService(actionService)
 	}
@@ -2665,7 +2666,16 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	if err := actionConsumer.Start(); err != nil {
 		return fmt.Errorf("start device access action consumer: %w", err)
 	}
+	actionReconciler := deviceaccess.NewActionReconciler(actionService, logger)
+	actionReconcilerCtx, stopActionReconciler := context.WithCancel(context.Background())
+	actionReconcilerDone := make(chan struct{})
+	go func() {
+		defer close(actionReconcilerDone)
+		_ = actionReconciler.Start(actionReconcilerCtx)
+	}()
 	c.GS.Register("device-access-actions", 2, func(context.Context) error {
+		stopActionReconciler()
+		<-actionReconcilerDone
 		return actionConsumer.Stop()
 	})
 	logger.Info("automatic device access RF action workflow initialized; business switch controls dispatch")

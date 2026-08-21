@@ -13,18 +13,22 @@ var _ HistoryRepository = (*PgHistoryRepository)(nil)
 func TestPgHistoryRepository_ColumnsCoverAllFields(t *testing.T) {
 	t.Parallel()
 	want := map[string]bool{
-		"id":            false,
-		"template_id":   false,
-		"channel":       false,
-		"recipients":    false,
-		"subject":       false,
-		"body":          false,
-		"status":        false,
-		"error_message": false,
-		"alarm_id":      false,
-		"retry_count":   false,
-		"sent_at":       false,
-		"created_at":    false,
+		"id":             false,
+		"template_id":    false,
+		"channel":        false,
+		"recipients":     false,
+		"subject":        false,
+		"body":           false,
+		"status":         false,
+		"error_message":  false,
+		"alarm_id":       false,
+		"source_type":    false,
+		"source_id":      false,
+		"event_id":       false,
+		"correlation_id": false,
+		"retry_count":    false,
+		"sent_at":        false,
+		"created_at":     false,
 	}
 	for _, c := range historyColumns {
 		if _, ok := want[c]; ok {

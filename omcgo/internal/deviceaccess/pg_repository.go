@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"strings"
 	"time"
@@ -12,7 +13,9 @@ import (
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
@@ -35,29 +38,40 @@ func (r *PgRepository) UpsertCandidateObservation(
 	if err := validateIdentity(observation.Carrier, observation.SerialNumber); err != nil {
 		return Candidate{}, err
 	}
+	rfControlPaths, err := json.Marshal(observation.RFControlPaths)
+	if err != nil {
+		return Candidate{}, fmt.Errorf("encode candidate RF control paths: %w", err)
+	}
 
 	query, args, err := storage.Psql.Insert("device_access_candidates").
 		Columns(
-			"carrier", "serial_number", "oui", "product_class", "software_version",
-			"observed_remote_ip", "first_seen_at", "last_seen_at", "expires_at",
+			"carrier", "serial_number", "device_id", "oui", "product_class", "software_version",
+			"technology", "rf_control_paths", "observed_remote_ip", "first_seen_at", "last_seen_at", "expires_at",
 		).
 		Values(
-			observation.Carrier, observation.SerialNumber, observation.OUI,
+			observation.Carrier, observation.SerialNumber, observation.DeviceID, observation.OUI,
 			nullableString(observation.ProductClass), nullableString(observation.SoftwareVersion),
-			nullableAddr(observation.RemoteIP), observation.ObservedAt, observation.ObservedAt,
+			observation.Technology, json.RawMessage(rfControlPaths), nullableAddr(observation.RemoteIP), observation.ObservedAt, observation.ObservedAt,
 			observation.ExpiresAt,
 		).
 		Suffix(`ON CONFLICT (carrier,serial_number) DO UPDATE SET
+			device_id = COALESCE(EXCLUDED.device_id, device_access_candidates.device_id),
 			oui = EXCLUDED.oui,
 			product_class = EXCLUDED.product_class,
 			software_version = EXCLUDED.software_version,
+			technology = EXCLUDED.technology,
+			rf_control_paths = EXCLUDED.rf_control_paths,
 			observed_remote_ip = EXCLUDED.observed_remote_ip,
 			last_seen_at = EXCLUDED.last_seen_at,
 			inform_count = device_access_candidates.inform_count + 1,
+			review_status = CASE
+				WHEN EXCLUDED.device_id IS NOT NULL AND device_access_candidates.review_status = 'pending' THEN 'approved'
+				ELSE device_access_candidates.review_status
+			END,
 			expires_at = EXCLUDED.expires_at,
 			updated_at = EXCLUDED.last_seen_at
 			RETURNING id, carrier, serial_number, oui, COALESCE(product_class, ''),
-				COALESCE(software_version, ''), observed_remote_ip, first_seen_at, last_seen_at,
+				COALESCE(software_version, ''), technology, rf_control_paths, observed_remote_ip, first_seen_at, last_seen_at,
 				inform_count, review_status, reviewed_by, reviewed_at, expires_at`).
 		ToSql()
 	if err != nil {
@@ -65,6 +79,7 @@ func (r *PgRepository) UpsertCandidateObservation(
 	}
 
 	var candidate Candidate
+	var storedRFControlPaths []byte
 	err = r.db.QueryRow(ctx, query, args...).Scan(
 		&candidate.ID,
 		&candidate.Carrier,
@@ -72,6 +87,8 @@ func (r *PgRepository) UpsertCandidateObservation(
 		&candidate.OUI,
 		&candidate.ProductClass,
 		&candidate.SoftwareVersion,
+		&candidate.Technology,
+		&storedRFControlPaths,
 		&candidate.RemoteIP,
 		&candidate.FirstSeenAt,
 		&candidate.LastSeenAt,
@@ -83,6 +100,9 @@ func (r *PgRepository) UpsertCandidateObservation(
 	)
 	if err != nil {
 		return Candidate{}, fmt.Errorf("upsert candidate observation: %w", err)
+	}
+	if err := json.Unmarshal(storedRFControlPaths, &candidate.RFControlPaths); err != nil {
+		return Candidate{}, fmt.Errorf("decode candidate RF control paths: %w", err)
 	}
 	return candidate, nil
 }
@@ -100,7 +120,7 @@ func (r *PgRepository) LoadEvaluationContext(
 		Select(
 			"id", "carrier", "serial_number", "device_id", "candidate_id", "state",
 			"effective_decision", "reason_code", "policy_version_id", "evidence_version",
-			"decision_version", "normal_tasks_frozen",
+			"decision_version", "normal_tasks_frozen", "decision_expires_at",
 		).
 		From("device_access_states").
 		Where(sq.Eq{"carrier": carrier}).
@@ -125,6 +145,7 @@ func (r *PgRepository) LoadEvaluationContext(
 		&state.EvidenceVersion,
 		&state.DecisionVersion,
 		&state.NormalTasksFrozen,
+		&state.DecisionExpiresAt,
 	)
 	switch {
 	case err == nil:
@@ -237,6 +258,67 @@ func (r *PgRepository) AppendEvidence(ctx context.Context, evidence EvidenceBatc
 		return 0, fmt.Errorf("commit append evidence transaction: %w", err)
 	}
 	return evidence.Version, nil
+}
+
+func (r *PgRepository) SaveIdentitySnapshot(ctx context.Context, snapshot IdentitySnapshot) error {
+	return insertIdentitySnapshot(ctx, r.db, snapshot)
+}
+
+type identitySnapshotExecutor interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+func insertIdentitySnapshot(ctx context.Context, executor identitySnapshotExecutor, snapshot IdentitySnapshot) error {
+	if err := validateIdentity(snapshot.Carrier, snapshot.SerialNumber); err != nil {
+		return err
+	}
+	if strings.TrimSpace(snapshot.RequestID) == "" {
+		return fmt.Errorf("save identity snapshot: request id is required")
+	}
+	id, err := nullableUUID(snapshot.ID)
+	if err != nil {
+		return fmt.Errorf("parse identity snapshot id: %w", err)
+	}
+	if id == nil {
+		generated := uuid.New()
+		id = &generated
+	}
+	decisionID, err := nullableUUID(snapshot.DecisionID)
+	if err != nil {
+		return fmt.Errorf("parse identity snapshot decision id: %w", err)
+	}
+	deviceID, err := nullableUUID(snapshot.DeviceID)
+	if err != nil {
+		return fmt.Errorf("parse identity snapshot device id: %w", err)
+	}
+	candidateID, err := nullableUUID(snapshot.CandidateID)
+	if err != nil {
+		return fmt.Errorf("parse identity snapshot candidate id: %w", err)
+	}
+	query, args, err := storage.Psql.Insert("device_access_identity_snapshots").
+		Columns(
+			"id", "request_id", "decision_id", "device_id", "candidate_id", "carrier", "serial_number",
+			"device_code", "cloud_key", "oui", "product_class", "raw_remote_ip", "observed_remote_ip",
+			"inform_event", "inform_time", "identity_source", "identity_status", "identity_reason_code", "created_at",
+		).
+		Values(
+			*id, strings.TrimSpace(snapshot.RequestID), decisionID, deviceID, candidateID,
+			strings.TrimSpace(snapshot.Carrier), strings.TrimSpace(snapshot.SerialNumber),
+			nullableString(strings.TrimSpace(snapshot.DeviceCode)), nullableString(strings.TrimSpace(snapshot.CloudKey)),
+			nullableString(strings.ToUpper(strings.TrimSpace(snapshot.OUI))), nullableString(strings.TrimSpace(snapshot.ProductClass)),
+			nullableIP(snapshot.RawRemoteIP), nullableIP(snapshot.ObservedRemoteIP), nullableString(strings.TrimSpace(snapshot.InformEvent)),
+			snapshot.InformTime, nullableString(strings.TrimSpace(snapshot.IdentitySource)), snapshot.IdentityStatus,
+			nullableString(string(snapshot.IdentityReasonCode)), snapshot.CreatedAt,
+		).
+		Suffix("ON CONFLICT (carrier, serial_number, request_id) DO NOTHING").
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build identity snapshot insert: %w", err)
+	}
+	if _, err := executor.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("insert identity snapshot: %w", err)
+	}
+	return nil
 }
 
 func lockEvidenceIdentity(ctx context.Context, tx pgx.Tx, carrier, serialNumber string) error {
@@ -380,6 +462,13 @@ func (r *PgRepository) SaveDecision(ctx context.Context, change DecisionChange) 
 		return SavedDecision{}, err
 	}
 	if found {
+		if change.IdentitySnapshot != nil {
+			snapshot := *change.IdentitySnapshot
+			snapshot.DecisionID = saved.ID.String()
+			if err := insertIdentitySnapshot(ctx, tx, snapshot); err != nil {
+				return SavedDecision{}, err
+			}
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return SavedDecision{}, fmt.Errorf("commit idempotent save decision transaction: %w", err)
 		}
@@ -413,6 +502,13 @@ func (r *PgRepository) SaveDecision(ctx context.Context, change DecisionChange) 
 	decisionID := uuid.New()
 	if err := insertDecision(ctx, tx, decisionID, current.State, nextVersion, change); err != nil {
 		return SavedDecision{}, err
+	}
+	if change.IdentitySnapshot != nil {
+		snapshot := *change.IdentitySnapshot
+		snapshot.DecisionID = decisionID.String()
+		if err := insertIdentitySnapshot(ctx, tx, snapshot); err != nil {
+			return SavedDecision{}, err
+		}
 	}
 	for _, check := range change.Decision.Checks {
 		if err := insertDecisionCheck(ctx, tx, decisionID, check); err != nil {
@@ -663,6 +759,13 @@ func validateDecisionChange(change DecisionChange) error {
 			return fmt.Errorf("decision evidence identity or version mismatch")
 		}
 	}
+	if change.IdentitySnapshot != nil {
+		if change.IdentitySnapshot.Carrier != change.Carrier ||
+			change.IdentitySnapshot.SerialNumber != change.SerialNumber ||
+			strings.TrimSpace(change.IdentitySnapshot.RequestID) != change.TriggerEventID {
+			return fmt.Errorf("decision identity snapshot identity or request mismatch")
+		}
+	}
 	return nil
 }
 
@@ -708,7 +811,7 @@ func lockAccessState(
 	query, args, err := storage.Psql.
 		Select(
 			"id", "device_id", "candidate_id", "state", "decision_version",
-			"evidence_version", "policy_version_id", "normal_tasks_frozen",
+			"evidence_version", "policy_version_id", "normal_tasks_frozen", "decision_expires_at",
 		).
 		From("device_access_states").
 		Where(sq.Eq{"carrier": carrier}).
@@ -728,6 +831,7 @@ func lockAccessState(
 		&state.EvidenceVersion,
 		&state.PolicyVersionID,
 		&state.NormalTasksFrozen,
+		&state.DecisionExpiresAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return AccessStateProjection{
@@ -780,13 +884,13 @@ func upsertAccessState(
 		Columns(
 			"id", "carrier", "serial_number", "device_id", "candidate_id", "state",
 			"effective_decision", "reason_code", "policy_version_id", "evidence_version",
-			"decision_version", "normal_tasks_frozen", "last_decided_at", "updated_at",
+			"decision_version", "normal_tasks_frozen", "decision_expires_at", "last_decided_at", "updated_at",
 		).
 		Values(
 			stateID, change.Carrier, change.SerialNumber, change.DeviceID, change.CandidateID,
 			change.Decision.State, change.Decision.EffectiveAction, change.Decision.ReasonCode,
 			change.PolicyVersionID, change.EvidenceVersion, nextVersion, change.Decision.FreezeNormal,
-			change.OccurredAt, change.OccurredAt,
+			change.DecisionExpiresAt, change.OccurredAt, change.OccurredAt,
 		).
 		Suffix(`ON CONFLICT (carrier,serial_number) DO UPDATE SET
 			device_id = EXCLUDED.device_id,
@@ -798,6 +902,7 @@ func upsertAccessState(
 			evidence_version = EXCLUDED.evidence_version,
 			decision_version = EXCLUDED.decision_version,
 			normal_tasks_frozen = EXCLUDED.normal_tasks_frozen,
+			decision_expires_at = EXCLUDED.decision_expires_at,
 			last_decided_at = EXCLUDED.last_decided_at,
 			updated_at = EXCLUDED.updated_at
 			WHERE device_access_states.decision_version = ?`, change.ExpectedDecisionVersion).
@@ -896,6 +1001,12 @@ func insertOutboxEvent(
 	payload["decision_id"] = decisionID
 	payload["decision_version"] = decisionVersion
 	payload["device_id"] = change.DeviceID
+	payload["candidate_id"] = change.CandidateID
+	payload["event_id"] = decisionID
+	payload["event_name"] = decisionEventName(event.EventType)
+	payload["request_id"] = change.TriggerEventID
+	payload["policy_version_id"] = change.PolicyVersionID
+	payload["occurred_at"] = change.OccurredAt
 	enrichedPayload, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("encode decision outbox payload: %w", err)
@@ -919,6 +1030,21 @@ func insertOutboxEvent(
 	return nil
 }
 
+func decisionEventName(subject string) string {
+	switch subject {
+	case event.SubjectDeviceAccessAccepted:
+		return "DEVICE_ACCESS_ACCEPTED"
+	case event.SubjectDeviceAccessRejected:
+		return "DEVICE_ACCESS_REJECTED"
+	case event.SubjectDeviceAccessRevoked:
+		return "DEVICE_ACCESS_REVOKED"
+	case event.SubjectDeviceAccessReviewRequired:
+		return "DEVICE_ACCESS_REVIEW_REQUIRED"
+	default:
+		return ""
+	}
+}
+
 func nullableString(value string) any {
 	if value == "" {
 		return nil
@@ -931,6 +1057,13 @@ func nullableAddr(value netip.Addr) any {
 		return nil
 	}
 	return value
+}
+
+func nullableIP(value net.IP) any {
+	if len(value) == 0 {
+		return nil
+	}
+	return value.String()
 }
 
 func nullableTime(value time.Time) any {

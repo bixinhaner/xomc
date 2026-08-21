@@ -90,7 +90,7 @@ func (s *HistoryService) MarkDeadLetter(ctx context.Context, id uuid.UUID, error
 // validateHistoryChannel rejects unsupported channel values.
 func validateHistoryChannel(channel string) error {
 	switch channel {
-	case TemplateChannelEmail, TemplateChannelSMS, TemplateChannelWebhook:
+	case TemplateChannelEmail, TemplateChannelSMS, TemplateChannelWebhook, HistoryChannelSystem:
 		return nil
 	default:
 		return fmt.Errorf("%w: unsupported history channel %q", commonerrors.ErrInvalidInput, channel)
@@ -100,7 +100,7 @@ func validateHistoryChannel(channel string) error {
 // validateHistoryStatus rejects unsupported status values.
 func validateHistoryStatus(status string) error {
 	switch status {
-	case HistoryStatusPending, HistoryStatusSent, HistoryStatusFailed, HistoryStatusDeadLetter:
+	case HistoryStatusPending, HistoryStatusSent, HistoryStatusFailed, HistoryStatusDeadLetter, HistoryStatusNotConfigured:
 		return nil
 	default:
 		return fmt.Errorf("%w: unsupported history status %q", commonerrors.ErrInvalidInput, status)

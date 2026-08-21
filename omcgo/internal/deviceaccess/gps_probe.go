@@ -434,7 +434,7 @@ func (s *GPSProbeService) reevaluateProbeEvidence(
 	if err := s.reevaluator.Handle(ctx, ReevaluationRequest{
 		Carrier:                 params.Carrier,
 		SerialNumber:            params.SerialNumber,
-		TriggerType:             "access_probe_evidence",
+		TriggerType:             TriggerAccessProbeEvidence,
 		TriggerEventID:          triggerEventID,
 		ObservedProductClass:    params.ProductClass,
 		ObservedSoftwareVersion: params.SoftwareVersion,

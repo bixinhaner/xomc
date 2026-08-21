@@ -14,6 +14,11 @@ import (
 // 显式 carrier 或提供可唯一识别的 ProductClass，禁止选择注册顺序首项。
 var ErrAmbiguousCarrier = errors.New("carrier is ambiguous for device identity")
 
+// ErrUnresolvedCarrier means no registered OUI/ProductClass profile can own
+// the observed identity and no deployment carrier is available for candidate
+// review.
+var ErrUnresolvedCarrier = errors.New("carrier is unresolved for device identity")
+
 // CarrierRegistry 管理运营商适配器的注册和查找。
 // 各微服务在启动时初始化一个全局 Registry，并依次注册 cmcc/ctcc/cucc 适配器。
 // 运行时不允许修改，所有读操作并发安全。

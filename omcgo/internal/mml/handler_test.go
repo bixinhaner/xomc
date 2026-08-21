@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -19,6 +20,7 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/task"
 )
 
 // ---------------------------------------------------------------------------
@@ -689,6 +691,40 @@ func TestHandler_StartTask(t *testing.T) {
 	var resp MMLTask
 	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, taskID, resp.ID)
+}
+
+func TestHandler_StartTask_AdmissionDeniedReturnsConflict(t *testing.T) {
+	taskID := uuid.New()
+	taskRepo := &hTaskRepo{
+		GetByIDFn: func(_ context.Context, id uuid.UUID) (*MMLTask, error) {
+			return &MMLTask{
+				ID:           id,
+				Status:       TaskPending,
+				ExecuteType:  ExecuteImmediate,
+				DeviceSNs:    []string{"SN-REJECTED"},
+				TotalDevices: 1,
+				Commands: []map[string]interface{}{{
+					"command_code": "REBOOT",
+					"rpc_method":   "Reboot",
+				}},
+			}, nil
+		},
+		UpdateStatusFn: func(_ context.Context, _ uuid.UUID, _ TaskStatus) error { return nil },
+		UpdateFn:       func(_ context.Context, _ *MMLTask) error { return nil },
+	}
+
+	logger := zap.NewNop()
+	svc := NewService(&hCmdRepo{}, &hScriptRepo{}, taskRepo, &hCustomCommandRepo{}, nil, logger)
+	svc.SetFanouter(NewFanouter(&stubDeviceTaskCreator{
+		err: fmt.Errorf("device SN-REJECTED: %w: normal_tasks_frozen_by_access_state", task.ErrTaskAdmissionDenied),
+	}, nil, nil, nil, logger))
+	router := setupMMLRouter(NewHandler(svc, logger))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/mml/tasks/"+taskID.String()+"/start", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
 }
 
 func TestHandler_PauseTask(t *testing.T) {

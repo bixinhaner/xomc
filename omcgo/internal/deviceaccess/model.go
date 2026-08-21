@@ -18,6 +18,7 @@ type EffectiveAction string
 
 const (
 	EffectiveActionAccept EffectiveAction = "accept"
+	EffectiveActionBypass EffectiveAction = "bypass"
 	EffectiveActionReview EffectiveAction = "review"
 	EffectiveActionReject EffectiveAction = "reject"
 	EffectiveActionRevoke EffectiveAction = "revoke"
@@ -28,6 +29,16 @@ type PolicyDefaultAction string
 
 const (
 	PolicyDefaultActionReject PolicyDefaultAction = "reject"
+	PolicyDefaultActionReview PolicyDefaultAction = "review"
+)
+
+// FailureMode controls the terminal decision after bounded evidence collection
+// has exhausted its configured deadline.
+type FailureMode string
+
+const (
+	FailureModeFailClosed FailureMode = "fail_closed"
+	FailureModeReviewHold FailureMode = "review_hold"
 )
 
 type CredentialStatus string
@@ -76,7 +87,9 @@ const (
 	ConditionOperatorEqual        ConditionOperator = "equal"
 	ConditionOperatorIn           ConditionOperator = "in"
 	ConditionOperatorCIDR         ConditionOperator = "cidr"
+	ConditionOperatorIPRange      ConditionOperator = "ip_range"
 	ConditionOperatorWithinRadius ConditionOperator = "within_radius"
+	ConditionOperatorWithinBounds ConditionOperator = "within_bounds"
 )
 
 type SerialScopeType string
@@ -123,6 +136,19 @@ type GeoFence struct {
 	AllowMissing bool `json:"allow_missing,omitempty"`
 }
 
+type IPRange struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
+type GeoBounds struct {
+	MinLatitude  float64 `json:"min_latitude"`
+	MaxLatitude  float64 `json:"max_latitude"`
+	MinLongitude float64 `json:"min_longitude"`
+	MaxLongitude float64 `json:"max_longitude"`
+	AllowMissing bool    `json:"allow_missing,omitempty"`
+}
+
 type EvidenceValue struct {
 	Status     EvidenceStatus `json:"status"`
 	Text       string         `json:"text,omitempty"`
@@ -147,20 +173,25 @@ type SerialScope struct {
 }
 
 type CompiledCondition struct {
-	ID          string            `json:"id"`
-	Type        ConditionType     `json:"type"`
-	Operator    ConditionOperator `json:"operator"`
-	Expected    string            `json:"expected,omitempty"`
-	ExpectedAny []string          `json:"expected_any,omitempty"`
-	GeoFence    *GeoFence         `json:"geo_fence,omitempty"`
-	Required    bool              `json:"required"`
-	EvidenceTTL time.Duration     `json:"evidence_ttl"`
+	ID           string            `json:"id"`
+	Type         ConditionType     `json:"type"`
+	Operator     ConditionOperator `json:"operator"`
+	Expected     string            `json:"expected,omitempty"`
+	ExpectedAny  []string          `json:"expected_any,omitempty"`
+	IPRange      *IPRange          `json:"ip_range,omitempty"`
+	IPRanges     []IPRange         `json:"ip_ranges,omitempty"`
+	GeoFence     *GeoFence         `json:"geo_fence,omitempty"`
+	GeoBounds    *GeoBounds        `json:"geo_bounds,omitempty"`
+	GeoBoundsAny []GeoBounds       `json:"geo_bounds_any,omitempty"`
+	Required     bool              `json:"required"`
+	EvidenceTTL  time.Duration     `json:"evidence_ttl"`
 }
 
 type CompiledRule struct {
 	ID          string              `json:"id"`
 	Name        string              `json:"name"`
 	Enabled     bool                `json:"enabled"`
+	Priority    int                 `json:"priority"`
 	SerialScope SerialScope         `json:"serial_scope"`
 	Conditions  []CompiledCondition `json:"conditions"`
 }
@@ -176,22 +207,44 @@ type CompiledListEntry struct {
 	ValidUntil    *time.Time      `json:"valid_until,omitempty"`
 }
 
+// BypassProfile is an explicit, versioned replacement for the legacy
+// hard-coded platform exceptions. Non-empty selectors are combined with AND;
+// values inside one selector are OR alternatives.
+type BypassProfile struct {
+	ID             string       `json:"id"`
+	Name           string       `json:"name"`
+	Enabled        bool         `json:"enabled"`
+	Priority       int          `json:"priority"`
+	SerialScope    *SerialScope `json:"serial_scope,omitempty"`
+	OUIs           []string     `json:"ouis,omitempty"`
+	ProductClasses []string     `json:"product_classes,omitempty"`
+	Reason         string       `json:"reason"`
+	ValidFrom      *time.Time   `json:"valid_from,omitempty"`
+	ValidUntil     *time.Time   `json:"valid_until,omitempty"`
+}
+
 type CompiledPolicy struct {
-	VersionID     string              `json:"version_id"`
-	DefaultAction PolicyDefaultAction `json:"default_action"`
-	ListEntries   []CompiledListEntry `json:"list_entries"`
-	Rules         []CompiledRule      `json:"rules"`
+	VersionID         string              `json:"version_id"`
+	DefaultAction     PolicyDefaultAction `json:"default_action"`
+	FailureMode       FailureMode         `json:"failure_mode"`
+	CollectionTimeout time.Duration       `json:"collection_timeout"`
+	BypassProfiles    []BypassProfile     `json:"bypass_profiles,omitempty"`
+	ListEntries       []CompiledListEntry `json:"list_entries"`
+	Rules             []CompiledRule      `json:"rules"`
 }
 
 type EvaluationInput struct {
 	Carrier                string         `json:"carrier"`
 	SerialNumber           string         `json:"serial_number"`
+	OUI                    string         `json:"oui,omitempty"`
+	ProductClass           string         `json:"product_class,omitempty"`
 	AuthenticationRequired bool           `json:"authentication_required"`
 	Authenticated          bool           `json:"authenticated"`
 	AssetRetired           bool           `json:"asset_retired"`
 	ExistingState          AccessState    `json:"existing_state"`
 	ConfirmedMismatch      bool           `json:"confirmed_mismatch"`
 	EvaluatedAt            time.Time      `json:"evaluated_at"`
+	CollectionDeadline     *time.Time     `json:"collection_deadline,omitempty"`
 	Evidence               EvidenceSet    `json:"evidence"`
 	Policy                 CompiledPolicy `json:"policy"`
 }

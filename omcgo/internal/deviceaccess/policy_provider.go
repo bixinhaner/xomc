@@ -1,6 +1,7 @@
 package deviceaccess
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,11 +38,18 @@ func (p *PgPolicyProvider) Load(ctx context.Context, carrier string) (CompiledPo
 	}
 
 	versionID, defaultAction, err := p.loadActiveVersion(ctx, carrier)
-	policy := CompiledPolicy{DefaultAction: PolicyDefaultActionReject}
+	policy := CompiledPolicy{
+		DefaultAction:     PolicyDefaultActionReject,
+		FailureMode:       FailureModeFailClosed,
+		CollectionTimeout: 15 * time.Minute,
+	}
 	switch {
 	case err == nil:
 		policy.VersionID = versionID.String()
 		policy.DefaultAction = defaultAction
+		if err := p.loadVersionSettings(ctx, versionID, &policy); err != nil {
+			return CompiledPolicy{}, err
+		}
 		if err := p.loadRules(ctx, versionID, &policy); err != nil {
 			return CompiledPolicy{}, err
 		}
@@ -58,6 +66,27 @@ func (p *PgPolicyProvider) Load(ctx context.Context, carrier string) (CompiledPo
 		return CompiledPolicy{}, err
 	}
 	return policy, nil
+}
+
+func (p *PgPolicyProvider) loadVersionSettings(ctx context.Context, versionID uuid.UUID, policy *CompiledPolicy) error {
+	query, args, err := storage.Psql.
+		Select("failure_mode", "collection_timeout_seconds", "bypass_profiles").
+		From("device_access_policy_versions").
+		Where(sq.Eq{"id": versionID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build device access policy settings query: %w", err)
+	}
+	var timeoutSeconds int64
+	var bypassJSON []byte
+	if err := p.db.QueryRow(ctx, query, args...).Scan(&policy.FailureMode, &timeoutSeconds, &bypassJSON); err != nil {
+		return fmt.Errorf("load device access policy settings: %w", err)
+	}
+	policy.CollectionTimeout = time.Duration(timeoutSeconds) * time.Second
+	if err := json.Unmarshal(bypassJSON, &policy.BypassProfiles); err != nil {
+		return fmt.Errorf("decode device access bypass profiles: %w", err)
+	}
+	return nil
 }
 
 func (p *PgPolicyProvider) loadActiveVersion(ctx context.Context, carrier string) (uuid.UUID, PolicyDefaultAction, error) {
@@ -80,10 +109,10 @@ func (p *PgPolicyProvider) loadActiveVersion(ctx context.Context, carrier string
 
 func (p *PgPolicyProvider) loadRules(ctx context.Context, versionID uuid.UUID, policy *CompiledPolicy) error {
 	query, args, err := storage.Psql.
-		Select("id", "name", "enabled", "serial_scope_type", "serial_scope").
+		Select("id", "name", "enabled", "priority", "serial_scope_type", "serial_scope").
 		From("device_access_rules").
 		Where(sq.Eq{"policy_version_id": versionID}).
-		OrderBy("created_order ASC", "id ASC").
+		OrderBy("priority ASC", "id ASC").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build device access rules query: %w", err)
@@ -98,7 +127,7 @@ func (p *PgPolicyProvider) loadRules(ctx context.Context, versionID uuid.UUID, p
 		var ruleID uuid.UUID
 		var scopeType string
 		var scopeJSON []byte
-		if err := rows.Scan(&ruleID, &rule.Name, &rule.Enabled, &scopeType, &scopeJSON); err != nil {
+		if err := rows.Scan(&ruleID, &rule.Name, &rule.Enabled, &rule.Priority, &scopeType, &scopeJSON); err != nil {
 			return fmt.Errorf("scan device access rule: %w", err)
 		}
 		rule.ID = ruleID.String()
@@ -123,7 +152,7 @@ func (p *PgPolicyProvider) loadConditions(ctx context.Context, versionID uuid.UU
 		From("device_access_conditions c").
 		Join("device_access_rules r ON r.id = c.rule_id").
 		Where(sq.Eq{"r.policy_version_id": versionID}).
-		OrderBy("r.created_order ASC", "c.id ASC").
+		OrderBy("r.priority ASC", "c.id ASC").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build device access conditions query: %w", err)
@@ -195,9 +224,21 @@ func decodeConditionExpected(condition *CompiledCondition, raw []byte) error {
 	switch condition.Operator {
 	case ConditionOperatorIn:
 		return json.Unmarshal(raw, &condition.ExpectedAny)
+	case ConditionOperatorIPRange:
+		if len(bytes.TrimSpace(raw)) > 0 && bytes.TrimSpace(raw)[0] == '[' {
+			return json.Unmarshal(raw, &condition.IPRanges)
+		}
+		condition.IPRange = &IPRange{}
+		return json.Unmarshal(raw, condition.IPRange)
 	case ConditionOperatorWithinRadius:
 		condition.GeoFence = &GeoFence{}
 		return json.Unmarshal(raw, condition.GeoFence)
+	case ConditionOperatorWithinBounds:
+		if len(bytes.TrimSpace(raw)) > 0 && bytes.TrimSpace(raw)[0] == '[' {
+			return json.Unmarshal(raw, &condition.GeoBoundsAny)
+		}
+		condition.GeoBounds = &GeoBounds{}
+		return json.Unmarshal(raw, condition.GeoBounds)
 	default:
 		if err := json.Unmarshal(raw, &condition.Expected); err == nil {
 			return nil

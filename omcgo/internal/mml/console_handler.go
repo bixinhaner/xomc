@@ -377,6 +377,8 @@ func (h *ConsoleHandler) PostExecuteStatements(c *gin.Context) {
 		var orphanErr *ErrProductClassUnresolved
 		var unsupportedErr *ErrPathUnsupported
 		switch {
+		case isTaskAdmissionDenied(err):
+			response.Fail(c, http.StatusConflict, err.Error())
 		case errors.Is(err, ErrCommandNotFound):
 			response.Fail(c, http.StatusNotFound, err.Error())
 		case errors.Is(err, ErrInvalidRequest):
@@ -435,6 +437,8 @@ func (h *ConsoleHandler) PostExecuteStatementsStructured(c *gin.Context) {
 		var orphanErr *ErrProductClassUnresolved
 		var unsupportedErr *ErrPathUnsupported
 		switch {
+		case isTaskAdmissionDenied(err):
+			response.Fail(c, http.StatusConflict, err.Error())
 		case errors.As(err, &unknownErr):
 			response.FailWithData(c, http.StatusUnprocessableEntity, unknownErr.Error(),
 				gin.H{"unknown_paths": unknownErr.Paths, "command_id": unknownErr.CommandID})

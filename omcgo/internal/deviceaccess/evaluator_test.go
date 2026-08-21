@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -100,22 +101,22 @@ func TestEvaluatorPriorityOrder(t *testing.T) {
 			wantReason: ReasonDenylistMatched,
 		},
 		{
-			name: "strong identity mismatch wins over allowlist",
+			name: "allowlist bypasses ordinary identity evidence mismatch",
 			mutate: func(in *EvaluationInput) {
 				in.Evidence.Identity = CheckFailed
 			},
-			wantState:  AccessStateRejected,
-			wantAction: EffectiveActionReject,
-			wantReason: ReasonIdentityMismatch,
+			wantState:  AccessStateAccepted,
+			wantAction: EffectiveActionAccept,
+			wantReason: ReasonAllowlistMatched,
 		},
 		{
-			name: "asset ownership mismatch wins over allowlist",
+			name: "allowlist bypasses ordinary asset ownership mismatch",
 			mutate: func(in *EvaluationInput) {
 				in.Evidence.Ownership = CheckFailed
 			},
-			wantState:  AccessStateRejected,
-			wantAction: EffectiveActionReject,
-			wantReason: ReasonOwnershipMismatch,
+			wantState:  AccessStateAccepted,
+			wantAction: EffectiveActionAccept,
+			wantReason: ReasonAllowlistMatched,
 		},
 		{
 			name: "allowlist skips an ordinary planning mismatch",
@@ -232,6 +233,36 @@ func TestEvaluatorRulesUseANDWithinRuleAndORAcrossRules(t *testing.T) {
 	assert.Equal(t, CheckPassed, got.Checks[3].Result)
 }
 
+func TestEvaluatorUsesExplicitRulePriorityInsteadOfPayloadOrder(t *testing.T) {
+	now := time.Date(2026, 8, 19, 15, 0, 0, 0, time.UTC)
+	input := validInput(now)
+	input.Evidence.Values[ConditionTypeTAC] = availableTextEvidence("100", now)
+	input.Policy.Rules = []CompiledRule{
+		{
+			ID: "rule-later", Priority: 200, Enabled: true,
+			SerialScope: SerialScope{Type: SerialScopeAll},
+			Conditions: []CompiledCondition{{
+				ID: "tac-later", Type: ConditionTypeTAC, Operator: ConditionOperatorEqual,
+				Expected: "100", Required: true,
+			}},
+		},
+		{
+			ID: "rule-first", Priority: 100, Enabled: true,
+			SerialScope: SerialScope{Type: SerialScopeAll},
+			Conditions: []CompiledCondition{{
+				ID: "tac-first", Type: ConditionTypeTAC, Operator: ConditionOperatorEqual,
+				Expected: "100", Required: true,
+			}},
+		},
+	}
+
+	decision := (Evaluator{}).Evaluate(input)
+
+	require.Equal(t, AccessStateAccepted, decision.State)
+	require.Equal(t, ReasonRuleMatched, decision.ReasonCode)
+	require.Equal(t, "rule-first", decision.MatchedRuleID)
+}
+
 func TestEvaluatorRequiresEveryServingCellValueInPlannedSet(t *testing.T) {
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	input := validInput(now)
@@ -290,9 +321,9 @@ func TestEvaluatorDoesNotTreatMissingStaleOrCollectionFailureAsPass(t *testing.T
 			wantCheck:  CheckError,
 		},
 		{
-			name:       "system error requires review",
+			name:       "system error enters bounded collection",
 			evidence:   EvidenceValue{Status: EvidenceStatusSystemError, Source: "repository"},
-			wantState:  AccessStateReviewRequired,
+			wantState:  AccessStateCollecting,
 			wantReason: ReasonEvidenceSystemError,
 			wantCheck:  CheckError,
 		},
@@ -324,6 +355,77 @@ func TestEvaluatorDoesNotTreatMissingStaleOrCollectionFailureAsPass(t *testing.T
 			assert.Equal(t, tt.wantCheck, got.Checks[0].Result)
 		})
 	}
+}
+
+func TestEvaluatorUsesExplicitBypassProfileBeforeOrdinaryPolicy(t *testing.T) {
+	now := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	validUntil := now.Add(time.Hour)
+	input := validInput(now)
+	input.OUI = "48BF74"
+	input.ProductClass = "BaiBNX"
+	input.AuthenticationRequired = true
+	input.Authenticated = false
+	input.Policy.BypassProfiles = []BypassProfile{{
+		ID: uuid.NewString(), Name: "legacy-special-platform", Enabled: true, Priority: 10,
+		OUIs: []string{"48bf74"}, ProductClasses: []string{"baibnx"},
+		Reason: "legacy platform compatibility", ValidUntil: &validUntil,
+	}}
+
+	got := (Evaluator{}).Evaluate(input)
+
+	assert.Equal(t, AccessStateAccepted, got.State)
+	assert.Equal(t, EffectiveActionBypass, got.EffectiveAction)
+	assert.Equal(t, ReasonBypassProfileMatched, got.ReasonCode)
+	require.Len(t, got.Checks, 1)
+	assert.Contains(t, got.Checks[0].ExpectedSummary, "legacy-special-platform")
+}
+
+func TestEvaluatorExpiredBypassProfileDoesNotMatch(t *testing.T) {
+	now := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	expired := now.Add(-time.Second)
+	input := validInput(now)
+	input.ProductClass = "BaiBNX"
+	input.Policy.BypassProfiles = []BypassProfile{{
+		ID: uuid.NewString(), Name: "expired", Enabled: true, Priority: 10,
+		ProductClasses: []string{"BaiBNX"}, Reason: "temporary", ValidUntil: &expired,
+	}}
+
+	got := (Evaluator{}).Evaluate(input)
+
+	assert.NotEqual(t, ReasonBypassProfileMatched, got.ReasonCode)
+}
+
+func TestEvaluatorSupportsReviewDefaultWithoutDefaultAccept(t *testing.T) {
+	now := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	input := validInput(now)
+	input.Policy.Rules = nil
+	input.Policy.DefaultAction = PolicyDefaultActionReview
+
+	got := (Evaluator{}).Evaluate(input)
+
+	assert.Equal(t, AccessStateReviewRequired, got.State)
+	assert.Equal(t, EffectiveActionReview, got.EffectiveAction)
+	assert.Equal(t, ReasonNoApplicableRule, got.ReasonCode)
+}
+
+func TestEvaluatorTerminatesEvidenceCollectionAtConfiguredDeadline(t *testing.T) {
+	now := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	deadline := now.Add(-time.Second)
+	base := validInput(now)
+	base.CollectionDeadline = &deadline
+	base.Evidence.Values[ConditionTypeTAC] = EvidenceValue{Status: EvidenceStatusCollectionFailed}
+	base.Policy.Rules = []CompiledRule{{
+		ID: "rule-tac", Enabled: true, Priority: 10, SerialScope: SerialScope{Type: SerialScopeAll},
+		Conditions: []CompiledCondition{{ID: "tac", Type: ConditionTypeTAC, Operator: ConditionOperatorEqual, Expected: "100", Required: true}},
+	}}
+
+	failClosed := base
+	failClosed.Policy.FailureMode = FailureModeFailClosed
+	assert.Equal(t, AccessStateRejected, (Evaluator{}).Evaluate(failClosed).State)
+
+	reviewHold := base
+	reviewHold.Policy.FailureMode = FailureModeReviewHold
+	assert.Equal(t, AccessStateReviewRequired, (Evaluator{}).Evaluate(reviewHold).State)
 }
 
 func TestEvaluatorSkipsOptionalMissingCondition(t *testing.T) {
@@ -467,6 +569,78 @@ func TestEvaluatorChecksCIDRMembership(t *testing.T) {
 	assert.Equal(t, "ip-rule", got.MatchedRuleID)
 }
 
+func TestEvaluatorChecksInclusiveIPRangeMembership(t *testing.T) {
+	now := time.Date(2026, 8, 19, 16, 0, 0, 0, time.UTC)
+	input := validInput(now)
+	input.Evidence.Values[ConditionTypeObservedIP] = availableTextEvidence("10.21.7.20", now)
+	input.Policy.Rules = []CompiledRule{{
+		ID: "ip-range", Enabled: true, SerialScope: SerialScope{Type: SerialScopeAll},
+		Conditions: []CompiledCondition{{
+			ID: "ip", Type: ConditionTypeObservedIP, Operator: ConditionOperatorIPRange,
+			IPRange: &IPRange{Start: "10.21.7.1", End: "10.21.7.20"}, Required: true,
+		}},
+	}}
+
+	inside := (Evaluator{}).Evaluate(input)
+	require.Equal(t, AccessStateAccepted, inside.State)
+	require.Equal(t, ReasonRuleMatched, inside.ReasonCode)
+
+	input.Evidence.Values[ConditionTypeObservedIP] = availableTextEvidence("10.21.7.21", now)
+	outside := (Evaluator{}).Evaluate(input)
+	require.Equal(t, AccessStateRejected, outside.State)
+	require.Equal(t, ReasonRuleMismatch, outside.ReasonCode)
+}
+
+func TestEvaluatorChecksInclusiveGPSBounds(t *testing.T) {
+	now := time.Date(2026, 8, 19, 16, 30, 0, 0, time.UTC)
+	input := validInput(now)
+	input.Evidence.Values[ConditionTypeGPS] = EvidenceValue{
+		Status: EvidenceStatusAvailable, Point: &GeoPoint{Latitude: 31, Longitude: 122}, ObservedAt: now,
+	}
+	input.Policy.Rules = []CompiledRule{{
+		ID: "gps-bounds", Enabled: true, SerialScope: SerialScope{Type: SerialScopeAll},
+		Conditions: []CompiledCondition{{
+			ID: "gps", Type: ConditionTypeGPS, Operator: ConditionOperatorWithinBounds,
+			GeoBounds: &GeoBounds{MinLatitude: 30, MaxLatitude: 32, MinLongitude: 120, MaxLongitude: 122}, Required: true,
+		}},
+	}}
+
+	inside := (Evaluator{}).Evaluate(input)
+	require.Equal(t, AccessStateAccepted, inside.State)
+	require.Equal(t, ReasonRuleMatched, inside.ReasonCode)
+
+	input.Evidence.Values[ConditionTypeGPS] = EvidenceValue{
+		Status: EvidenceStatusAvailable, Point: &GeoPoint{Latitude: 31, Longitude: 122.0001}, ObservedAt: now,
+	}
+	outside := (Evaluator{}).Evaluate(input)
+	require.Equal(t, AccessStateRejected, outside.State)
+	require.Equal(t, ReasonRuleMismatch, outside.ReasonCode)
+}
+
+func TestEvaluatorAllowsExplicitlyMissingGPSCoordinatesForBounds(t *testing.T) {
+	now := time.Date(2026, 8, 19, 16, 30, 0, 0, time.UTC)
+	input := validInput(now)
+	delete(input.Evidence.Values, ConditionTypeGPS)
+	input.Policy.Rules = []CompiledRule{{
+		ID: "gps-bounds-missing-allowed", Enabled: true, SerialScope: SerialScope{Type: SerialScopeAll},
+		Conditions: []CompiledCondition{{
+			ID: "gps", Type: ConditionTypeGPS, Operator: ConditionOperatorWithinBounds,
+			GeoBounds: &GeoBounds{
+				MinLatitude: 30, MaxLatitude: 32, MinLongitude: 120, MaxLongitude: 122,
+				AllowMissing: true,
+			},
+			Required: true,
+		}},
+	}}
+
+	got := (Evaluator{}).Evaluate(input)
+
+	require.Equal(t, AccessStateAccepted, got.State)
+	require.Len(t, got.Checks, 1)
+	require.Equal(t, CheckSkipped, got.Checks[0].Result)
+	require.Equal(t, "geo_bounds;allow_missing=true", got.Checks[0].ExpectedSummary)
+}
+
 func TestEvaluatorRejectsPointOutsideGPSRadius(t *testing.T) {
 	now := time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC)
 	input := validInput(now)
@@ -538,6 +712,30 @@ func TestEvaluatorUsesVersionedRejectDefaultWhenNoRuleApplies(t *testing.T) {
 	assert.Equal(t, EffectiveActionReject, got.EffectiveAction)
 	assert.Equal(t, ReasonNoApplicableRule, got.ReasonCode)
 	assert.True(t, got.FreezeNormal)
+}
+
+func TestEvaluatorTreatsImportedIPRangesAsAlternatives(t *testing.T) {
+	condition := CompiledCondition{Operator: ConditionOperatorIPRange, IPRanges: []IPRange{
+		{Start: "10.0.0.1", End: "10.0.0.10"},
+		{Start: "192.0.2.1", End: "192.0.2.20"},
+	}}
+
+	matched, valid := conditionMatches(condition, EvidenceValue{Text: "192.0.2.8"})
+
+	assert.True(t, valid)
+	assert.True(t, matched)
+}
+
+func TestEvaluatorTreatsImportedGPSBoundsAsAlternatives(t *testing.T) {
+	condition := CompiledCondition{Operator: ConditionOperatorWithinBounds, GeoBoundsAny: []GeoBounds{
+		{MinLatitude: 30, MaxLatitude: 31, MinLongitude: 120, MaxLongitude: 121},
+		{MinLatitude: 39, MaxLatitude: 41, MinLongitude: 115, MaxLongitude: 117},
+	}}
+
+	matched, valid := conditionMatches(condition, EvidenceValue{Point: &GeoPoint{Latitude: 40, Longitude: 116}})
+
+	assert.True(t, valid)
+	assert.True(t, matched)
 }
 
 func TestEvaluatorFreezesNormalTasksUnlessDecisionAccepts(t *testing.T) {

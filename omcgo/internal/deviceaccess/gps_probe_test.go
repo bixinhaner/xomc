@@ -61,6 +61,10 @@ func (r *gpsFlowRepository) AppendEvidence(_ context.Context, batch EvidenceBatc
 	return batch.Version, nil
 }
 
+func (r *gpsFlowRepository) SaveIdentitySnapshot(context.Context, IdentitySnapshot) error {
+	return nil
+}
+
 type gpsTaskEnqueuer struct {
 	created *task.Task
 }

@@ -2,8 +2,12 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import {
   deviceAccessApi,
   type AccessListType,
+  type AccessAuditFilters,
   type AccessState,
   type ActionStatus,
+  type ImportFailurePolicy,
+  type ImportMode,
+  type RuleDimension,
 } from '../../services/api/deviceAccessApi';
 
 const rootKey = ['device-access'] as const;
@@ -17,8 +21,12 @@ export function invalidateDeviceAccessQueries(qc: Pick<QueryClient, 'invalidateQ
   void qc.invalidateQueries({ queryKey: rootKey });
 }
 
-export function useAccessStates(params: { operatorCode: string; page: number; pageSize: number; serialNumber?: string; state?: AccessState }) {
+export function useAccessStates(params: { operatorCode: string; page: number; pageSize: number; serialNumber?: string; state?: AccessState } & AccessAuditFilters) {
   return useQuery({ queryKey: [...rootKey, 'states', params], queryFn: () => deviceAccessApi.listStates(params), enabled: Boolean(params.operatorCode) });
+}
+
+export function useAccessStateSummary(params: { operatorCode: string; serialNumber?: string; state?: AccessState } & AccessAuditFilters) {
+  return useQuery({ queryKey: [...rootKey, 'states-summary', params], queryFn: () => deviceAccessApi.summarizeStates(params), enabled: Boolean(params.operatorCode) });
 }
 
 export function useDeviceAccessRuntimeSettings(operatorCode: string) {
@@ -43,6 +51,48 @@ export function useAccessDetail(operatorCode: string, serialNumber?: string) {
     queryKey: [...rootKey, 'detail', operatorCode, serialNumber],
     queryFn: () => deviceAccessApi.getDetail(operatorCode, serialNumber!),
     enabled: Boolean(operatorCode && serialNumber),
+  });
+}
+
+export function useAccessDecisions(params: { operatorCode: string; serialNumber?: string; page: number; pageSize: number } & AccessAuditFilters) {
+  return useQuery({
+    queryKey: [...rootKey, 'decisions', params],
+    queryFn: () => deviceAccessApi.listDecisions(params),
+    enabled: Boolean(params.operatorCode && params.serialNumber),
+  });
+}
+
+export function useAccessIdentitySnapshots(params: { operatorCode: string; serialNumber?: string; page: number; pageSize: number }) {
+  return useQuery({ queryKey: [...rootKey, 'identity-snapshots', params], queryFn: () => deviceAccessApi.listIdentitySnapshots(params), enabled: Boolean(params.operatorCode && params.serialNumber) });
+}
+
+export function useAccessEvidence(params: { operatorCode: string; serialNumber?: string; page: number; pageSize: number }) {
+  return useQuery({ queryKey: [...rootKey, 'evidence', params], queryFn: () => deviceAccessApi.listEvidence(params), enabled: Boolean(params.operatorCode && params.serialNumber) });
+}
+
+export function useAccessNotifications(params: { operatorCode: string; serialNumber?: string; page: number; pageSize: number }) {
+  return useQuery({ queryKey: [...rootKey, 'notifications', params], queryFn: () => deviceAccessApi.listNotifications(params), enabled: Boolean(params.operatorCode && params.serialNumber) });
+}
+
+export function useAccessManualOperations(params: { operatorCode: string; serialNumber?: string; page: number; pageSize: number }) {
+  return useQuery({ queryKey: [...rootKey, 'manual-operations', params], queryFn: () => deviceAccessApi.listManualOperations(params), enabled: Boolean(params.operatorCode && params.serialNumber) });
+}
+
+export function useArchiveAccessDecision() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ operatorCode, decisionId, reason }: { operatorCode: string; decisionId: string; reason: string }) =>
+      deviceAccessApi.archiveDecision(operatorCode, decisionId, reason),
+    onSuccess: () => invalidateDeviceAccessQueries(qc),
+  });
+}
+
+export function useRestoreAccessDecision() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ operatorCode, decisionId }: { operatorCode: string; decisionId: string }) =>
+      deviceAccessApi.restoreDecision(operatorCode, decisionId),
+    onSuccess: () => invalidateDeviceAccessQueries(qc),
   });
 }
 
@@ -72,10 +122,31 @@ export function useCreateAccessPolicyDraft() {
   return useMutation({ mutationFn: deviceAccessApi.createPolicyDraft, onSuccess: () => invalidateDeviceAccessQueries(qc) });
 }
 
+export function useUpdateAccessPolicyDraft() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: deviceAccessApi.updatePolicyDraft, onSuccess: () => invalidateDeviceAccessQueries(qc) });
+}
+
 export function usePublishAccessPolicy() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ operatorCode, versionId }: { operatorCode: string; versionId: string }) => deviceAccessApi.publishPolicy(operatorCode, versionId),
+    onSuccess: () => invalidateDeviceAccessQueries(qc),
+  });
+}
+
+export function useAccessPolicyDifference() {
+  return useMutation({
+    mutationFn: ({ operatorCode, versionId, baseVersionId }: { operatorCode: string; versionId: string; baseVersionId?: string }) =>
+      deviceAccessApi.getPolicyDifference(operatorCode, versionId, baseVersionId),
+  });
+}
+
+export function useRollbackAccessPolicy() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ operatorCode, versionId }: { operatorCode: string; versionId: string }) =>
+      deviceAccessApi.rollbackPolicy(operatorCode, versionId),
     onSuccess: () => invalidateDeviceAccessQueries(qc),
   });
 }
@@ -89,9 +160,60 @@ export function useDeleteAccessPolicyDraft() {
   });
 }
 
-export function useAccessEntries(params: { operatorCode: string; page: number; pageSize: number; serialNumber?: string; entryType?: AccessListType }) {
+export function useAccessEntries(params: { operatorCode: string; page: number; pageSize: number; serialNumber?: string; productName?: string; entryType?: AccessListType; status?: 'active' | 'disabled' }) {
   return useQuery({ queryKey: [...rootKey, 'entries', params], queryFn: () => deviceAccessApi.listEntries(params), enabled: Boolean(params.operatorCode) });
 }
+
+export function useUpsertAccessEntries() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: deviceAccessApi.upsertEntries, onSuccess: () => invalidateDeviceAccessQueries(qc) });
+}
+
+export function useDisableAccessEntries() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: deviceAccessApi.disableEntries, onSuccess: () => invalidateDeviceAccessQueries(qc) });
+}
+
+export function useAccessListImports(params: { operatorCode: string; page: number; pageSize: number }) {
+  return useQuery({ queryKey: [...rootKey, 'imports', params], queryFn: () => deviceAccessApi.listAccessListImports(params), enabled: Boolean(params.operatorCode) });
+}
+
+export function useRuleDimensionImports(params: { operatorCode: string; policyVersionId: string; ruleId: string; dimension: RuleDimension; page: number; pageSize: number; enabled?: boolean }) {
+  return useQuery({
+    queryKey: [...rootKey, 'rule-dimension-imports', params],
+    queryFn: () => deviceAccessApi.listRuleDimensionImports(params),
+    enabled: Boolean(params.enabled && params.operatorCode && params.policyVersionId && params.ruleId),
+  });
+}
+
+export function usePreviewAccessListImport() {
+  return useMutation({ mutationFn: deviceAccessApi.previewAccessListImport });
+}
+
+export function usePreviewRuleDimensionImport() {
+  return useMutation({ mutationFn: deviceAccessApi.previewRuleDimensionImport });
+}
+
+export function useClearRuleDimension() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: deviceAccessApi.clearRuleDimension, onSuccess: () => invalidateDeviceAccessQueries(qc) });
+}
+
+export function useCommitAccessListImport() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: deviceAccessApi.commitAccessListImport, onSuccess: () => invalidateDeviceAccessQueries(qc) });
+}
+
+export function useRollbackAccessListImport() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: deviceAccessApi.rollbackAccessListImport, onSuccess: () => invalidateDeviceAccessQueries(qc) });
+}
+
+export type AccessListImportFormValues = {
+  entryType: AccessListType;
+  mode: ImportMode;
+  failurePolicy: ImportFailurePolicy;
+};
 
 export function useUpsertAccessEntry() {
   const qc = useQueryClient();
@@ -107,14 +229,23 @@ export function useReviewAccessCandidate() {
   return useMutation({ mutationFn: deviceAccessApi.reviewCandidate, onSuccess: () => invalidateDeviceAccessQueries(qc) });
 }
 
-export function useAccessActions(params: { operatorCode: string; page: number; pageSize: number; serialNumber?: string; status?: ActionStatus }) {
+export function useAccessActions(params: { operatorCode: string; page: number; pageSize: number; serialNumber?: string; status?: ActionStatus } & AccessAuditFilters) {
   return useQuery({ queryKey: [...rootKey, 'actions', params], queryFn: () => deviceAccessApi.listActions(params), enabled: Boolean(params.operatorCode) });
+}
+
+export function useAccessActionAttempts(operatorCode: string, actionId?: string) {
+  return useQuery({
+    queryKey: [...rootKey, 'actions', actionId, 'attempts'],
+    queryFn: () => deviceAccessApi.listActionAttempts(operatorCode, actionId!),
+    enabled: Boolean(operatorCode && actionId),
+  });
 }
 
 export function useRetryAccessAction() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ operatorCode, actionId }: { operatorCode: string; actionId: string }) => deviceAccessApi.retryAction(operatorCode, actionId),
+    mutationFn: ({ operatorCode, actionId, reason }: { operatorCode: string; actionId: string; reason: string }) =>
+      deviceAccessApi.retryAction(operatorCode, actionId, reason),
     onSuccess: () => invalidateDeviceAccessQueries(qc),
   });
 }

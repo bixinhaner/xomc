@@ -33,6 +33,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/deviceaccess"
 	"github.com/omcgo/omcgo/internal/geofence"
 	"github.com/omcgo/omcgo/internal/mr"
 	mrcollector "github.com/omcgo/omcgo/internal/mr/collector"
@@ -443,6 +444,13 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	geofenceControlMonitor.SetActionRepository(
 		geofence.NewPgControlActionRepository(w.PgPool),
 	)
+	geofenceControlMonitor.SetRFActivationAdmissionReader(
+		deviceaccess.NewRFActivationAdmissionReader(
+			deviceaccess.NewPgRepository(w.PgPool),
+			deviceaccess.NewPgActionStore(w.PgPool),
+			deviceaccess.NewPgRuntimeSettingsStore(w.PgPool),
+		),
+	)
 	if err := geofenceControlMonitor.Subscribe(w.EventBus); err != nil {
 		return fmt.Errorf("subscribe geofence control monitor: %w", err)
 	} else {
@@ -562,6 +570,27 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 		logger.Warn("subscribe notification task subscriber", zap.Error(err))
 	} else {
 		logger.Info("notification task subscriber started (T-0157 C5)")
+	}
+	historyRepo := notification.NewPgHistoryRepository(w.PgPool)
+	if count, err := historyRepo.BackfillDeviceAccessDecisions(context.Background()); err != nil {
+		logger.Warn("backfill device access decision notification history", zap.Error(err))
+	} else if count > 0 {
+		logger.Info("device access decision notification history backfilled", zap.Int64("count", count))
+	}
+	historyService := notification.NewHistoryService(historyRepo, logger)
+	decisionNotificationSubscriber := notification.NewDeviceAccessDecisionSubscriber(historyService, logger)
+	if err := decisionNotificationSubscriber.Subscribe(w.EventBus); err != nil {
+		logger.Warn("subscribe device access decision notification history", zap.Error(err))
+	} else {
+		logger.Info("device access decision notification history subscriber started")
+	}
+	actionNotificationSubscriber := notification.NewDeviceAccessActionSubscriber(
+		historyService, logger,
+	)
+	if err := actionNotificationSubscriber.Subscribe(w.EventBus); err != nil {
+		logger.Warn("subscribe device access action notification history", zap.Error(err))
+	} else {
+		logger.Info("device access action notification history subscriber started")
 	}
 
 	// T-0157 C2: 任务过期扫描器 — 周期把 expires_at < now 且仍 pending/sent 的任务标记为 expired，

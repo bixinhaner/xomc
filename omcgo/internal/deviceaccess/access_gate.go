@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/netip"
 	"strings"
 	"time"
@@ -86,25 +87,32 @@ func (g *AccessGate) admit(ctx context.Context, observation devicepkg.AccessObse
 	}
 
 	evaluatedAt := g.now().UTC()
+	triggerType := strings.TrimSpace(observation.TriggerType)
+	if triggerType == "" {
+		triggerType = TriggerInformPeriodic
+	}
 	remoteIP, _ := netip.ParseAddr(strings.TrimSpace(observation.RemoteIP))
 	remoteIP = remoteIP.WithZone("").Unmap()
+	technology, rfControlPaths := devicepkg.CandidateRFIdentitySnapshot(observation)
+	asset, err := g.assets.Resolve(ctx, carrierCode, serialNumber)
+	if err != nil {
+		return devicepkg.AccessDecision{}, fmt.Errorf("resolve device access asset: %w", err)
+	}
 	candidate, err := g.repository.UpsertCandidateObservation(ctx, Observation{
 		Carrier:         carrierCode,
 		SerialNumber:    serialNumber,
+		DeviceID:        asset.DeviceID,
 		OUI:             observation.OUI,
 		ProductClass:    observation.ProductClass,
 		SoftwareVersion: observation.SoftwareVersion,
+		Technology:      technology,
+		RFControlPaths:  rfControlPaths,
 		RemoteIP:        remoteIP,
 		ObservedAt:      evaluatedAt,
 		ExpiresAt:       evaluatedAt.Add(candidateObservationTTL),
 	})
 	if err != nil {
 		return devicepkg.AccessDecision{}, fmt.Errorf("observe device access candidate: %w", err)
-	}
-
-	asset, err := g.assets.Resolve(ctx, carrierCode, serialNumber)
-	if err != nil {
-		return devicepkg.AccessDecision{}, fmt.Errorf("resolve device access asset: %w", err)
 	}
 	context, err := g.repository.LoadEvaluationContext(ctx, carrierCode, serialNumber)
 	if err != nil {
@@ -121,11 +129,14 @@ func (g *AccessGate) admit(ctx context.Context, observation devicepkg.AccessObse
 	baseInput := EvaluationInput{
 		Carrier:                carrierCode,
 		SerialNumber:           serialNumber,
+		OUI:                    observation.OUI,
+		ProductClass:           observation.ProductClass,
 		AuthenticationRequired: accessAuthenticationRequired(observation.AuthMethod),
 		Authenticated:          observation.Authenticated,
 		AssetRetired:           asset.AssetRetired,
 		ExistingState:          existingState,
 		EvaluatedAt:            evaluatedAt,
+		CollectionDeadline:     collectionDeadline(context.State),
 		Evidence:               evidenceSetFromContext(context, asset, evaluatedAt),
 		Policy:                 policy,
 	}
@@ -158,12 +169,10 @@ func (g *AccessGate) admit(ctx context.Context, observation devicepkg.AccessObse
 	probeNeeds, shouldProbe := accessProbeNeeds(context, decision, evaluatedAt)
 	unchanged := decisionUnchanged(context, decision, policy.VersionID) &&
 		projectionOwnerUnchanged(context.State, asset.DeviceID)
-	if unchanged && !shouldProbe {
-		return devicepkg.AccessDecision{
-			State:      string(decision.State),
-			ReasonCode: string(decision.ReasonCode),
-		}, nil
-	}
+	identitySnapshot := buildIdentitySnapshot(
+		observation, asset, candidate, decision, "", evaluatedAt,
+	)
+	var savedDecisionID string
 	if !unchanged {
 		policyVersionID, err := policyVersionUUID(policy.VersionID)
 		if err != nil {
@@ -182,6 +191,7 @@ func (g *AccessGate) admit(ctx context.Context, observation devicepkg.AccessObse
 			EvidenceVersion   int64       `json:"evidence_version"`
 			NormalTasksFrozen bool        `json:"normal_tasks_frozen"`
 			PublishedAt       time.Time   `json:"published_at"`
+			TriggerType       string      `json:"trigger_type"`
 		}{
 			SerialNumber:      serialNumber,
 			Carrier:           carrierCode,
@@ -195,35 +205,52 @@ func (g *AccessGate) admit(ctx context.Context, observation devicepkg.AccessObse
 			EvidenceVersion:   context.Evidence.Version,
 			NormalTasksFrozen: decision.FreezeNormal,
 			PublishedAt:       evaluatedAt,
+			TriggerType:       triggerType,
 		})
 		if err != nil {
 			return devicepkg.AccessDecision{}, fmt.Errorf("encode device access decision event: %w", err)
 		}
 		var candidateID *uuid.UUID
-		if candidate.ID != uuid.Nil {
+		if asset.DeviceID == nil && candidate.ID != uuid.Nil {
 			candidateID = &candidate.ID
 		}
-		if _, err := g.repository.SaveDecision(ctx, DecisionChange{
+		saved, err := g.repository.SaveDecision(ctx, DecisionChange{
 			Carrier:                 carrierCode,
 			SerialNumber:            serialNumber,
 			DeviceID:                asset.DeviceID,
 			CandidateID:             candidateID,
-			TriggerType:             "inform",
+			TriggerType:             triggerType,
 			TriggerEventID:          observation.EventID,
 			ExpectedDecisionVersion: decisionVersion(context),
 			PolicyVersionID:         policyVersionID,
 			EvidenceVersion:         context.Evidence.Version,
 			OccurredAt:              evaluatedAt,
+			DecisionExpiresAt:       nextDecisionDeadline(context.State, decision, policy, evaluatedAt),
 			Decision:                decision,
 			Evidence:                evidence,
+			IdentitySnapshot:        &identitySnapshot,
 			Outbox: OutboxEvent{
 				EventType: decisionEventType(decision.State),
 				EventKey:  fmt.Sprintf("device-access:%s:%s:%s", carrierCode, serialNumber, observation.EventID),
 				Payload:   payload,
 			},
-		}); err != nil {
+		})
+		if err != nil {
 			return devicepkg.AccessDecision{}, fmt.Errorf("save device access decision: %w", err)
 		}
+		savedDecisionID = saved.ID.String()
+	}
+	if unchanged {
+		identitySnapshot.DecisionID = savedDecisionID
+		if err := g.repository.SaveIdentitySnapshot(ctx, identitySnapshot); err != nil {
+			return devicepkg.AccessDecision{}, fmt.Errorf("save inform identity snapshot: %w", err)
+		}
+	}
+	if unchanged && !shouldProbe {
+		return devicepkg.AccessDecision{
+			State:      string(decision.State),
+			ReasonCode: string(decision.ReasonCode),
+		}, nil
 	}
 	// The access projection and its evidence must become durable before a task
 	// is enqueued. Besides preserving the reason for a failed path resolution,
@@ -253,6 +280,61 @@ func (g *AccessGate) admit(ctx context.Context, observation devicepkg.AccessObse
 	}, nil
 }
 
+func buildIdentitySnapshot(
+	observation devicepkg.AccessObservation,
+	asset AssetEvidence,
+	candidate Candidate,
+	decision Decision,
+	decisionID string,
+	observedAt time.Time,
+) IdentitySnapshot {
+	identityResult := identityCheckResult(observation, asset)
+	status := IdentityStatusResolved
+	reason := ReasonCode("")
+	switch identityResult {
+	case CheckFailed:
+		status = IdentityStatusConflict
+		reason = ReasonIdentityMismatch
+	case CheckMissing:
+		status = IdentityStatusUnresolved
+		reason = identityMissingReason(observation)
+	}
+	if decision.ReasonCode == ReasonOwnershipMismatch {
+		status = IdentityStatusConflict
+		reason = ReasonOwnershipMismatch
+	}
+	remoteIP := net.ParseIP(strings.TrimSpace(observation.RemoteIP))
+	snapshot := IdentitySnapshot{
+		ID:                 uuid.NewString(),
+		RequestID:          strings.TrimSpace(observation.EventID),
+		DecisionID:         decisionID,
+		Carrier:            strings.TrimSpace(string(observation.Carrier)),
+		SerialNumber:       strings.TrimSpace(observation.SerialNumber),
+		DeviceCode:         strings.TrimSpace(observation.DeviceCode),
+		CloudKey:           strings.TrimSpace(observation.CloudKey),
+		OUI:                strings.ToUpper(strings.TrimSpace(observation.OUI)),
+		ProductClass:       strings.TrimSpace(observation.ProductClass),
+		RawRemoteIP:        remoteIP,
+		ObservedRemoteIP:   remoteIP,
+		InformEvent:        strings.TrimSpace(observation.InformEvent),
+		InformTime:         observedAt,
+		IdentitySource:     "inform_device_id",
+		IdentityStatus:     status,
+		IdentityReasonCode: reason,
+		CreatedAt:          observedAt,
+	}
+	if snapshot.DeviceCode == "" && asset.SiteID != nil {
+		snapshot.DeviceCode = strings.TrimSpace(*asset.SiteID)
+	}
+	if asset.DeviceID != nil {
+		snapshot.DeviceID = asset.DeviceID.String()
+	}
+	if candidate.ID != uuid.Nil {
+		snapshot.CandidateID = candidate.ID.String()
+	}
+	return snapshot
+}
+
 func projectionOwnerUnchanged(state *AccessStateProjection, deviceID *uuid.UUID) bool {
 	if state == nil || deviceID == nil {
 		return true
@@ -271,6 +353,8 @@ type accessCheckEvidence struct {
 	CredentialStatus     CredentialStatus    `json:"credential_status,omitempty"`
 	AuthMethod           string              `json:"auth_method,omitempty"`
 	CredentialID         string              `json:"credential_id,omitempty"`
+	DeviceCode           string              `json:"device_code,omitempty"`
+	CloudKey             string              `json:"cloud_key,omitempty"`
 }
 
 func buildInformEvidence(
@@ -312,6 +396,8 @@ func buildInformEvidence(
 				ObservedProductClass: strings.TrimSpace(observation.ProductClass),
 				ExpectedOUI:          asset.ExpectedOUI,
 				ExpectedProductClass: asset.ExpectedProductClass,
+				DeviceCode:           strings.TrimSpace(observation.DeviceCode),
+				CloudKey:             strings.TrimSpace(observation.CloudKey),
 			},
 		},
 		{
@@ -403,6 +489,17 @@ func failedCheckEvidenceRefreshed(decision Decision, previous, current EvidenceB
 }
 
 func identityCheckResult(observation devicepkg.AccessObservation, asset AssetEvidence) CheckResult {
+	if observation.DeviceCodeRequired && strings.TrimSpace(observation.DeviceCode) == "" {
+		return CheckMissing
+	}
+	if observation.CloudKeyRequired && strings.TrimSpace(observation.CloudKey) == "" {
+		return CheckMissing
+	}
+	if observation.DeviceCodeRequired && asset.SiteID != nil &&
+		strings.TrimSpace(observation.DeviceCode) != "" &&
+		strings.TrimSpace(observation.DeviceCode) != strings.TrimSpace(*asset.SiteID) {
+		return CheckFailed
+	}
 	observedOUI := strings.ToUpper(strings.TrimSpace(observation.OUI))
 	observedProductClass := strings.TrimSpace(observation.ProductClass)
 	expectedOUI := strings.ToUpper(strings.TrimSpace(asset.ExpectedOUI))
@@ -422,6 +519,16 @@ func identityCheckResult(observation devicepkg.AccessObservation, asset AssetEvi
 		return CheckPassed
 	}
 	return CheckMissing
+}
+
+func identityMissingReason(observation devicepkg.AccessObservation) ReasonCode {
+	if observation.DeviceCodeRequired && strings.TrimSpace(observation.DeviceCode) == "" {
+		return ReasonDeviceCodeMissing
+	}
+	if observation.CloudKeyRequired && strings.TrimSpace(observation.CloudKey) == "" {
+		return ReasonCloudKeyMissing
+	}
+	return ReasonIdentityUnverified
 }
 
 func evidenceStatusForCheck(result CheckResult) EvidenceStatus {
@@ -457,13 +564,14 @@ func accessProbeNeeds(context EvaluationContext, decision Decision, now time.Tim
 	isCollecting := decision.State == AccessStateCollecting &&
 		(decision.ReasonCode == ReasonEvidenceMissing ||
 			decision.ReasonCode == ReasonEvidenceStale ||
-			decision.ReasonCode == ReasonEvidenceCollectionFailed)
+			decision.ReasonCode == ReasonEvidenceCollectionFailed ||
+			decision.ReasonCode == ReasonEvidenceSystemError)
 	isConfirmingMismatch := decision.State == AccessStateRevalidating &&
 		decision.ReasonCode == ReasonRuleMismatchPendingConfirmation
 	if !isCollecting && !isConfirmingMismatch {
 		return accessProbeRequirement{}, false
 	}
-	collectionRetryDue := decision.ReasonCode == ReasonEvidenceCollectionFailed &&
+	collectionRetryDue := (decision.ReasonCode == ReasonEvidenceCollectionFailed || decision.ReasonCode == ReasonEvidenceSystemError) &&
 		failedEvidenceRetryDue(context.Evidence.Records, now)
 	if !collectionRetryDue && decision.ReasonCode != ReasonEvidenceMissing && context.State != nil &&
 		context.State.State == decision.State &&
@@ -474,7 +582,7 @@ func accessProbeNeeds(context EvaluationContext, decision Decision, now time.Tim
 	for _, check := range decision.Checks {
 		if check.Result != CheckMissing && check.Result != CheckStale &&
 			!(isConfirmingMismatch && check.Result == CheckFailed) &&
-			!(check.Result == CheckError && check.ReasonCode == ReasonEvidenceCollectionFailed) {
+			!(check.Result == CheckError && (check.ReasonCode == ReasonEvidenceCollectionFailed || check.ReasonCode == ReasonEvidenceSystemError)) {
 			continue
 		}
 		switch check.CheckType {
@@ -492,7 +600,7 @@ func accessProbeNeeds(context EvaluationContext, decision Decision, now time.Tim
 func failedEvidenceRetryDue(records []EvidenceRecord, now time.Time) bool {
 	var latest time.Time
 	for _, record := range records {
-		if record.Status == EvidenceStatusCollectionFailed && record.ObservedAt.After(latest) {
+		if (record.Status == EvidenceStatusCollectionFailed || record.Status == EvidenceStatusSystemError) && record.ObservedAt.After(latest) {
 			latest = record.ObservedAt
 		}
 	}
@@ -500,6 +608,32 @@ func failedEvidenceRetryDue(records []EvidenceRecord, now time.Time) bool {
 }
 
 const candidateObservationTTL = 24 * time.Hour
+
+const defaultEvidenceCollectionTimeout = 15 * time.Minute
+
+func collectionDeadline(state *AccessStateProjection) *time.Time {
+	if state == nil || state.DecisionExpiresAt == nil {
+		return nil
+	}
+	value := state.DecisionExpiresAt.UTC()
+	return &value
+}
+
+func nextDecisionDeadline(state *AccessStateProjection, decision Decision, policy CompiledPolicy, now time.Time) *time.Time {
+	if decision.State != AccessStateCollecting {
+		return nil
+	}
+	if state != nil && state.State == AccessStateCollecting && state.DecisionExpiresAt != nil {
+		value := state.DecisionExpiresAt.UTC()
+		return &value
+	}
+	timeout := policy.CollectionTimeout
+	if timeout <= 0 {
+		timeout = defaultEvidenceCollectionTimeout
+	}
+	value := now.UTC().Add(timeout)
+	return &value
+}
 
 var ErrAccessGateDependencyMissing = fmt.Errorf("device access gate dependency missing")
 
