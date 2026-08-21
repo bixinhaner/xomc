@@ -18,9 +18,10 @@ import (
 )
 
 type RollupOutboxRecord struct {
-	EventID uuid.UUID
-	Subject string
-	Payload RollupPayload
+	EventID    uuid.UUID
+	Subject    string
+	Payload    RollupPayload
+	ClaimToken uuid.UUID
 }
 
 var maxRollupEventBytes = DefaultConfig().MaxEventBytes
@@ -330,6 +331,9 @@ func insertRollupTxWithEligibility(
 			window_start = EXCLUDED.window_start,
 			published_at = NULL,
 			consumed_at = NULL,
+			claim_token = NULL,
+			claim_expires_at = NULL,
+			next_attempt_at = '-infinity'::timestamptz,
 			barrier_eligible = EXCLUDED.barrier_eligible,
 			revision = EXCLUDED.revision,
 			publish_attempts = 0,
@@ -415,25 +419,39 @@ func (r *RollupOutboxRepository) RequeueStaleUnconsumed(
 	return tag.RowsAffected(), nil
 }
 
-func (r *RollupOutboxRepository) lockBatch(
+func (r *RollupOutboxRepository) ClaimBatch(
 	ctx context.Context,
-	tx pgx.Tx,
 	limit uint64,
+	now time.Time,
+	lease time.Duration,
 ) ([]RollupOutboxRecord, error) {
 	if limit == 0 {
 		limit = 1
 	}
+	if now.IsZero() {
+		return nil, fmt.Errorf("claim PM rollup outbox batch: current time is required")
+	}
+	if lease <= 0 {
+		return nil, fmt.Errorf("claim PM rollup outbox batch: lease must be positive")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin PM rollup outbox claim tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	query, args, err := pendingRollupOutboxSelect("event_id", "subject", "payload").
+		Where(outboxClaimDue(now, "rollup")).
 		OrderBy("rollup.created_at", "rollup.event_id").
 		Limit(limit).
 		Suffix("FOR UPDATE SKIP LOCKED").
 		ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("build lock PM rollup outbox SQL: %w", err)
+		return nil, fmt.Errorf("build claim PM rollup outbox SQL: %w", err)
 	}
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("lock PM rollup outbox: %w", err)
+		return nil, fmt.Errorf("claim PM rollup outbox: %w", err)
 	}
 	defer rows.Close()
 	out := make([]RollupOutboxRecord, 0, limit)
@@ -441,14 +459,48 @@ func (r *RollupOutboxRepository) lockBatch(
 		var record RollupOutboxRecord
 		var raw []byte
 		if err := rows.Scan(&record.EventID, &record.Subject, &raw); err != nil {
-			return nil, fmt.Errorf("scan PM rollup outbox: %w", err)
+			return nil, fmt.Errorf("scan PM rollup outbox claim: %w", err)
 		}
 		if err := json.Unmarshal(raw, &record.Payload); err != nil {
-			return nil, fmt.Errorf("decode PM rollup outbox: %w", err)
+			return nil, fmt.Errorf("decode PM rollup outbox claim: %w", err)
 		}
 		out = append(out, record)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit empty PM rollup outbox claim: %w", err)
+		}
+		return nil, nil
+	}
+	ids := make([]uuid.UUID, 0, len(out))
+	claimToken := uuid.New()
+	claimExpiresAt := now.Add(lease)
+	for i := range out {
+		ids = append(ids, out[i].EventID)
+		out[i].ClaimToken = claimToken
+	}
+	update, updateArgs, err := storage.Psql.Update("pm_aggregation_rollup_outbox").
+		Set("claim_token", claimToken).
+		Set("claim_expires_at", claimExpiresAt).
+		Where(sq.Eq{"event_id": ids}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build mark PM rollup outbox claimed SQL: %w", err)
+	}
+	tag, err := tx.Exec(ctx, update, updateArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("mark PM rollup outbox claimed: %w", err)
+	}
+	if tag.RowsAffected() != int64(len(out)) {
+		return nil, fmt.Errorf("claim PM rollup outbox batch: claimed %d rows, want %d", tag.RowsAffected(), len(out))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit PM rollup outbox claim: %w", err)
+	}
+	return out, nil
 }
 
 func pendingRollupOutboxSelect(columns ...string) sq.SelectBuilder {
@@ -469,31 +521,44 @@ func pendingRollupOutboxSelect(columns ...string) sq.SelectBuilder {
 		Where(sq.Eq{"rollup.barrier_eligible": true})
 }
 
-func markRollupPublished(ctx context.Context, tx pgx.Tx, eventID uuid.UUID) error {
-	query, args, err := storage.Psql.Update("pm_aggregation_rollup_outbox").
-		Set("published_at", time.Now().UTC()).
-		Set("publish_attempts", sq.Expr("publish_attempts + 1")).
-		Set("last_error", nil).
-		Where(sq.Eq{"event_id": eventID}).
-		ToSql()
+func (r *RollupOutboxRepository) MarkPublished(
+	ctx context.Context,
+	eventID uuid.UUID,
+	claimToken uuid.UUID,
+	now time.Time,
+) (bool, error) {
+	query, args, err := markOutboxPublishedUpdate(
+		"pm_aggregation_rollup_outbox", eventID, claimToken, now,
+	).ToSql()
 	if err != nil {
-		return err
+		return false, err
 	}
-	_, err = tx.Exec(ctx, query, args...)
-	return err
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
-func markRollupFailed(ctx context.Context, tx pgx.Tx, eventID uuid.UUID, publishErr error) error {
-	query, args, err := storage.Psql.Update("pm_aggregation_rollup_outbox").
-		Set("publish_attempts", sq.Expr("publish_attempts + 1")).
-		Set("last_error", publishErr.Error()).
-		Where(sq.Eq{"event_id": eventID}).
-		ToSql()
+func (r *RollupOutboxRepository) MarkFailed(
+	ctx context.Context,
+	eventID uuid.UUID,
+	claimToken uuid.UUID,
+	publishErr error,
+	now time.Time,
+	retryAfter time.Duration,
+) (bool, error) {
+	query, args, err := markOutboxFailedUpdate(
+		"pm_aggregation_rollup_outbox", eventID, claimToken, publishErr, now, retryAfter,
+	).ToSql()
 	if err != nil {
-		return err
+		return false, err
 	}
-	_, err = tx.Exec(ctx, query, args...)
-	return err
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 func (r *RollupOutboxRepository) ListSnapshots(
@@ -698,14 +763,23 @@ func visitSnapshotsForRebuildBatch(
 }
 
 type RollupOutboxRelay struct {
-	repo            *RollupOutboxRepository
+	repo            rollupOutboxRelayRepository
 	bus             event.EventBus
 	logger          *zap.Logger
 	metrics         *Metrics
 	batch           int
 	interval        time.Duration
+	claimLease      time.Duration
+	retryAfter      time.Duration
 	redeliveryAfter time.Duration
 	redeliveryEvery time.Duration
+}
+
+type rollupOutboxRelayRepository interface {
+	ClaimBatch(context.Context, uint64, time.Time, time.Duration) ([]RollupOutboxRecord, error)
+	MarkPublished(context.Context, uuid.UUID, uuid.UUID, time.Time) (bool, error)
+	MarkFailed(context.Context, uuid.UUID, uuid.UUID, error, time.Time, time.Duration) (bool, error)
+	RequeueStaleUnconsumed(context.Context, time.Time) (int64, error)
 }
 
 func NewRollupOutboxRelay(
@@ -718,6 +792,8 @@ func NewRollupOutboxRelay(
 	}
 	return &RollupOutboxRelay{
 		repo: repo, bus: bus, logger: logger, batch: 100, interval: 200 * time.Millisecond,
+		claimLease:      30 * time.Second,
+		retryAfter:      time.Second,
 		redeliveryAfter: 5 * time.Minute, redeliveryEvery: time.Minute,
 	}
 }
@@ -778,12 +854,7 @@ func (r *RollupOutboxRelay) requeueStale(ctx context.Context) {
 }
 
 func (r *RollupOutboxRelay) publishBatch(ctx context.Context) (bool, error) {
-	tx, err := r.repo.pool.Begin(ctx)
-	if err != nil {
-		return false, fmt.Errorf("begin PM rollup outbox tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	rows, err := r.repo.lockBatch(ctx, tx, uint64(r.batch))
+	rows, err := r.repo.ClaimBatch(ctx, uint64(r.batch), time.Now().UTC(), r.claimLease)
 	if err != nil {
 		return false, err
 	}
@@ -799,19 +870,26 @@ func (r *RollupOutboxRelay) publishBatch(ctx context.Context) (bool, error) {
 		}
 		envelope.ID = row.EventID.String()
 		if publishErr := r.bus.Publish(ctx, row.Subject, envelope); publishErr != nil {
-			if markErr := markRollupFailed(ctx, tx, row.EventID, publishErr); markErr != nil {
+			ok, markErr := r.repo.MarkFailed(
+				ctx, row.EventID, row.ClaimToken, publishErr, time.Now().UTC(), r.retryAfter,
+			)
+			if markErr != nil {
 				return false, errors.Join(publishErr, markErr)
+			}
+			if !ok {
+				return false, errors.Join(publishErr, fmt.Errorf("PM rollup outbox claim ownership lost for %s", row.EventID))
 			}
 			publishErrors = append(publishErrors, publishErr)
 			continue
 		}
-		if err := markRollupPublished(ctx, tx, row.EventID); err != nil {
+		ok, err := r.repo.MarkPublished(ctx, row.EventID, row.ClaimToken, time.Now().UTC())
+		if err != nil {
 			return false, err
 		}
+		if !ok {
+			return false, fmt.Errorf("PM rollup outbox claim ownership lost for %s", row.EventID)
+		}
 		publishedCount++
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return false, err
 	}
 	if r.metrics != nil {
 		r.metrics.RollupOutboxPublishedTotal.Add(float64(publishedCount))

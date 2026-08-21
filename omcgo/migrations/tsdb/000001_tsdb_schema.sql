@@ -1496,7 +1496,10 @@ ALTER TABLE public.pm_aggregation_outbox
     ADD COLUMN event_window_end timestamptz,
     ADD COLUMN device_id uuid,
     ADD COLUMN consumed_at timestamptz,
-    ADD COLUMN barrier_eligible boolean;
+    ADD COLUMN barrier_eligible boolean,
+    ADD COLUMN claim_token uuid,
+    ADD COLUMN claim_expires_at timestamptz,
+    ADD COLUMN next_attempt_at timestamptz NOT NULL DEFAULT '-infinity';
 
 UPDATE public.pm_aggregation_outbox
 SET event_window_start = (payload->>'window_start')::timestamptz,
@@ -1518,13 +1521,19 @@ ALTER TABLE public.pm_aggregation_outbox
 CREATE INDEX idx_pm_aggregation_outbox_consume_barrier
     ON public.pm_aggregation_outbox (event_window_start, created_at)
     WHERE consumed_at IS NULL AND barrier_eligible;
+CREATE INDEX idx_pm_aggregation_outbox_claim_due
+    ON public.pm_aggregation_outbox (next_attempt_at, created_at, event_id)
+    WHERE published_at IS NULL AND consumed_at IS NULL;
 CREATE INDEX idx_pm_aggregation_outbox_device_period_replay
     ON public.pm_aggregation_outbox (device_id, event_window_start, event_id)
     WHERE NOT barrier_eligible;
 
 ALTER TABLE public.pm_aggregation_rollup_outbox
     ADD COLUMN consumed_at timestamptz,
-    ADD COLUMN barrier_eligible boolean;
+    ADD COLUMN barrier_eligible boolean,
+    ADD COLUMN claim_token uuid,
+    ADD COLUMN claim_expires_at timestamptz,
+    ADD COLUMN next_attempt_at timestamptz NOT NULL DEFAULT '-infinity';
 
 UPDATE public.pm_aggregation_rollup_outbox
 SET barrier_eligible = false;
@@ -1541,6 +1550,9 @@ CREATE INDEX idx_pm_rollup_outbox_publication
 CREATE INDEX idx_pm_aggregation_rollup_consume_barrier
     ON public.pm_aggregation_rollup_outbox (subject, window_start)
     WHERE consumed_at IS NULL AND barrier_eligible;
+CREATE INDEX idx_pm_aggregation_rollup_claim_due
+    ON public.pm_aggregation_rollup_outbox (next_attempt_at, created_at, event_id)
+    WHERE published_at IS NULL AND consumed_at IS NULL AND barrier_eligible;
 
 ALTER TABLE public.pm_aggregation_windows
     ADD COLUMN revision integer NOT NULL DEFAULT 1,

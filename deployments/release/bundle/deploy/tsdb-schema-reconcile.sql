@@ -184,4 +184,37 @@ END
 $pm_replay_reconcile$;
 -- +goose StatementEnd
 
+-- #361: PM outbox relay claims rows in a short transaction and publishes to
+-- NATS outside the database transaction. Existing baseline-1 databases need
+-- the lease columns because goose will not re-run the consolidated migration.
+ALTER TABLE public.pm_aggregation_outbox
+    ADD COLUMN IF NOT EXISTS claim_token uuid,
+    ADD COLUMN IF NOT EXISTS claim_expires_at timestamptz,
+    ADD COLUMN IF NOT EXISTS next_attempt_at timestamptz NOT NULL DEFAULT '-infinity';
+ALTER TABLE public.pm_aggregation_rollup_outbox
+    ADD COLUMN IF NOT EXISTS claim_token uuid,
+    ADD COLUMN IF NOT EXISTS claim_expires_at timestamptz,
+    ADD COLUMN IF NOT EXISTS next_attempt_at timestamptz NOT NULL DEFAULT '-infinity';
+
+UPDATE public.pm_aggregation_outbox
+SET next_attempt_at = '-infinity'
+WHERE next_attempt_at IS NULL;
+UPDATE public.pm_aggregation_rollup_outbox
+SET next_attempt_at = '-infinity'
+WHERE next_attempt_at IS NULL;
+
+ALTER TABLE public.pm_aggregation_outbox
+    ALTER COLUMN next_attempt_at SET DEFAULT '-infinity',
+    ALTER COLUMN next_attempt_at SET NOT NULL;
+ALTER TABLE public.pm_aggregation_rollup_outbox
+    ALTER COLUMN next_attempt_at SET DEFAULT '-infinity',
+    ALTER COLUMN next_attempt_at SET NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_outbox_claim_due
+    ON public.pm_aggregation_outbox (next_attempt_at, created_at, event_id)
+    WHERE published_at IS NULL AND consumed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_rollup_claim_due
+    ON public.pm_aggregation_rollup_outbox (next_attempt_at, created_at, event_id)
+    WHERE published_at IS NULL AND consumed_at IS NULL AND barrier_eligible;
+
 COMMIT;

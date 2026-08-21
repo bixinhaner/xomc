@@ -19,6 +19,7 @@ type OutboxRecord struct {
 	SourceFileID uuid.UUID
 	Payload      event.PMAggregationNormalizedPayload
 	CreatedAt    time.Time
+	ClaimToken   uuid.UUID
 }
 
 type OutboxRepository struct {
@@ -28,6 +29,9 @@ type OutboxRepository struct {
 func staleBarrierRedeliveryUpdate(table string, before time.Time) sq.UpdateBuilder {
 	return storage.Psql.Update(table).
 		Set("published_at", nil).
+		Set("claim_token", nil).
+		Set("claim_expires_at", nil).
+		Set("next_attempt_at", sq.Expr("'-infinity'::timestamptz")).
 		Set("last_error", nil).
 		Where("published_at IS NOT NULL").
 		Where("consumed_at IS NULL").
@@ -38,6 +42,65 @@ func staleBarrierRedeliveryUpdate(table string, before time.Time) sq.UpdateBuild
 func pendingOutboxSelect(table string, columns ...string) sq.SelectBuilder {
 	return storage.Psql.Select(columns...).
 		From(table).
+		Where("published_at IS NULL").
+		Where("consumed_at IS NULL")
+}
+
+func outboxClaimDue(now time.Time, prefix string) sq.Sqlizer {
+	column := func(name string) string {
+		if prefix == "" {
+			return name
+		}
+		return prefix + "." + name
+	}
+	return sq.And{
+		sq.LtOrEq{column("next_attempt_at"): now},
+		sq.Or{
+			sq.Eq{column("claim_token"): nil},
+			sq.Eq{column("claim_expires_at"): nil},
+			sq.LtOrEq{column("claim_expires_at"): now},
+		},
+	}
+}
+
+func markOutboxPublishedUpdate(
+	table string,
+	eventID uuid.UUID,
+	claimToken uuid.UUID,
+	now time.Time,
+) sq.UpdateBuilder {
+	return storage.Psql.Update(table).
+		Set("published_at", now).
+		Set("publish_attempts", sq.Expr("publish_attempts + 1")).
+		Set("last_error", nil).
+		Set("claim_token", nil).
+		Set("claim_expires_at", nil).
+		Where(sq.Eq{"event_id": eventID, "claim_token": claimToken}).
+		Where(sq.Gt{"claim_expires_at": now}).
+		Where("published_at IS NULL").
+		Where("consumed_at IS NULL")
+}
+
+func markOutboxFailedUpdate(
+	table string,
+	eventID uuid.UUID,
+	claimToken uuid.UUID,
+	publishErr error,
+	now time.Time,
+	retryAfter time.Duration,
+) sq.UpdateBuilder {
+	nextAttemptAt := now
+	if retryAfter > 0 {
+		nextAttemptAt = now.Add(retryAfter)
+	}
+	return storage.Psql.Update(table).
+		Set("publish_attempts", sq.Expr("publish_attempts + 1")).
+		Set("last_error", publishErr.Error()).
+		Set("claim_token", nil).
+		Set("claim_expires_at", nil).
+		Set("next_attempt_at", nextAttemptAt).
+		Where(sq.Eq{"event_id": eventID, "claim_token": claimToken}).
+		Where(sq.Gt{"claim_expires_at": now}).
 		Where("published_at IS NULL").
 		Where("consumed_at IS NULL")
 }
@@ -122,25 +185,32 @@ func (r *OutboxRepository) RequeueStaleUnconsumed(
 	return tag.RowsAffected(), nil
 }
 
-func (r *OutboxRepository) lockNext(ctx context.Context, tx pgx.Tx) (*OutboxRecord, error) {
-	rows, err := r.lockBatch(ctx, tx, 1)
-	if err != nil {
-		return nil, err
-	}
-	if len(rows) == 0 {
-		return nil, pgx.ErrNoRows
-	}
-	return rows[0], nil
-}
-
-func (r *OutboxRepository) lockBatch(ctx context.Context, tx pgx.Tx, limit uint64) ([]*OutboxRecord, error) {
+func (r *OutboxRepository) ClaimBatch(
+	ctx context.Context,
+	limit uint64,
+	now time.Time,
+	lease time.Duration,
+) ([]*OutboxRecord, error) {
 	if limit == 0 {
 		limit = 1
 	}
+	if now.IsZero() {
+		return nil, fmt.Errorf("claim PM aggregation outbox batch: current time is required")
+	}
+	if lease <= 0 {
+		return nil, fmt.Errorf("claim PM aggregation outbox batch: lease must be positive")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin PM aggregation outbox claim tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	query, args, err := pendingOutboxSelect(
 		"pm_aggregation_outbox",
 		"event_id", "source_file_id", "payload", "created_at",
 	).
+		Where(outboxClaimDue(now, "")).
 		OrderBy("created_at", "event_id").
 		Limit(limit).
 		Suffix("FOR UPDATE SKIP LOCKED").
@@ -168,38 +238,78 @@ func (r *OutboxRepository) lockBatch(ctx context.Context, tx pgx.Tx, limit uint6
 	if err := dbRows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate PM aggregation outbox batch: %w", err)
 	}
+	if len(records) == 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit empty PM aggregation outbox claim: %w", err)
+		}
+		return nil, nil
+	}
+	ids := make([]uuid.UUID, 0, len(records))
+	claimToken := uuid.New()
+	claimExpiresAt := now.Add(lease)
+	for _, record := range records {
+		ids = append(ids, record.EventID)
+		record.ClaimToken = claimToken
+	}
+	update, updateArgs, err := storage.Psql.Update("pm_aggregation_outbox").
+		Set("claim_token", claimToken).
+		Set("claim_expires_at", claimExpiresAt).
+		Where(sq.Eq{"event_id": ids}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build claim PM aggregation outbox batch SQL: %w", err)
+	}
+	tag, err := tx.Exec(ctx, update, updateArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("claim PM aggregation outbox batch: %w", err)
+	}
+	if tag.RowsAffected() != int64(len(records)) {
+		return nil, fmt.Errorf("claim PM aggregation outbox batch: claimed %d rows, want %d", tag.RowsAffected(), len(records))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit PM aggregation outbox claim: %w", err)
+	}
 	return records, nil
 }
 
-func markOutboxPublished(ctx context.Context, tx pgx.Tx, eventID uuid.UUID) error {
-	query, args, err := storage.Psql.Update("pm_aggregation_outbox").
-		Set("published_at", time.Now().UTC()).
-		Set("publish_attempts", sq.Expr("publish_attempts + 1")).
-		Set("last_error", nil).
-		Where(sq.Eq{"event_id": eventID}).
-		ToSql()
+func (r *OutboxRepository) MarkPublished(
+	ctx context.Context,
+	eventID uuid.UUID,
+	claimToken uuid.UUID,
+	now time.Time,
+) (bool, error) {
+	query, args, err := markOutboxPublishedUpdate(
+		"pm_aggregation_outbox", eventID, claimToken, now,
+	).ToSql()
 	if err != nil {
-		return fmt.Errorf("build mark outbox published SQL: %w", err)
+		return false, fmt.Errorf("build mark outbox published SQL: %w", err)
 	}
-	if _, err := tx.Exec(ctx, query, args...); err != nil {
-		return fmt.Errorf("mark PM aggregation outbox published: %w", err)
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return false, fmt.Errorf("mark PM aggregation outbox published: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() == 1, nil
 }
 
-func markOutboxFailed(ctx context.Context, tx pgx.Tx, eventID uuid.UUID, publishErr error) error {
-	query, args, err := storage.Psql.Update("pm_aggregation_outbox").
-		Set("publish_attempts", sq.Expr("publish_attempts + 1")).
-		Set("last_error", publishErr.Error()).
-		Where(sq.Eq{"event_id": eventID}).
-		ToSql()
+func (r *OutboxRepository) MarkFailed(
+	ctx context.Context,
+	eventID uuid.UUID,
+	claimToken uuid.UUID,
+	publishErr error,
+	now time.Time,
+	retryAfter time.Duration,
+) (bool, error) {
+	query, args, err := markOutboxFailedUpdate(
+		"pm_aggregation_outbox", eventID, claimToken, publishErr, now, retryAfter,
+	).ToSql()
 	if err != nil {
-		return fmt.Errorf("build mark outbox failed SQL: %w", err)
+		return false, fmt.Errorf("build mark outbox failed SQL: %w", err)
 	}
-	if _, err := tx.Exec(ctx, query, args...); err != nil {
-		return fmt.Errorf("mark PM aggregation outbox failed: %w", err)
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return false, fmt.Errorf("mark PM aggregation outbox failed: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() == 1, nil
 }
 
 func devicePeriodReplaySelect(
