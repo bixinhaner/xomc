@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 // pgURL 返回测试用的 PG DSN。优先 TEST_PG_URL 环境变量；回退到本地 docker-compose 默认。
@@ -87,6 +90,34 @@ func cleanupTestTasks(t *testing.T, pool *pgxpool.Pool) {
 		testDeviceSNPrefix+"%")
 }
 
+func explainText(t *testing.T, pool *pgxpool.Pool, query string, args ...any) string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), query, args...)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		require.NoError(t, rows.Scan(&line))
+		plan.WriteString(line)
+		plan.WriteByte('\n')
+	}
+	require.NoError(t, rows.Err())
+	return plan.String()
+}
+
+func deviceTaskPartitionsInPlan(plan string) map[string]struct{} {
+	partitions := make(map[string]struct{})
+	for i := 0; i < 16; i++ {
+		name := fmt.Sprintf("device_tasks_p%02d", i)
+		if strings.Contains(plan, name) {
+			partitions[name] = struct{}{}
+		}
+	}
+	return partitions
+}
+
 // ---- Helpers ----
 
 func TestPgRepo_NilUUID(t *testing.T) {
@@ -101,6 +132,33 @@ func TestPgRepo_TaskColumns(t *testing.T) {
 	assert.Contains(t, cols, "device_sn")
 	assert.Contains(t, cols, "method")
 	assert.Contains(t, cols, "status")
+}
+
+func TestPgRepo_TaskIdentityWhereCarriesDevicePartitionKey(t *testing.T) {
+	query, args, err := storage.Psql.Select("id").
+		From("device_tasks").
+		Where(taskIdentityWhere("task-1", "SN-1")).
+		ToSql()
+	require.NoError(t, err)
+
+	require.Contains(t, query, "id =")
+	require.Contains(t, query, "device_sn =")
+	require.Len(t, args, 2)
+	require.Contains(t, args, "task-1")
+	require.Contains(t, args, "SN-1")
+}
+
+func TestPgRepo_TaskIdentityWhereRejectsMissingDevicePartitionKey(t *testing.T) {
+	query, args, err := storage.Psql.Select("id").
+		From("device_tasks").
+		Where(taskIdentityWhere("task-1", "")).
+		ToSql()
+	require.NoError(t, err)
+
+	require.Contains(t, query, "id =")
+	require.Contains(t, query, "false")
+	require.NotContains(t, strings.ToLower(query), "device_sn")
+	require.Equal(t, []any{"task-1"}, args)
 }
 
 // fakeRow 实现 pgx.Row 用于 scanTaskRow 测试
@@ -223,6 +281,42 @@ func TestPgRepo_Integration_CreateAndGet(t *testing.T) {
 	assert.Equal(t, tk.DeviceSN, got.DeviceSN)
 	assert.Equal(t, tk.Method, got.Method)
 	assert.Equal(t, TaskStatusPending, got.Status)
+}
+
+func TestPgRepo_Integration_LocationContractRoutesTaskIdentityToSinglePartition(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+
+	tk := freshTaskForPG("plan", "plan")
+	require.NoError(t, repo.Create(ctx, tk))
+
+	locatedSN, ok, err := repo.LocateDeviceSNByID(ctx, tk.ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, tk.DeviceSN, locatedSN)
+
+	targetedReadPlan := explainText(t, pool,
+		"EXPLAIN (COSTS OFF) SELECT id FROM device_tasks WHERE id=$1 AND device_sn=$2",
+		tk.ID, tk.DeviceSN,
+	)
+	require.Len(t, deviceTaskPartitionsInPlan(targetedReadPlan), 1, targetedReadPlan)
+
+	targetedUpdatePlan := explainText(t, pool,
+		"EXPLAIN (COSTS OFF) UPDATE device_tasks SET cwmp_id=$3 WHERE id=$1 AND device_sn=$2 AND status='pending'",
+		tk.ID, tk.DeviceSN, "cwmp-plan-check",
+	)
+	require.Len(t, deviceTaskPartitionsInPlan(targetedUpdatePlan), 1, targetedUpdatePlan)
+
+	idOnlyPlan := explainText(t, pool,
+		"EXPLAIN (COSTS OFF) SELECT id FROM device_tasks WHERE id=$1",
+		tk.ID,
+	)
+	require.Greater(t, len(deviceTaskPartitionsInPlan(idOnlyPlan)), 1, idOnlyPlan)
 }
 
 func TestPgRepo_Integration_GetByIDNotFound(t *testing.T) {

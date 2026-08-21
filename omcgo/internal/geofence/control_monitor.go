@@ -44,6 +44,10 @@ type GeofenceControlTaskReader interface {
 	AcquireCommandKeyLock(context.Context, string) (func(), error)
 }
 
+type geofenceControlPartitionedTaskReader interface {
+	GetByDeviceAndCommandKey(context.Context, string, string) (*task.Task, error)
+}
+
 type GeofenceControlParameterReader interface {
 	GetByDevice(context.Context, uuid.UUID) ([]model.DeviceParameter, error)
 }
@@ -424,7 +428,7 @@ func (m *GeofenceControlMonitor) queueControlVerification(
 		return fmt.Errorf("lock geofence verification command key: %w", err)
 	}
 	defer release()
-	existing, err := m.history.GetByCommandKey(ctx, commandKey)
+	existing, err := m.getTaskByDeviceAndCommandKey(ctx, action.DeviceSN, commandKey)
 	if err != nil {
 		return fmt.Errorf("check geofence verification duplicate: %w", err)
 	}
@@ -646,7 +650,7 @@ func (m *GeofenceControlMonitor) queueDeviceControl(
 	}
 	defer release()
 
-	existing, err := m.history.GetByCommandKey(ctx, action.ActionKey)
+	existing, err := m.getTaskByDeviceAndCommandKey(ctx, action.DeviceSN, action.ActionKey)
 	if err != nil {
 		return false, fmt.Errorf("check geofence control duplicate: %w", err)
 	}
@@ -748,6 +752,16 @@ func (m *GeofenceControlMonitor) queueDeviceControl(
 		return false, fmt.Errorf("mark geofence action executing: %w", err)
 	}
 	return true, nil
+}
+
+func (m *GeofenceControlMonitor) getTaskByDeviceAndCommandKey(
+	ctx context.Context,
+	deviceSN, commandKey string,
+) (*task.Task, error) {
+	if partitioned, ok := m.history.(geofenceControlPartitionedTaskReader); ok {
+		return partitioned.GetByDeviceAndCommandKey(ctx, deviceSN, commandKey)
+	}
+	return m.history.GetByCommandKey(ctx, commandKey)
 }
 
 func intPtr(value int) *int {

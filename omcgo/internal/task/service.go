@@ -383,7 +383,7 @@ func (s *TaskService) EnsureTaskByCommandKey(ctx context.Context, req *CreateTas
 		return nil, fmt.Errorf("acquire task command key lock: %w", err)
 	}
 	defer release()
-	existing, err := s.repo.GetByCommandKey(ctx, req.CommandKey)
+	existing, err := s.repo.GetByDeviceAndCommandKey(ctx, req.DeviceSN, req.CommandKey)
 	if err != nil {
 		return nil, fmt.Errorf("load task by command key: %w", err)
 	}
@@ -423,6 +423,14 @@ func (s *TaskService) checkCreateAdmission(ctx context.Context, req *CreateTaskR
 
 // GetTask 获取任务详情
 func (s *TaskService) GetTask(ctx context.Context, taskID string) (*Task, error) {
+	return s.getTask(ctx, "", taskID)
+}
+
+func (s *TaskService) GetTaskByDevice(ctx context.Context, deviceSN, taskID string) (*Task, error) {
+	return s.getTask(ctx, deviceSN, taskID)
+}
+
+func (s *TaskService) getTask(ctx context.Context, deviceSN, taskID string) (*Task, error) {
 	// 优先从 Redis 获取（更实时）
 	task, err := s.queue.GetByID(ctx, taskID)
 	if err != nil {
@@ -430,9 +438,28 @@ func (s *TaskService) GetTask(ctx context.Context, taskID string) (*Task, error)
 	}
 	if task == nil {
 		// 从 PostgreSQL 获取
+		if strings.TrimSpace(deviceSN) != "" {
+			return s.repo.GetByDeviceAndID(ctx, deviceSN, taskID)
+		}
 		return s.repo.GetByID(ctx, taskID)
 	}
-	resolved, err := resolveTaskDetails(ctx, task, s.repo.GetByID)
+	if strings.TrimSpace(deviceSN) != "" && task.DeviceSN != "" && task.DeviceSN != deviceSN {
+		return nil, nil
+	}
+	if isTerminal(task.Status) && task.DeviceSN == "" {
+		durable, err := s.repo.GetByID(ctx, task.ID)
+		if err != nil {
+			return nil, fmt.Errorf("get terminal task from repository: %w", err)
+		}
+		if durable != nil {
+			if strings.TrimSpace(deviceSN) != "" && durable.DeviceSN != deviceSN {
+				return nil, nil
+			}
+			return durable, nil
+		}
+		return task, nil
+	}
+	resolved, err := resolveTaskDetails(ctx, task, s.repo.GetByDeviceAndID)
 	if err != nil {
 		return nil, fmt.Errorf("get terminal task from repository: %w", err)
 	}
@@ -442,12 +469,12 @@ func (s *TaskService) GetTask(ctx context.Context, taskID string) (*Task, error)
 func resolveTaskDetails(
 	ctx context.Context,
 	queueTask *Task,
-	loadDurable func(context.Context, string) (*Task, error),
+	loadDurable func(context.Context, string, string) (*Task, error),
 ) (*Task, error) {
 	if queueTask == nil || !isTerminal(queueTask.Status) {
 		return queueTask, nil
 	}
-	durable, err := loadDurable(ctx, queueTask.ID)
+	durable, err := loadDurable(ctx, queueTask.DeviceSN, queueTask.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -709,8 +736,18 @@ func (s *TaskService) AcquireSyncGPVDeviceLock(ctx context.Context, deviceSN str
 
 // MarkTaskSent 标记任务已发送
 func (s *TaskService) MarkTaskSent(ctx context.Context, taskID, cwmpID string) error {
+	current, err := s.queue.GetByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get task for send fence: %w", err)
+	}
+	if current == nil {
+		return ErrTaskNotFound
+	}
+	if strings.TrimSpace(current.DeviceSN) == "" {
+		return fmt.Errorf("task %s missing device_sn for send fence", taskID)
+	}
 	if s.repo != nil {
-		acquired, err := s.repo.MarkSentIfPending(ctx, taskID, cwmpID, time.Now())
+		acquired, err := s.repo.MarkSentIfPendingByDevice(ctx, current.DeviceSN, taskID, cwmpID, time.Now())
 		if err != nil {
 			return err
 		}
@@ -727,7 +764,7 @@ func (s *TaskService) MarkTaskSent(ctx context.Context, taskID, cwmpID string) e
 	// 更新 Redis
 	if err := s.queue.MarkTaskSent(ctx, taskID, cwmpID); err != nil {
 		if s.repo != nil {
-			return s.releaseUnwrittenSendClaim(ctx, taskID, cwmpID, err)
+			return s.releaseUnwrittenSendClaim(ctx, current.DeviceSN, taskID, cwmpID, err)
 		}
 		return fmt.Errorf("mark task sent in queue: %w", err)
 	}
@@ -739,8 +776,8 @@ func (s *TaskService) MarkTaskSent(ctx context.Context, taskID, cwmpID string) e
 	return nil
 }
 
-func (s *TaskService) releaseUnwrittenSendClaim(ctx context.Context, taskID, cwmpID string, cause error) error {
-	released, err := s.repo.ReleaseSentClaimIfUnwritten(ctx, taskID, cwmpID)
+func (s *TaskService) releaseUnwrittenSendClaim(ctx context.Context, deviceSN, taskID, cwmpID string, cause error) error {
+	released, err := s.repo.ReleaseSentClaimIfUnwrittenByDevice(ctx, deviceSN, taskID, cwmpID)
 	if err != nil {
 		s.recordDualWriteFail("release_send_claim")
 		return errors.Join(fmt.Errorf("mark task sent in queue: %w", cause), err)
@@ -756,7 +793,7 @@ func (s *TaskService) releaseUnwrittenSendClaim(ctx context.Context, taskID, cwm
 	if err := s.queue.DeleteCWMPIDMapping(ctx, cwmpID); err != nil {
 		repairErrs = append(repairErrs, fmt.Errorf("delete unwritten cwmp mapping: %w", err))
 	}
-	pending, err := s.repo.GetByID(ctx, taskID)
+	pending, err := s.repo.GetByDeviceAndID(ctx, deviceSN, taskID)
 	if err != nil {
 		repairErrs = append(repairErrs, fmt.Errorf("load released task send claim: %w", err))
 	} else if pending != nil {
@@ -1026,7 +1063,11 @@ func (s *TaskService) notifyCreateFailure(ctx context.Context, task *Task, err e
 
 // CancelTask 取消任务
 func (s *TaskService) CancelTask(ctx context.Context, taskID string) error {
-	task, err := s.GetTask(ctx, taskID)
+	return s.CancelTaskByDevice(ctx, "", taskID)
+}
+
+func (s *TaskService) CancelTaskByDevice(ctx context.Context, deviceSN, taskID string) error {
+	task, err := s.getTask(ctx, deviceSN, taskID)
 	if err != nil {
 		return fmt.Errorf("get task for cancel: %w", err)
 	}
@@ -1277,7 +1318,13 @@ func (s *TaskService) RetryTask(ctx context.Context, task *Task) error {
 		return fmt.Errorf("task is nil")
 	}
 
-	current, err := s.repo.GetByID(ctx, task.ID)
+	var current *Task
+	var err error
+	if strings.TrimSpace(task.DeviceSN) != "" {
+		current, err = s.repo.GetByDeviceAndID(ctx, task.DeviceSN, task.ID)
+	} else {
+		current, err = s.repo.GetByID(ctx, task.ID)
+	}
 	if err != nil {
 		return fmt.Errorf("load durable task for retry: %w", err)
 	}

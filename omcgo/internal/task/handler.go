@@ -96,7 +96,7 @@ func (h *Handler) GetTask(c *gin.Context) {
 		return
 	}
 
-	task, err := h.service.GetTask(c.Request.Context(), taskID)
+	task, err := h.service.GetTaskByDevice(c.Request.Context(), c.Query("device_sn"), taskID)
 	if err != nil {
 		logger.L(c.Request.Context()).Error("get task", zap.Error(err), zap.String("task_id", taskID))
 		errors.AbortWithError(c, http.StatusInternalServerError, errors.ErrInternal)
@@ -180,7 +180,7 @@ func (h *Handler) CancelTask(c *gin.Context) {
 		return
 	}
 
-	err := h.service.CancelTask(c.Request.Context(), taskID)
+	err := h.service.CancelTaskByDevice(c.Request.Context(), c.Query("device_sn"), taskID)
 	if err != nil {
 		logger.L(c.Request.Context()).Error("cancel task",
 			zap.Error(err),
@@ -285,7 +285,7 @@ func (h *Handler) RetryTask(c *gin.Context) {
 		return
 	}
 
-	task, err := h.service.GetTask(c.Request.Context(), taskID)
+	task, err := h.service.GetTaskByDevice(c.Request.Context(), c.Query("device_sn"), taskID)
 	if err != nil {
 		errors.AbortWithError(c, http.StatusInternalServerError, errors.ErrInternal)
 		return

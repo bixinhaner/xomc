@@ -143,6 +143,13 @@ func (m *mockTaskRepository) GetByID(ctx context.Context, id string) (*Task, err
 	return nil, nil
 }
 
+func (m *mockTaskRepository) GetByIDAndDeviceSN(ctx context.Context, id, deviceSN string) (*Task, error) {
+	if m.getByIDFn != nil {
+		return m.getByIDFn(ctx, id)
+	}
+	return nil, nil
+}
+
 func (m *mockTaskRepository) GetByCWMPID(ctx context.Context, cwmpID string) (*Task, error) {
 	if m.getByCWMPIDFn != nil {
 		return m.getByCWMPIDFn(ctx, cwmpID)
@@ -261,15 +268,17 @@ func (ts *testableTaskService) GetTask(ctx context.Context, taskID string) (*Tas
 
 func TestResolveTaskDetails_TerminalTombstoneUsesDurableTask(t *testing.T) {
 	ctx := context.Background()
-	tombstone := &Task{ID: "task-terminal", Status: TaskStatusCompleted}
+	tombstone := &Task{ID: "task-terminal", DeviceSN: "SN-terminal", Status: TaskStatusCompleted}
 	durable := &Task{
-		ID:     tombstone.ID,
-		Status: TaskStatusCompleted,
-		Params: json.RawMessage(`{"names":["Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth"]}`),
-		Result: json.RawMessage(`{"values":[{"name":"DLBandwidth","value":"n100"}]}`),
+		ID:       tombstone.ID,
+		DeviceSN: tombstone.DeviceSN,
+		Status:   TaskStatusCompleted,
+		Params:   json.RawMessage(`{"names":["Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth"]}`),
+		Result:   json.RawMessage(`{"values":[{"name":"DLBandwidth","value":"n100"}]}`),
 	}
 
-	got, err := resolveTaskDetails(ctx, tombstone, func(_ context.Context, id string) (*Task, error) {
+	got, err := resolveTaskDetails(ctx, tombstone, func(_ context.Context, deviceSN, id string) (*Task, error) {
+		require.Equal(t, tombstone.DeviceSN, deviceSN)
 		require.Equal(t, tombstone.ID, id)
 		return durable, nil
 	})
@@ -280,7 +289,7 @@ func TestResolveTaskDetails_TerminalTombstoneUsesDurableTask(t *testing.T) {
 func TestResolveTaskDetails_NonTerminalTaskStaysOnRedis(t *testing.T) {
 	pending := &Task{ID: "task-pending", Status: TaskStatusPending}
 	got, err := resolveTaskDetails(context.Background(), pending,
-		func(context.Context, string) (*Task, error) {
+		func(context.Context, string, string) (*Task, error) {
 			t.Fatal("non-terminal task must not query PostgreSQL")
 			return nil, nil
 		})
@@ -289,9 +298,9 @@ func TestResolveTaskDetails_NonTerminalTaskStaysOnRedis(t *testing.T) {
 }
 
 func TestResolveTaskDetails_MissingDurableRowKeepsTerminalFence(t *testing.T) {
-	tombstone := &Task{ID: "task-missing", Status: TaskStatusFailed}
+	tombstone := &Task{ID: "task-missing", DeviceSN: "SN-missing", Status: TaskStatusFailed}
 	got, err := resolveTaskDetails(context.Background(), tombstone,
-		func(context.Context, string) (*Task, error) { return nil, nil })
+		func(context.Context, string, string) (*Task, error) { return nil, nil })
 	require.NoError(t, err)
 	require.Same(t, tombstone, got)
 }
@@ -299,8 +308,8 @@ func TestResolveTaskDetails_MissingDurableRowKeepsTerminalFence(t *testing.T) {
 func TestResolveTaskDetails_DurableLoadErrorPropagates(t *testing.T) {
 	wantErr := fmt.Errorf("postgres unavailable")
 	got, err := resolveTaskDetails(context.Background(),
-		&Task{ID: "task-error", Status: TaskStatusExpired},
-		func(context.Context, string) (*Task, error) { return nil, wantErr })
+		&Task{ID: "task-error", DeviceSN: "SN-error", Status: TaskStatusExpired},
+		func(context.Context, string, string) (*Task, error) { return nil, wantErr })
 	require.ErrorIs(t, err, wantErr)
 	require.Nil(t, got)
 }

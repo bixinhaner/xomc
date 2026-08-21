@@ -130,16 +130,12 @@ type persistentQueueQuery struct {
 // or statuses as SQL input and keeps the observer safe from identifier injection.
 var persistentQueueQueries = []persistentQueueQuery{
 	{name: "device_tasks", query: `
-SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, COALESCE(MAX(EXTRACT(EPOCH FROM (now() - expires_at))) FILTER (WHERE expires_at < now()), 0)::double precision FROM device_tasks WHERE status = 'pending' GROUP BY status
-UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, COALESCE(MAX(EXTRACT(EPOCH FROM (now() - expires_at))) FILTER (WHERE expires_at < now()), 0)::double precision FROM device_tasks WHERE status = 'sent' GROUP BY status
-UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, COALESCE(MAX(EXTRACT(EPOCH FROM (now() - expires_at))) FILTER (WHERE expires_at < now()), 0)::double precision FROM device_tasks WHERE status = 'failed' GROUP BY status
--- Historical terminal states dominate this partitioned table. Exact COUNT/MIN/MAX
--- walks millions of index entries every 30 seconds. PostgreSQL already maintains
--- a status histogram and row estimate for each child, so use those constant-cost
--- planner statistics for terminal gauges. Live pending/sent/failed states above
--- remain exact. An unexpected writer status is still surfaced to normalization.
-UNION ALL SELECT estimated.status, estimated.estimate, 0::double precision, 0::double precision
+SELECT status, count, oldest_age_seconds, overdue_oldest_age_seconds
 FROM (
+WITH live_status(status) AS (
+    VALUES ('pending'), ('sent'), ('failed')
+),
+status_estimates AS (
     SELECT v.value AS status, COALESCE(SUM(c.reltuples * f.freq), 0)::bigint AS estimate
     FROM pg_inherits i
     JOIN pg_class p ON p.oid = i.inhparent
@@ -150,9 +146,61 @@ FROM (
     JOIN LATERAL unnest(s.most_common_freqs) WITH ORDINALITY f(freq, ord) USING (ord)
     WHERE p.oid = 'device_tasks'::regclass
     GROUP BY v.value
-) estimated
-WHERE estimated.status IN ('completed', 'expired', 'cancelled')
-   OR estimated.status NOT IN ('pending', 'sent', 'completed', 'failed', 'expired', 'cancelled')`},
+),
+live_counts AS (
+    SELECT s.status,
+           CASE
+             WHEN bounded.count <= 1000 THEN bounded.count
+             ELSE GREATEST(COALESCE(e.estimate, 0), bounded.count)
+           END::bigint AS count
+    FROM live_status s
+    LEFT JOIN status_estimates e ON e.status = s.status
+    CROSS JOIN LATERAL (
+        SELECT COUNT(*)::bigint AS count
+        FROM (
+            SELECT 1 FROM device_tasks WHERE status = s.status LIMIT 1001
+        ) bounded_rows
+    ) bounded
+),
+live_oldest AS (
+    SELECT s.status,
+           COALESCE(EXTRACT(EPOCH FROM (now() - oldest.created_at)), 0)::double precision AS oldest_age_seconds
+    FROM live_status s
+    LEFT JOIN LATERAL (
+        SELECT created_at
+        FROM device_tasks
+        WHERE status = s.status
+        ORDER BY created_at ASC
+        LIMIT 1
+    ) oldest ON true
+),
+live_overdue AS (
+    SELECT s.status,
+           COALESCE(EXTRACT(EPOCH FROM (now() - overdue.expires_at)), 0)::double precision AS overdue_oldest_age_seconds
+    FROM live_status s
+    LEFT JOIN LATERAL (
+        SELECT expires_at
+        FROM device_tasks
+        WHERE status = s.status AND expires_at < now()
+        ORDER BY expires_at ASC
+        LIMIT 1
+    ) overdue ON true
+)
+SELECT c.status, c.count, o.oldest_age_seconds, od.overdue_oldest_age_seconds
+FROM live_counts c
+JOIN live_oldest o USING (status)
+JOIN live_overdue od USING (status)
+WHERE c.count > 0
+-- Historical terminal states dominate this partitioned table. Exact COUNT/MIN/MAX
+-- walks millions of index entries every 30 seconds. PostgreSQL already maintains
+-- a status histogram and row estimate for each child, so use those bounded-cost
+-- planner statistics for terminal gauges.
+UNION ALL SELECT status_estimates.status, status_estimates.estimate, 0::double precision, 0::double precision
+FROM status_estimates
+WHERE status_estimates.estimate > 0
+  AND (status_estimates.status IN ('completed', 'expired', 'cancelled')
+       OR status_estimates.status NOT IN ('pending', 'sent', 'completed', 'failed', 'expired', 'cancelled'))
+) bounded_device_tasks`},
 	{name: "async_jobs", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM async_jobs GROUP BY status`},
 	{name: "parameter_sync_outbox", query: `
 SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM parameter_sync_outbox WHERE status = 'pending' GROUP BY status

@@ -38,7 +38,7 @@ func TestPersistentQueueQueriesUseRowExpiryOnlyForDeviceTasks(t *testing.T) {
 	for _, descriptor := range persistentQueueQueries {
 		if descriptor.name == "device_tasks" {
 			require.Contains(t, descriptor.query, "expires_at < now()")
-			require.Contains(t, descriptor.query, "now() - expires_at")
+			require.Contains(t, descriptor.query, "now() - overdue.expires_at")
 			continue
 		}
 		require.NotContains(t, descriptor.query, "expires_at", descriptor.name)
@@ -50,12 +50,16 @@ func TestHotPersistentQueueQueriesSplitStatusesToUseIndexes(t *testing.T) {
 	for _, descriptor := range persistentQueueQueries {
 		switch descriptor.name {
 		case "device_tasks":
-			require.Contains(t, descriptor.query, "WHERE status = 'pending'")
+			require.Contains(t, descriptor.query, "WHERE status = s.status LIMIT 1001")
+			require.Contains(t, descriptor.query, "ORDER BY created_at ASC")
+			require.Contains(t, descriptor.query, "ORDER BY expires_at ASC")
 			require.NotContains(t, descriptor.query, "FROM device_tasks WHERE status = 'completed'")
 			require.NotContains(t, descriptor.query, "FROM device_tasks WHERE status = 'expired'")
 			require.NotContains(t, descriptor.query, "FROM device_tasks WHERE status = 'cancelled'")
 			require.Contains(t, descriptor.query, "pg_inherits")
 			require.Contains(t, descriptor.query, "pg_stats")
+			require.Contains(t, descriptor.query, "status_estimates")
+			require.Contains(t, descriptor.query, "live_counts")
 			require.NotContains(t, descriptor.query, "FROM device_tasks WHERE status NOT IN")
 			require.NotContains(t, descriptor.query, "FROM device_tasks GROUP BY status")
 		case "parameter_sync_outbox":
