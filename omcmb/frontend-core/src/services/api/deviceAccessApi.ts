@@ -655,7 +655,11 @@ export const deviceAccessApi = {
     form.append('mode', input.mode);
     form.append('failure_policy', input.failurePolicy);
     const { data } = await http.post<AccessListImportPreview>('/device-access/imports/preview', form, {
-      headers: { ...headers(input.operatorCode), 'Idempotency-Key': input.idempotencyKey },
+      headers: {
+        ...headers(input.operatorCode),
+        'Content-Type': 'multipart/form-data',
+        'Idempotency-Key': input.idempotencyKey,
+      },
     });
     return data;
   },
@@ -678,7 +682,11 @@ export const deviceAccessApi = {
     form.append('mode', input.mode);
     form.append('failure_policy', input.failurePolicy);
     const { data } = await http.post<RuleDimensionImportPreview>('/device-access/imports/preview', form, {
-      headers: { ...headers(input.operatorCode), 'Idempotency-Key': input.idempotencyKey },
+      headers: {
+        ...headers(input.operatorCode),
+        'Content-Type': 'multipart/form-data',
+        'Idempotency-Key': input.idempotencyKey,
+      },
     });
     return data;
   },
