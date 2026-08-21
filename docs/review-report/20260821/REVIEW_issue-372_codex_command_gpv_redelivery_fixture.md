@@ -20,7 +20,7 @@
 
 - COMMAND/GPV 成功、瞬时失败、永久失败、ACK 断连、redelivery、慢设备均在验证矩阵中落到具体测试。
 - `TestCommandGPVQueueStatsShowsAckGapWhileAckRateLagsAndSettles` 覆盖慢设备下 ACK gap 可见，以及释放后 ACK 追平发布/投递进度。
-- `TestKeyedQueueHandlerFailureNaksThenSuccessAcks` 补强了 transient NAK 与最终 ACK 的计数断言。
+- `TestKeyedQueueHandlerFailureNaksThenSuccessAcks` 补强了 keyed lane 本地重试不提前 NAK、最终 ACK 的计数断言。
 - `TestResultConsumerRealNATSRedeliveryAfterCommitDoesNotDuplicateBusinessProjection` 覆盖 PG commit 后 ACK 失败再投递的真实组合，并断言 result、device parameter、run、task 均只保留一份，staging 最多一份且终态可清理为 0。
 - 验收文档说明了本地 Docker 真栈运行所需的 `GPV_NATS_TEST_URL` 和 `TEST_PG_URL`。
 

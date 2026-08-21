@@ -13,7 +13,7 @@
 | 场景 | 夹具 | 关键断言 |
 |---|---|---|
 | COMMAND/GPV 成功 | `internal/core/event.TestCommandGPVQueueStatsShowsAckGapWhileAckRateLagsAndSettles` | 释放慢处理后 `AckSequence=LastSequence=3`，`AckGap=0` |
-| 瞬时失败 | `internal/core/event.TestKeyedQueueHandlerFailureNaksThenSuccessAcks` | 第一次 NAK、第二次 ACK，最终 `AckGap=0` |
+| 瞬时失败 | `internal/core/event.TestKeyedQueueHandlerFailureNaksThenSuccessAcks` | keyed lane 内先本地重试，不提前 NAK 给 JetStream；最终 ACK 且 `AckGap=0` |
 | 永久失败 | `internal/core/event.TestKeyedQueueTerminalHeadFailureExhaustsMaxDeliverBeforeFollower` | head 消息耗尽 `MaxDeliver` 后 follower 才执行，避免同设备乱序 |
 | ACK 断连 | `internal/paramsync.TestResultConsumerRealNATSRedeliveryAfterCommitDoesNotDuplicateBusinessProjection` | PG commit 后模拟 ACK 链路失败，NATS redelivery 后业务投影仍只一份 |
 | redelivery 幂等 | `internal/paramsync.TestResultConsumerRealNATSRedeliveryAfterCommitDoesNotDuplicateBusinessProjection` | `parameter_sync_task_results`、`device_parameters`、run、task 计数均为 1，staging 最多 1 份且终态可清理为 0 |
