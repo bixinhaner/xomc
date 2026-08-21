@@ -41,10 +41,44 @@ describe('specified-device parameter editor', () => {
 
   it('submits only the selected parameter configuration mode', () => {
     expect(pageSource).toContain("const submittedParamConfigMode: ParamConfigMode = values.paramConfigMode === 'specified' ? 'specified' : 'common';");
+    expect(pageSource).toContain("const submittedFunctionModule = isFunctionModule(values.functionModule)");
+    expect(pageSource).toContain("if (submittedFunctionModule === '2')");
     expect(pageSource).toContain("submittedParamConfigList = [];");
     expect(pageSource).toContain('commonParamConfig = {};');
     expect(pageSource).toContain('paramConfigMode: submittedParamConfigMode');
     expect(pageSource).toContain('paramConfigList: submittedParamConfigList');
+  });
+
+  it('keeps module selection in the form snapshot before submit', () => {
+    expect(pageSource).toContain('function isFunctionModule');
+    expect(pageSource).toContain('<Form.Item name="functionModule" noStyle>');
+    expect(pageSource).toContain('<Radio.Group style={{ width: \'100%\' }}>');
+    expect(pageSource).not.toContain('handleFunctionModuleChange');
+  });
+
+  it('recovers the selected module from legacy policy payloads', () => {
+    expect(pageSource).toContain('function inferFunctionModule');
+    expect(pageSource).toContain('flags.selfConfigEnabled === true');
+    expect(pageSource).toContain('hasObjectContent(config.commonParamConfig)');
+    expect(pageSource).toContain('config.paramConfigList.length > 0');
+    expect(pageSource).toContain('licenseEnabled: persistedPolicy.licenseEnabled');
+    expect(pageSource).toContain('selfConfigEnabled: persistedPolicy.selfConfigEnabled');
+  });
+
+  it('initializes common parameter form before switching to parameter module', () => {
+    expect(pageSource).toContain('withInitialCommonParamConfig(');
+    expect(pageSource).not.toContain("functionModule !== '2'");
+  });
+
+  it('allows parameter templates to be imported from multiple files at once', () => {
+    expect(pageSource).toContain('const previewImportConfigFiles = useCallback(async (files: UploadFile[]) => {');
+    expect(pageSource).toContain('for (const [fileIndex, uploadFile] of files.entries())');
+    expect(pageSource).toContain('const importedConfigs: ParamConfig[] = [];');
+    expect(pageSource).toContain('importedConfigs.push(...rows.map((row, index) => ({');
+    expect(pageSource).toContain('multiple');
+    expect(pageSource).toContain('beforeUpload={(_, fileList) => {');
+    expect(pageSource).toContain('const nextFiles = toSelectedParamImportFiles(fileList as UploadFile[]);');
+    expect(pageSource).not.toContain('void previewImportConfig(file);');
   });
 
   it('uses the same parameter field panel as common parameter configuration', () => {
@@ -75,6 +109,17 @@ describe('specified-device parameter editor', () => {
     expect(drawerSection).toContain("onClick={() => setConfigDetailMode('edit')}");
     expect(drawerSection).toContain("configDetailMode === 'edit'");
     expect(drawerSection).toContain('handleConfigFormSubmit');
+  });
+
+  it('persists edits made in the device config drawer immediately for existing policies', () => {
+    const submitSection = pageSource.slice(
+      pageSource.indexOf('const handleConfigFormSubmit'),
+      pageSource.indexOf('const toSelectedParamImportFiles'),
+    );
+
+    expect(submitSection).toContain('buildParamConfigListPolicyUpdate(persistedPolicy, next)');
+    expect(submitSection).toContain('savePolicyMutation.mutateAsync');
+    expect(submitSection).toContain('setParamConfigList(previous)');
   });
 
   it('offers a per-device download for the latest edited workbook', () => {

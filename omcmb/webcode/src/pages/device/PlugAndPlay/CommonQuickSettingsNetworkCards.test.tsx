@@ -1,8 +1,10 @@
 import { Form } from 'antd';
+import type { FormInstance } from 'antd';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { IntlProvider } from 'react-intl';
 import { describe, expect, it, vi } from 'vitest';
 import zhCN from '@core/i18n/zh-CN';
+import { quicksettingsApi } from '@core/services/api/quicksettingsApi';
 import type { QuickSettingsGroup } from '@core/types/quicksettings';
 import CommonQuickSettingsNetworkCards from './CommonQuickSettingsNetworkCards';
 
@@ -56,11 +58,16 @@ vi.mock('@core/services/api/quicksettingsApi', () => ({
 function NetworkHarness({
   readOnly = false,
   onRequestEdit,
+  paramModelName = 'BaiBNQ',
+  onForm,
 }: {
   readOnly?: boolean;
   onRequestEdit?: () => void;
+  paramModelName?: string;
+  onForm?: (form: FormInstance) => void;
 }) {
   const [form] = Form.useForm();
+  onForm?.(form);
   return (
     <IntlProvider locale="zh-CN" defaultLocale="zh-CN" messages={zhCN}>
       <Form
@@ -85,7 +92,7 @@ function NetworkHarness({
           },
         }}
       >
-        <CommonQuickSettingsNetworkCards paramModelName="BaiBNQ" readOnly={readOnly} onRequestEdit={onRequestEdit} />
+        <CommonQuickSettingsNetworkCards paramModelName={paramModelName} readOnly={readOnly} onRequestEdit={onRequestEdit} />
       </Form>
     </IntlProvider>
   );
@@ -138,5 +145,44 @@ describe('CommonQuickSettingsNetworkCards', () => {
     fireEvent.focus(container.querySelector('input')!);
 
     expect(onRequestEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses loaded network groups when the editor drawer remounts', async () => {
+    vi.mocked(quicksettingsApi.getGroupsByParamModel).mockClear();
+
+    const first = render(<NetworkHarness paramModelName="CacheModel" />);
+    await screen.findByText('WAN(VLAN)/LAN 1');
+    expect(quicksettingsApi.getGroupsByParamModel).toHaveBeenCalledTimes(1);
+
+    first.unmount();
+    render(<NetworkHarness paramModelName="CacheModel" />);
+
+    expect(screen.getByText('WAN(VLAN)/LAN 1')).toBeInTheDocument();
+    expect(quicksettingsApi.getGroupsByParamModel).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not block saving when a new interface has no interface name yet', async () => {
+    let form: FormInstance | undefined;
+    render(<NetworkHarness paramModelName="BlankInterfaceModel" onForm={(nextForm) => { form = nextForm; }} />);
+
+    await screen.findByText('WAN(VLAN)/LAN 1');
+
+    await expect(form?.validateFields()).resolves.toBeDefined();
+  });
+
+  it('stores interface name edits in the INTERFACE sheet', async () => {
+    let form: FormInstance | undefined;
+    render(<NetworkHarness onForm={(nextForm) => { form = nextForm; }} />);
+
+    await screen.findByText('WAN(VLAN)/LAN 1');
+    const item = screen.getByText('接口名称').closest('.ant-form-item');
+    const input = item?.querySelector('input');
+    expect(input).toBeTruthy();
+
+    fireEvent.change(input!, { target: { value: 'wan-selftest' } });
+
+    await waitFor(() => {
+      expect(form?.getFieldValue(['sheetParameters', 'INTERFACE', 0, 'Interface Name'])).toBe('wan-selftest');
+    });
   });
 });

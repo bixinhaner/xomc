@@ -282,11 +282,81 @@ function uniqueDynamicTemplateFields(metadata?: ParamConfigWorkbookMetadata): Dy
   });
 }
 
+function parameterMappingRow(
+  displayName: string,
+  sheet: string,
+  header: string,
+  trPath: string,
+  source: 'system' | 'custom',
+  note: string,
+): string[] {
+  return [displayName, sheet, header, trPath, source === 'custom' ? '用户自定义' : '系统预置', note];
+}
+
+function dataWorkbookColumns(workbook: XLSX.WorkBook): Map<string, string> {
+  const columns = new Map<string, string>();
+  for (const sheetName of workbook.SheetNames) {
+    if (sheetName === PARAM_MAPPING_SHEET || sheetName === '__XOMC_OPTIONS') continue;
+    const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet) continue;
+    const matrix = XLSX.utils.sheet_to_json<unknown[]>(worksheet, { header: 1, defval: '', raw: true });
+    for (const rawHeader of matrix[0] ?? []) {
+      const header = normalizeHeader(rawHeader);
+      if (!header || canonicalHeader(header) === 'SERIALNUMBER' || isInstanceControlHeader(header)) continue;
+      columns.set(`${canonicalHeader(sheetName)}.${canonicalHeader(header)}`, header);
+    }
+  }
+  return columns;
+}
+
+function unsuffixedTemplateHeader(header: string): string {
+  return header.replace(/\s\[[\d.]+\]$/, '');
+}
+
+function supplementParameterMappingSheet(
+  workbook: XLSX.WorkBook,
+  metadata?: ParamConfigWorkbookMetadata,
+): void {
+  const worksheet = workbook.Sheets[PARAM_MAPPING_SHEET];
+  if (!worksheet || !metadata?.deviceType) return;
+  const dataColumns = dataWorkbookColumns(workbook);
+  if (dataColumns.size === 0) return;
+  const existing = new Set(XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '', raw: true })
+    .map((row) => `${canonicalHeader(row['数据工作表'])}.${canonicalHeader(row['参数列名'])}.${String(row.TRPath ?? '').trim().toLowerCase()}`));
+  const rows = uniqueDynamicTemplateFields(metadata)
+    .filter((field) => !isInstanceControlHeader(field.header))
+    .flatMap((field) => {
+      const exactKey = `${canonicalHeader(field.sheet)}.${canonicalHeader(field.header)}`;
+      const baseKey = `${canonicalHeader(field.sheet)}.${canonicalHeader(unsuffixedTemplateHeader(field.header))}`;
+      const header = dataColumns.get(exactKey) ?? dataColumns.get(baseKey);
+      if (!header) return [];
+      const key = `${canonicalHeader(field.sheet)}.${canonicalHeader(header)}.${field.trPath.trim().toLowerCase()}`;
+      if (existing.has(key)) return [];
+      existing.add(key);
+      return [parameterMappingRow(
+        field.displayName,
+        field.sheet,
+        header,
+        field.trPath,
+        'system',
+        '按当前数据工作表列补充的页面字段映射',
+      )];
+    });
+  if (rows.length === 0) return;
+  XLSX.utils.sheet_add_aoa(worksheet, rows, { origin: -1 });
+  const range = XLSX.utils.decode_range(worksheet['!ref'] ?? `A1:F${rows.length + 1}`);
+  worksheet['!autofilter'] = { ref: `A1:F${range.e.r + 1}` };
+}
+
 function appendParameterMappingSheet(
   workbook: XLSX.WorkBook,
   metadata?: ParamConfigWorkbookMetadata,
 ): void {
-  if (!metadata?.deviceType || workbook.Sheets[PARAM_MAPPING_SHEET]) return;
+  if (!metadata?.deviceType) return;
+  if (workbook.Sheets[PARAM_MAPPING_SHEET]) {
+    supplementParameterMappingSheet(workbook, metadata);
+    return;
+  }
   const templateSheets = getParamConfigTemplateSheets(metadata.deviceType) ?? {};
   const locations = Object.entries(templateSheets).flatMap(([sheet, headers]) => (
     headers.map((header) => ({ sheet, header, key: canonicalHeader(header) }))
@@ -672,8 +742,19 @@ function mappedWorkbookRow(
   return Object.fromEntries(Object.entries(row).filter(([header]) => (
     canonicalHeader(header) === 'SERIALNUMBER'
       || isInstanceControlHeader(header)
+      || isMaterializedSystemWorkbookColumn(config, sheetName, header)
       || mappedHeaders.has(canonicalHeader(header))
   )));
+}
+
+function isMaterializedSystemWorkbookColumn(
+  config: ParamConfigSpreadsheetRow,
+  sheetName: string,
+  header: string,
+): boolean {
+  return config.deviceType === 'gNB'
+    && canonicalHeader(sheetName) === 'INTERFACE'
+    && canonicalHeader(header) === 'INTERFACENAME';
 }
 
 export function createParamConfigWorkbook(

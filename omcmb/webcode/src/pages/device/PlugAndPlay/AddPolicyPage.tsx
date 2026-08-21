@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import type { RcFile } from 'antd/es/upload/interface';
 import {
   Form,
   Input,
@@ -94,7 +95,7 @@ import { getPolicySubmitAvailability } from './policySubmitAvailability';
 import ProductClassSelect from './components/ProductClassSelect';
 import PolicyReadOnlySection from './components/PolicyReadOnlySection';
 import CommonParameterConfigPanel, { ParameterConfigFields } from './CommonParameterConfigPanel';
-import { sanitizeCommonParamConfig, withInitialCommonRadioInstance } from './commonParameterConfig';
+import { sanitizeCommonParamConfig, withInitialCommonParamConfig } from './commonParameterConfig';
 import { buildParamConfigListPolicyUpdate } from './paramConfigPersistence';
 import { buildPlugAndPlayLicenseListParams } from './licenseListParams';
 
@@ -104,6 +105,27 @@ const { Text, Title } = Typography;
 type ExecuteType = '0' | '1';
 type EnableType = '0' | '1';
 type ParamConfigMode = 'common' | 'specified';
+
+function isFunctionModule(value: unknown): value is '0' | '1' | '2' {
+  return value === '0' || value === '1' || value === '2';
+}
+
+function hasObjectContent(value: unknown): boolean {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0);
+}
+
+function inferFunctionModule(
+  config: Record<string, unknown>,
+  flags: { licenseEnabled?: boolean; selfConfigEnabled?: boolean },
+): '0' | '1' | '2' {
+  const configured = isFunctionModule(config.functionModule) ? config.functionModule : undefined;
+  const hasSelfConfigPayload = flags.selfConfigEnabled === true
+    || hasObjectContent(config.commonParamConfig)
+    || (Array.isArray(config.paramConfigList) && config.paramConfigList.length > 0);
+  if (hasSelfConfigPayload) return '2';
+  if (flags.licenseEnabled === true) return '1';
+  return configured ?? '0';
+}
 
 // T-0136: 保留为 export 占位，避免 TS6196 同时不破坏未来可能复用
 export interface _PolicyForm {
@@ -600,7 +622,8 @@ export default function AddPolicyPage() {
   }, [configDetailVisible, configForm, currentConfig]);
 
   // Current function module
-  const [functionModule, setFunctionModule] = useState<'0' | '1' | '2'>('0');
+  const watchedFunctionModule = Form.useWatch('functionModule', form);
+  const functionModule = isFunctionModule(watchedFunctionModule) ? watchedFunctionModule : '0';
   const [productClasses, setProductClasses] = useState<string[]>([]);
   // Compatibility form field: values are product names. Southbound-only
   // calls still receive a literal product class resolved from the catalog.
@@ -647,24 +670,19 @@ export default function AddPolicyPage() {
     [productMatchData, selectedProduct?.paramModelName, selectedProduct?.tech],
   );
   useEffect(() => {
-    if (!activeParamDeviceType || functionModule !== '2') return;
+    if (!activeParamDeviceType) return;
     const saved = persistedPolicy?.config?.commonParamConfig;
     const initial = {
       deviceType: activeParamDeviceType,
       ...(saved && typeof saved === 'object' ? saved : {}),
-      ...(activeParamDeviceType === 'gNB' && !saved ? {
-        gnbIdAllocation: { start: 1, end: 16_777_215, step: 1, reserved: [] },
-        pciAllocation: { start: 0, end: 1007, step: 1, reserved: [] },
-        gnbIdLength: 24,
-      } : {}),
     };
     commonConfigForm.resetFields();
-    commonConfigForm.setFieldsValue(withInitialCommonRadioInstance(
+    commonConfigForm.setFieldsValue(withInitialCommonParamConfig(
       initial,
       activeParamDeviceType,
       radioInstanceProductIdentity,
     ));
-  }, [activeParamDeviceType, commonConfigForm, functionModule, persistedPolicy, radioInstanceProductIdentity]);
+  }, [activeParamDeviceType, commonConfigForm, persistedPolicy, radioInstanceProductIdentity]);
   const matchedProductId = selectedProduct?.id ?? productMatchData?.product?.id;
   const {
     data: licenseData,
@@ -709,6 +727,10 @@ export default function AddPolicyPage() {
     const savedProductNames = persistedPolicy.productNames.length
       ? persistedPolicy.productNames
       : savedProductClasses;
+    const savedFunctionModule = inferFunctionModule(config, {
+      licenseEnabled: persistedPolicy.licenseEnabled,
+      selfConfigEnabled: persistedPolicy.selfConfigEnabled,
+    });
     const originalVersionValue = config.originalVersion;
     const originalVersions = Array.isArray(originalVersionValue)
       ? originalVersionValue.map(String).filter(Boolean)
@@ -728,6 +750,7 @@ export default function AddPolicyPage() {
         ),
       productClasses: savedProductNames,
       executeType: persistedPolicy.executeType === 'auto' ? '0' : '1',
+      functionModule: savedFunctionModule,
       selfStartEnable: persistedPolicy.enabled,
       upgradeEnable: persistedPolicy.upgradeEnabled,
       targetVersion: persistedPolicy.targetVersion,
@@ -1164,27 +1187,68 @@ export default function AddPolicyPage() {
   }, [productClass, t]);
 
   // Handle config form submit
-  const handleConfigFormSubmit = useCallback(() => {
-    configForm.validateFields().then(() => {
+  const handleConfigFormSubmit = useCallback(async () => {
+    try {
+      await configForm.validateFields();
       const values = configForm.getFieldsValue(true);
-      if (currentConfig) {
-        // Edit mode
-        setParamConfigList(prev => prev.map(item =>
-          item.id === currentConfig.id
-            ? mergeParamConfigFormValues(currentConfig, values)
-            : item
-        ));
+      if (!currentConfig) return;
+      const previous = paramConfigList;
+      const next = previous.map(item =>
+        item.id === currentConfig.id
+          ? mergeParamConfigFormValues(currentConfig, values)
+          : item
+      );
+      setParamConfigList(next);
+      if (isEdit && persistedPolicy) {
+        try {
+          await savePolicyMutation.mutateAsync(
+            buildParamConfigListPolicyUpdate(persistedPolicy, next),
+          );
+        } catch {
+          setParamConfigList(previous);
+          void message.error(t('common.failed'));
+          return;
+        }
       }
       setConfigDetailVisible(false);
       setCurrentConfig(null);
       configForm.resetFields();
-      message.success(t('common.success'));
-    });
-  }, [currentConfig, configForm, t]);
+      void message.success(t('common.success'));
+    } catch {
+      void message.warning(t('common.pleaseInput'));
+    }
+  }, [configForm, currentConfig, isEdit, paramConfigList, persistedPolicy, savePolicyMutation, t]);
 
-  const previewImportConfig = useCallback(async (file: File) => {
+  const toSelectedParamImportFiles = useCallback((incomingFiles: UploadFile[]): UploadFile[] => {
+    const merged = new Map(paramFileList.map((file) => [file.uid, file]));
+    for (const file of incomingFiles) {
+      const rawFile = file as unknown as RcFile;
+      merged.set(file.uid, {
+        uid: file.uid,
+        name: file.name,
+        status: 'done',
+        originFileObj: file.originFileObj ?? rawFile,
+      });
+    }
+    return Array.from(merged.values());
+  }, [paramFileList]);
+
+  const nativeUploadFile = (file: UploadFile): File | undefined => {
+    const candidate = file.originFileObj ?? file;
+    if (typeof File !== 'undefined' && candidate instanceof File) return candidate;
+    if (candidate && typeof candidate === 'object' && 'arrayBuffer' in candidate) return candidate as unknown as File;
+    return undefined;
+  };
+
+  const previewImportConfigFiles = useCallback(async (files: UploadFile[]) => {
     if (!activeParamDeviceType) {
       void message.warning(t('provision.paramConfigDeviceTypeUnavailable'));
+      return;
+    }
+    if (files.length === 0) {
+      setPendingImportedConfigs([]);
+      setImportPreview([]);
+      setImportPreviewError('');
       return;
     }
 
@@ -1197,33 +1261,39 @@ export default function AddPolicyPage() {
           paramModelApi.listMappings(paramModelName),
         ])
         : [{ groups: [] }, { items: [] }];
-      const rows = parseParamConfigWorkbook(
-        await file.arrayBuffer(),
-        activeParamDeviceType,
-        importedAt,
-        {
-          deviceType: activeParamDeviceType,
-          productClass: radioInstanceProductIdentity,
-          quickSettingsGroups: quickSettings.groups,
-          paramMappings: mappings.items,
-          quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
-        },
-      );
+      const parseContext = {
+        deviceType: activeParamDeviceType,
+        productClass: radioInstanceProductIdentity,
+        quickSettingsGroups: quickSettings.groups,
+        paramMappings: mappings.items,
+        quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
+      };
       const importId = Date.now();
-      const importedConfigs: ParamConfig[] = rows.map((row, index) => ({
-        id: `import-${importId}-${index}`,
-        deviceType: row.deviceType ?? activeParamDeviceType,
-        serialNumber: row.serialNumber,
-        cellName: row.cellName ?? '',
-        bandsSupport: row.bandsSupport,
-        bandWidth: row.bandWidth,
-        frequency: row.frequency,
-        subframeAssignment: row.subframeAssignment,
-        sheetParameters: row.sheetParameters,
-        workbookMappings: row.workbookMappings,
-        updatedBy: row.updatedBy ?? 'import',
-        updatedAt: row.updatedAt ?? importedAt,
-      }));
+      const importedConfigs: ParamConfig[] = [];
+      for (const [fileIndex, uploadFile] of files.entries()) {
+        const file = nativeUploadFile(uploadFile);
+        if (!file) throw new Error('invalid_upload_file');
+        const rows = parseParamConfigWorkbook(
+          await file.arrayBuffer(),
+          activeParamDeviceType,
+          importedAt,
+          parseContext,
+        );
+        importedConfigs.push(...rows.map((row, index) => ({
+          id: `import-${importId}-${fileIndex}-${index}`,
+          deviceType: row.deviceType ?? activeParamDeviceType,
+          serialNumber: row.serialNumber,
+          cellName: row.cellName ?? '',
+          bandsSupport: row.bandsSupport,
+          bandWidth: row.bandWidth,
+          frequency: row.frequency,
+          subframeAssignment: row.subframeAssignment,
+          sheetParameters: row.sheetParameters,
+          workbookMappings: row.workbookMappings,
+          updatedBy: row.updatedBy ?? 'import',
+          updatedAt: row.updatedAt ?? importedAt,
+        })));
+      }
       const preview = buildParamConfigImportPreview(paramConfigList, importedConfigs);
       setPendingImportedConfigs(importedConfigs);
       setImportPreview(preview);
@@ -1280,7 +1350,8 @@ export default function AddPolicyPage() {
       let commonParamConfig = persistedPolicy?.config?.commonParamConfig ?? {};
       let submittedParamConfigList = paramConfigList;
       const submittedParamConfigMode: ParamConfigMode = values.paramConfigMode === 'specified' ? 'specified' : 'common';
-      if (functionModule === '2') {
+      const submittedFunctionModule = isFunctionModule(values.functionModule) ? values.functionModule : '0';
+      if (submittedFunctionModule === '2') {
         if (values.selfConfigEnable && submittedParamConfigMode === 'common') {
           await commonConfigForm.validateFields();
           commonParamConfig = sanitizeCommonParamConfig({
@@ -1338,6 +1409,7 @@ export default function AddPolicyPage() {
         ?.errorFields?.[0]?.name;
       if (firstInvalidField) {
         form.scrollToField(firstInvalidField, { block: 'center' });
+        commonConfigForm.scrollToField(firstInvalidField, { block: 'center' });
       }
       if ((error as { response?: { status?: number } })?.response?.status === 409) {
         message.error(t('provision.enabledPolicyProductConflict'));
@@ -1346,7 +1418,7 @@ export default function AddPolicyPage() {
       submittingRef.current = false;
       setLoading(false);
     }
-  }, [activeParamDeviceType, commonConfigForm, form, functionModule, hasPersistedPolicy, isEdit, navigate, persistedPolicy?.config?.commonParamConfig, productCatalog?.items, productCatalogLoading, t, savePolicyMutation, paramConfigList]);
+  }, [activeParamDeviceType, commonConfigForm, form, hasPersistedPolicy, isEdit, navigate, persistedPolicy?.config?.commonParamConfig, productCatalog?.items, productCatalogLoading, t, savePolicyMutation, paramConfigList]);
 
   // Handle cancel
   const handleCancel = useCallback(() => {
@@ -1755,28 +1827,30 @@ export default function AddPolicyPage() {
             <Text type="secondary" style={{ marginBottom: 12, display: 'block' }}>
               {t('provision.selectModuleHint')}
             </Text>
-            <Radio.Group value={functionModule} onChange={(e) => setFunctionModule(e.target.value)} style={{ width: '100%' }}>
-              <Space size={16}>
-                <Radio.Button value="0" style={{ width: 240, height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Space>
-                    <CheckCircleOutlined />
-                    <span>{t('provision.softwareUpgrade')}</span>
-                  </Space>
-                </Radio.Button>
-                <Radio.Button value="1" style={{ width: 240, height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Space>
-                    <CheckCircleOutlined />
-                    <span>License</span>
-                  </Space>
-                </Radio.Button>
-                <Radio.Button value="2" style={{ width: 240, height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Space>
-                    <CheckCircleOutlined />
-                    <span>{t('provision.selfConfig')}</span>
-                  </Space>
-                </Radio.Button>
-              </Space>
-            </Radio.Group>
+            <Form.Item name="functionModule" noStyle>
+              <Radio.Group style={{ width: '100%' }}>
+                <Space size={16}>
+                  <Radio.Button value="0" style={{ width: 240, height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Space>
+                      <CheckCircleOutlined />
+                      <span>{t('provision.softwareUpgrade')}</span>
+                    </Space>
+                  </Radio.Button>
+                  <Radio.Button value="1" style={{ width: 240, height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Space>
+                      <CheckCircleOutlined />
+                      <span>License</span>
+                    </Space>
+                  </Radio.Button>
+                  <Radio.Button value="2" style={{ width: 240, height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Space>
+                      <CheckCircleOutlined />
+                      <span>{t('provision.selfConfig')}</span>
+                    </Space>
+                  </Radio.Button>
+                </Space>
+              </Radio.Group>
+            </Form.Item>
           </Card>
 
           {/* Module Config Panels */}
@@ -1979,17 +2053,19 @@ export default function AddPolicyPage() {
         {/* Upload Area */}
         <Upload.Dragger
           accept=".xlsx,.xls,.csv"
+          multiple
           fileList={paramFileList}
-          beforeUpload={(file) => {
-            setParamFileList([file]);
-            void previewImportConfig(file);
+          beforeUpload={(_, fileList) => {
+            const nextFiles = toSelectedParamImportFiles(fileList as UploadFile[]);
+            setParamFileList(nextFiles);
+            void previewImportConfigFiles(nextFiles);
             return false;
           }}
-          onRemove={() => {
-            setParamFileList([]);
-            setImportPreview([]);
-            setPendingImportedConfigs([]);
-            setImportPreviewError('');
+          onRemove={(file) => {
+            const nextFiles = paramFileList.filter((item) => item.uid !== file.uid);
+            setParamFileList(nextFiles);
+            void previewImportConfigFiles(nextFiles);
+            return true;
           }}
         >
           <p className="ant-upload-drag-icon">

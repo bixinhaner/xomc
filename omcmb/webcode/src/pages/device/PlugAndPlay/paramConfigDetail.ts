@@ -33,6 +33,7 @@ interface ParamConfigDetailSource {
   prefixLength?: unknown;
   vlanName?: unknown;
   workbookMappings?: Array<{ sheet: string; header: string; trPath: string }>;
+  customParams?: Array<{ name?: unknown; value?: unknown; trPath?: unknown }>;
 }
 
 const ENB_IPSEC_FIELD_MAPPINGS = [
@@ -382,7 +383,99 @@ function mappedParameterValues(config: ParamConfigDetailSource): Record<string, 
     const mappedValue = config.sheetParameters?.[mapping.sheet]?.[0]?.[mapping.header];
     if (mappedValue !== undefined) values[mapping.trPath] = mappedValue;
   }
+  if (config.deviceType === 'gNB') {
+    for (const [index, row] of (config.sheetParameters?.INTERFACE ?? []).entries()) {
+      const interfaceName = value(row, 'Interface Name');
+      const path = networkInterfaceNamePath(index);
+      if (interfaceName !== undefined && values[path] === undefined) values[path] = interfaceName;
+    }
+  }
+  for (const item of config.customParams ?? []) {
+    const path = stringValue(item.trPath);
+    if (!path || !isNetworkInterfacePath(path) || values[path] !== undefined) continue;
+    const customValue = stringValue(item.value);
+    if (customValue !== undefined) values[path] = customValue;
+  }
   return values;
+}
+
+function isNetworkInterfacePath(path: string): boolean {
+  return /^Device\.(?:Ethernet|IP)\.Interface\./.test(path);
+}
+
+function networkInterfaceNamePath(rowIndex: number): string {
+  return `Device.Ethernet.Interface.${rowIndex + 1}.Name`;
+}
+
+function networkInterfaceSheetTarget(path: string): { rowIndex: number; header: string } | undefined {
+  const match = /^Device\.(?:Ethernet|IP)\.Interface\.(\d+)\.Name$/.exec(path);
+  if (!match) return undefined;
+  return { rowIndex: Number(match[1]) - 1, header: 'Interface Name' };
+}
+
+function mergeNetworkParametersIntoInterfaceSheet(
+  current: ParamConfigDetailSource,
+  sheets: ImportedSheetParameters,
+  networkParameterValues: Record<string, unknown> | undefined,
+): void {
+  if (current.deviceType !== 'gNB' || !networkParameterValues) return;
+  for (const [rawPath, rawValue] of Object.entries(networkParameterValues)) {
+    const path = stringValue(rawPath);
+    if (!path) continue;
+    const target = networkInterfaceSheetTarget(path);
+    if (!target) continue;
+    const row = ensureSheetRow(sheets, 'gNB', 'INTERFACE', target.rowIndex, current.serialNumber);
+    if (!setExistingRowValue(row, [target.header], rawValue)) {
+      row[target.header] = rawValue ?? '';
+    }
+  }
+}
+
+function mergeSubmittedInterfaceNamesIntoInterfaceSheet(
+  current: ParamConfigDetailSource,
+  sheets: ImportedSheetParameters,
+  submittedSheets: ImportedSheetParameters | undefined,
+): void {
+  if (current.deviceType !== 'gNB') return;
+  const submittedRows = submittedSheets?.INTERFACE ?? [];
+  submittedRows.forEach((submittedRow, rowIndex) => {
+    const interfaceName = value(submittedRow, 'Interface Name');
+    if (interfaceName === undefined) return;
+    const row = ensureSheetRow(sheets, 'gNB', 'INTERFACE', rowIndex, current.serialNumber);
+    if (!setExistingRowValue(row, ['Interface Name'], interfaceName)) {
+      row['Interface Name'] = interfaceName ?? '';
+    }
+  });
+}
+
+function mergeUnmappedNetworkParametersIntoCustomParams(
+  current: ParamConfigDetailSource,
+  submittedCustomParams: unknown,
+  networkParameterValues: Record<string, unknown> | undefined,
+): ParamConfigDetailSource['customParams'] | undefined {
+  const baseCustomParams = Array.isArray(submittedCustomParams)
+    ? submittedCustomParams as ParamConfigDetailSource['customParams']
+    : current.customParams;
+  if (!networkParameterValues) return baseCustomParams;
+  const mappedPaths = new Set((current.workbookMappings ?? []).map((mapping) => mapping.trPath));
+  const customByPath = new Map<string, { name?: unknown; value?: unknown; trPath?: unknown }>();
+  for (const item of baseCustomParams ?? []) {
+    const path = stringValue(item.trPath);
+    if (!path || mappedPaths.has(path) || networkInterfaceSheetTarget(path)) continue;
+    customByPath.set(path, item);
+  }
+  for (const [rawPath, rawValue] of Object.entries(networkParameterValues)) {
+    const path = stringValue(rawPath);
+    if (!path || mappedPaths.has(path) || !isNetworkInterfacePath(path) || networkInterfaceSheetTarget(path)) continue;
+    const valueToSave = stringValue(rawValue);
+    if (valueToSave === undefined) {
+      customByPath.delete(path);
+    } else {
+      customByPath.set(path, { ...(customByPath.get(path) ?? {}), trPath: path, value: valueToSave });
+    }
+  }
+  const customParams = Array.from(customByPath.values());
+  return customParams.length > 0 ? customParams : undefined;
 }
 
 function mappedPathValue(
@@ -596,6 +689,11 @@ export function mergeParamConfigFormValues<T extends ParamConfigDetailSource>(
     submitted.sheetParameters as ImportedSheetParameters,
     new Set([primarySheet]),
   ), current.deviceType);
+  mergeSubmittedInterfaceNamesIntoInterfaceSheet(
+    current,
+    sheets,
+    submitted.sheetParameters as ImportedSheetParameters | undefined,
+  );
   const networkParameterValues = submitted.networkParameterValues as Record<string, unknown> | undefined;
   if (networkParameterValues) {
     for (const mapping of current.workbookMappings ?? []) {
@@ -609,6 +707,7 @@ export function mergeParamConfigFormValues<T extends ParamConfigDetailSource>(
       }
     }
   }
+  mergeNetworkParametersIntoInterfaceSheet(current, sheets, networkParameterValues);
   const mappings = current.deviceType === 'gNB'
     ? GNB_SHEET_FIELD_MAPPINGS
     : current.deviceType === 'eNB'
@@ -727,10 +826,15 @@ export function mergeParamConfigFormValues<T extends ParamConfigDetailSource>(
       ? { IPSEC_ENABLE: submitted.IPSEC_ENABLE }
       : {}),
     sheetParameters: sheets,
+    customParams: mergeUnmappedNetworkParametersIntoCustomParams(
+      current,
+      submitted.customParams,
+      networkParameterValues,
+    ),
   } as T & Record<string, unknown>;
   // networkParameterValues is transient form state reconstructed from the
-  // workbook mappings. Persisting it on a device override makes common-policy
-  // materialization convert the same public parameters into customParams,
+  // workbook mappings and customParams. Persisting it on a device override
+  // makes common-policy materialization convert the same public parameters,
   // producing a second stale value on subsequent edits and executions.
   delete result.networkParameterValues;
   return result;
