@@ -37,8 +37,8 @@ func buildUnion(f Filter) (string, []interface{}) {
 	faultDeviceSN := "COALESCE(NULLIF(fl.device_sn, ''), fd.serial_number, '')"
 	eventDeviceName := "COALESCE(NULLIF(el.device_name, ''), NULLIF(di.device_name, ''), d.site_name, '')"
 	faultDeviceName := "COALESCE(NULLIF(fl.device_name, ''), NULLIF(fdi.device_name, ''), fd.site_name, '')"
-	eventDeviceType := "COALESCE(NULLIF(CASE d.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(el.device_type, ''), '')"
-	faultDeviceType := "COALESCE(NULLIF(CASE fd.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(fl.device_type, ''), '')"
+	eventDeviceType := "COALESCE(NULLIF(CASE WHEN UPPER(COALESCE(d.product_class, '')) LIKE 'UPS%' THEN 'UPS' WHEN d.technology = 'nr' THEN 'gNB' WHEN d.technology = 'lte' THEN 'eNB' WHEN d.technology = 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(el.device_type, ''), '')"
+	faultDeviceType := "COALESCE(NULLIF(CASE WHEN UPPER(COALESCE(fd.product_class, '')) LIKE 'UPS%' THEN 'UPS' WHEN fd.technology = 'nr' THEN 'gNB' WHEN fd.technology = 'lte' THEN 'eNB' WHEN fd.technology = 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(fl.device_type, ''), '')"
 	eventOperateIP := "COALESCE(NULLIF(NULLIF(el.operate_ip, ''), '0.0.0.0'), NULLIF(host(d.ip_address), '0.0.0.0'), '')"
 	faultOperateIP := "COALESCE(NULLIF(NULLIF(fl.operate_ip, ''), '0.0.0.0'), NULLIF(host(fd.ip_address), '0.0.0.0'), '')"
 	eventSoftwareVersion := "COALESCE(NULLIF(el.software_version, ''), '')"
@@ -178,6 +178,7 @@ func (r *PgRepository) StatByDevice(ctx context.Context, f Filter) ([]*DeviceReb
 
 	statSQL := `SELECT device_sn,
 		(ARRAY_AGG(device_name ORDER BY reboot_time DESC))[1] AS device_name,
+		(ARRAY_AGG(device_type ORDER BY reboot_time DESC) FILTER (WHERE device_type <> ''))[1] AS device_type,
 		COUNT(*) AS total_count,
 		COUNT(*) FILTER (WHERE is_abnormal) AS abnormal_count,
 		MAX(reboot_time) AS latest_at
@@ -196,12 +197,16 @@ func (r *PgRepository) StatByDevice(ctx context.Context, f Filter) ([]*DeviceReb
 		var (
 			s          DeviceRebootStat
 			deviceName *string
+			deviceType *string
 		)
-		if err := rows.Scan(&s.DeviceSN, &deviceName, &s.TotalCount, &s.AbnormalCount, &s.LatestAt); err != nil {
+		if err := rows.Scan(&s.DeviceSN, &deviceName, &deviceType, &s.TotalCount, &s.AbnormalCount, &s.LatestAt); err != nil {
 			return nil, fmt.Errorf("scan reboot record stat: %w", err)
 		}
 		if deviceName != nil {
 			s.DeviceName = *deviceName
+		}
+		if deviceType != nil {
+			s.DeviceType = *deviceType
 		}
 		items = append(items, &s)
 	}

@@ -182,6 +182,10 @@ var codeModuleNames = map[string]string{
 	"OPERATOR":    "Operator",
 }
 
+var explicitFeaturePaths = map[string][]string{
+	"CODE_UPS": {"UPS", "Monitor"},
+}
+
 // AuthorizationTree derives a PRD §4 nested authorization tree from the legacy
 // feature codes/IDs a license grants. Each recognized CODE_<MODULE>[_<FEATURE>]
 // becomes a leaf "All" under Module[.Feature]; unrecognized or non-CODE_
@@ -215,11 +219,16 @@ func (m *LegacyFeatureMapping) AuthorizationTree(ids, codes []string) map[string
 	}
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
-		if id == "" || m.CatalogIDs[id] {
+		if id == "" {
 			continue
 		}
 		code, ok := m.IDToCode[id]
-		if !ok || seen[code] {
+		if !ok {
+			// Catalog nodes are grouping rows. A few legacy rows (UPS/81) appear
+			// in both catalog_ids and id_to_code; explicit mappings win there.
+			continue
+		}
+		if seen[code] {
 			continue
 		}
 		seen[code] = true
@@ -231,6 +240,9 @@ func (m *LegacyFeatureMapping) AuthorizationTree(ids, codes []string) map[string
 // codeToPath turns CODE_<MODULE>[_<FEATURE>] into a 1- or 2-level path.
 // Returns nil for non-CODE_ values (no stable key can be derived).
 func codeToPath(code string) []string {
+	if path := explicitFeaturePaths[code]; len(path) > 0 {
+		return append([]string(nil), path...)
+	}
 	if !strings.HasPrefix(code, "CODE_") {
 		return nil
 	}

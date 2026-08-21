@@ -1101,19 +1101,23 @@ func TestPGRepository_ListReleaseCandidatesSupersedesOlderQueuedCampaigns(t *tes
 	assert.Equal(t, 1, newQueued, "an older rolling instance must not cancel the newer release campaign")
 }
 
-func insertRegisteredSyncCandidateForTest(t *testing.T, pool *pgxpool.Pool, deviceID uuid.UUID, deleted bool) string {
+func insertRegisteredSyncCandidateForTest(t *testing.T, pool *pgxpool.Pool, deviceID uuid.UUID, deleted bool, productClasses ...string) string {
 	t.Helper()
 	sourceEventID := "device_registered:" + deviceID.String()
 	extensionData, err := json.Marshal(map[string]string{
 		"_system_registration_source_event_id": "inform:" + uuid.NewString(),
 	})
 	require.NoError(t, err)
+	productClass := "FAP/TEST"
+	if len(productClasses) > 0 {
+		productClass = productClasses[0]
+	}
 	_, err = pool.Exec(context.Background(), `
 		INSERT INTO devices (
-			id, serial_number, oui, carrier, technology, lifecycle_state, extension_data, deleted_at
-		) VALUES ($1, $2, 'AABBCC', $3, $4, $5, $6, CASE WHEN $7 THEN now() ELSE NULL END)
-	`, deviceID, "TEST-REGISTERED-"+deviceID.String(), model.CarrierCMCC,
-		model.TechLTE, model.LifecycleRegistered, extensionData, deleted)
+			id, serial_number, oui, product_class, carrier, technology, lifecycle_state, extension_data, deleted_at
+		) VALUES ($1, $2, 'AABBCC', $3, $4, $5, $6, $7, CASE WHEN $8 THEN now() ELSE NULL END)
+	`, deviceID, "TEST-REGISTERED-"+deviceID.String(), productClass,
+		model.CarrierCMCC, model.TechLTE, model.LifecycleRegistered, extensionData, deleted)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM devices WHERE id=$1`, deviceID)
@@ -1183,6 +1187,7 @@ func TestPGRepository_ListRegisteredSyncCandidatesRetriesOnlyUncoveredRegistrati
 	deduplicatedActiveID := uuid.New()
 	backedOffID := uuid.New()
 	deletedID := uuid.New()
+	upsID := uuid.New()
 
 	noRequestSource := insertRegisteredSyncCandidateForTest(t, pool, noRequestID, false)
 	failedSource := insertRegisteredSyncCandidateForTest(t, pool, failedID, false)
@@ -1192,7 +1197,9 @@ func TestPGRepository_ListRegisteredSyncCandidatesRetriesOnlyUncoveredRegistrati
 	deduplicatedActiveSource := insertRegisteredSyncCandidateForTest(t, pool, deduplicatedActiveID, false)
 	backedOffSource := insertRegisteredSyncCandidateForTest(t, pool, backedOffID, false)
 	deletedSource := insertRegisteredSyncCandidateForTest(t, pool, deletedID, true)
+	upsSource := insertRegisteredSyncCandidateForTest(t, pool, upsID, false, "UPS_M3_BMU")
 	_ = noRequestSource
+	_ = upsSource
 
 	insertRegisteredSyncRequestForTest(t, pool, failedID, failedSource, RequestStatusFailed, nil)
 	insertRegisteredSyncRequestForTest(t, pool, rejectedID, rejectedSource, RequestStatusRejected, nil)
@@ -1228,4 +1235,5 @@ func TestPGRepository_ListRegisteredSyncCandidatesRetriesOnlyUncoveredRegistrati
 	assert.False(t, ids[deduplicatedActiveID])
 	assert.False(t, ids[backedOffID])
 	assert.False(t, ids[deletedID])
+	assert.False(t, ids[upsID], "UPS devices must not enter registered parameter sync reconciliation")
 }

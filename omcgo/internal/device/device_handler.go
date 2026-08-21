@@ -383,6 +383,14 @@ func (h *Handler) ListDevices(c *gin.Context) {
 			}
 		}
 	}
+	if deviceType := c.Query("device_type"); deviceType != "" {
+		normalized := normalizeDeviceListDeviceType(deviceType)
+		if normalized == "" {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		filter.DeviceType = normalized
+	}
 	// T-0162: 老 ?status= 兼容入口，DeviceFilter.Status 会在 Repository 层翻译
 	// 为 lifecycle_state + is_online。新前端代码请走 ?lifecycle_state= / ?is_online=。
 	if status := c.Query("status"); status != "" {

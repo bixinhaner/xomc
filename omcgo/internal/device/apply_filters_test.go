@@ -99,3 +99,20 @@ func TestApplyDeviceFilters_NoSoftwareVersion_NoSubquery(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, q, "device_parameters")
 }
+
+func TestApplyDeviceFilters_DeviceTypeTabs(t *testing.T) {
+	base := sq.Select("*").From("devices d").PlaceholderFormat(sq.Dollar)
+
+	upsSQL, upsArgs, err := applyDeviceFilters(base, DeviceFilter{DeviceType: DeviceListDeviceTypeUPS}).ToSql()
+	require.NoError(t, err)
+	assert.Contains(t, upsSQL, "COALESCE(d.product_class, '') LIKE 'UPS%'")
+	assert.Empty(t, upsArgs)
+
+	baseStationSQL, baseStationArgs, err := applyDeviceFilters(
+		base,
+		DeviceFilter{DeviceType: DeviceListDeviceTypeBaseStation},
+	).ToSql()
+	require.NoError(t, err)
+	assert.Contains(t, baseStationSQL, "NOT (COALESCE(d.product_class, '') LIKE 'UPS%')")
+	assert.Empty(t, baseStationArgs)
+}

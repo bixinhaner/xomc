@@ -563,7 +563,7 @@ func (s *RPCResponseSubscriber) persist(
 		)
 		return err
 	}
-	if refreshInfo && s.infoRefresher != nil {
+	if refreshInfo && s.infoRefresher != nil && !isUPSProductClass(device.ProductClass) {
 		if _, err := s.infoRefresher.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology, device.ProductClass); err != nil {
 			s.logger.Warn("refresh device_info snapshot after rpc response persist failed",
 				zap.String("device_id", device.ID.String()),

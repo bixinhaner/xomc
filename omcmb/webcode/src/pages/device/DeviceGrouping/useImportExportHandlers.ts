@@ -183,13 +183,14 @@ export function useImportExportHandlers(deps: {
       t('device.csv.column.sn'),
       t('device.csv.column.deviceName'),
       t('device.csv.column.remark'),
+      t('device.csv.column.productClass'),
       t('device.csv.column.carrier'),
       t('device.csv.column.technology'),
     ].map(csvField).join(',');
     const examples = [
-      ['120288069823C4B0060', '北京海淀中关村站', '一期', '', ''],
-      ['1202000690241FB0010', '北京朝阳CBD站', '二期', 'cmcc', 'lte'],
-      ['UNKNOWN-OUI-00001', '上海浦东陆家嘴站', '', 'ctcc', 'nr'],
+      ['120288069823C4B0060', '北京海淀中关村站', '一期', '', '', ''],
+      ['1202000690241FB0010', '北京朝阳CBD站', '二期', 'FAP/mBS31001/SC', 'cmcc', 'lte'],
+      ['UPS-SN-00001', '机房UPS-01', '', 'UPS_M3_BMU', 'ctcc', 'lte'],
     ].map(row => row.map(csvField).join(',')).join('\n');
     const content = comment + '\n' + header + '\n' + examples + '\n';
     const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' });

@@ -91,6 +91,14 @@ export const deviceService = {
       );
     }
     if (params.vendor) filtered = filtered.filter((d) => d.vendor === params.vendor);
+    if (params.deviceType && params.deviceType !== 'ALL') {
+      filtered = filtered.filter((d) => {
+        const deviceType = d.deviceType || (d.productClass.startsWith('UPS') ? 'UPS' : 'BASE_STATION');
+        if (params.deviceType === 'UPS') return deviceType === 'UPS';
+        if (params.deviceType === 'BASE_STATION') return deviceType !== 'UPS';
+        return true;
+      });
+    }
     if (params.productClass) filtered = filtered.filter((d) => d.productClass === params.productClass);
     // #443: 入参的「制式」（lte/nr/gsm 或老链路 eNB/gNB/GSM）先归一到
     // device.networkType 实际存储的基站类型码（eNB/gNB/GSM）再比对，与真实

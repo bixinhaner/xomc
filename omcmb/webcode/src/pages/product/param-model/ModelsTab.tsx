@@ -21,9 +21,11 @@ interface Props {
   /** 2026-05-28: 由 param-model index 顶部统一 toolbar 提供的关键字过滤
    *  (取消 Tabs 后,搜索框上提到容器外,client-side 过滤 name / description)。 */
   keyword?: string;
+  /** License 过滤后的模型名集合；未传表示不过滤。 */
+  visibleModelNames?: readonly string[];
 }
 
-export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
+export default function ModelsTab({ selectedName, onSelect, keyword, visibleModelNames }: Props) {
   const t = useT();
   const { data, isLoading } = useParamModelList();
   const updateMut = useUpdateParamModel();
@@ -42,17 +44,25 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
     setPage(1);
   }
 
+  const visibleNameSet = useMemo(() => (
+    visibleModelNames
+      ? new Set(visibleModelNames.map((name) => name.trim().toUpperCase()))
+      : undefined
+  ), [visibleModelNames]);
+
   const items = useMemo(() => {
     // 2026-05-29 用户决策:前端隐藏"无加载源"(source=unknown)的孤儿模型。
     // 后端 ListParamModels SQL 已加 WHERE 前缀过滤 + migration 218 一次性物理清理,
     // 本 .filter 是双保险,防止 stale cache / 老版本 API 漏出 unknown 行。
-    const raw = (data?.items || []).filter((m) => (m.source ?? 'unknown') !== 'unknown');
+    const raw = (data?.items || [])
+      .filter((m) => (m.source ?? 'unknown') !== 'unknown')
+      .filter((m) => !visibleNameSet || visibleNameSet.has(m.name.trim().toUpperCase()));
     const k = keyword?.trim().toLowerCase();
     if (!k) return raw;
     return raw.filter((m) =>
       (m.name + ' ' + (m.description || '')).toLowerCase().includes(k),
     );
-  }, [data, keyword]);
+  }, [data, keyword, visibleNameSet]);
 
   const columns = [
     {

@@ -793,6 +793,11 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 		createUser = "system"
 	}
 
+	productClass := strings.TrimSpace(fw.ProductClass)
+	if productClass == "" {
+		productClass = strings.TrimSpace(req.ProductClassHint)
+	}
+
 	mainTask := &UpgradeTask{
 		TaskName:         req.TaskName,
 		TaskType:         taskType,
@@ -801,7 +806,7 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 		FileName:         fw.FileName,
 		FileMD5:          fw.MD5Val,
 		Status:           TaskPending,
-		ProductClass:     fw.ProductClass,
+		ProductClass:     productClass,
 		IsKeepConfig:     req.IsKeepConfig,
 		CreateStatus:     CreateStatusActive,
 		CreateUser:       createUser,
@@ -1274,18 +1279,25 @@ func (s *SoftwareService) handleTCBody(ctx context.Context, commandKey string, f
 	return s.advanceAfterTC(ctx, subTask, dev)
 }
 
-// advanceAfterTC handles the 4G/5G branching after a successful TransferComplete.
+// advanceAfterTC handles device-family branching after a successful TransferComplete.
 func (s *SoftwareService) advanceAfterTC(ctx context.Context, subTask *UpgradeSubTask, dev *model.Device) error {
 	// For log collection (Upload RPC), TransferComplete means the file was successfully
 	// uploaded by the device. No reboot is needed — just complete the subtask.
-	parentTask, err := s.taskRepo.GetByID(ctx, subTask.TaskID)
-	if err == nil && parentTask.TaskType == TaskTypeLogCollect {
-		s.executor.completeSubTask(ctx, subTask, dev.SerialNumber)
-		return nil
+	var parentTask *UpgradeTask
+	if task, err := s.taskRepo.GetByID(ctx, subTask.TaskID); err == nil {
+		parentTask = task
+		if parentTask.TaskType == TaskTypeLogCollect {
+			s.executor.completeSubTask(ctx, subTask, dev.SerialNumber)
+			return nil
+		}
 	}
 
 	is5G := Is5G(dev)
 	nextState := NextStateAfterTC(is5G)
+	isUPSUpgrade := parentTask != nil && parentTask.TaskType == TaskTypeUpgrade && isUPSUpgradeDevice(dev)
+	if isUPSUpgrade {
+		nextState = UpgradeRebooting
+	}
 
 	if err := ValidateUpgradeTransition(subTask.Status, nextState); err != nil {
 		s.logger.Warn("invalid upgrade transition",
@@ -1315,7 +1327,8 @@ func (s *SoftwareService) advanceAfterTC(ctx context.Context, subTask *UpgradeSu
 			}
 		}
 	} else {
-		// 5G: TC success = file downloaded, device will now install and reboot
+		// 5G and UPS both continue after TransferComplete: 5G waits for
+		// 102 UPGRADE FINISH, UPS waits for the following 1 BOOT Inform.
 		if err := s.subTaskRepo.UpdateStatus(ctx, subTask.ID, nextState, ""); err != nil {
 			return fmt.Errorf("update sub-task to rebooting: %w", err)
 		}
@@ -1326,9 +1339,14 @@ func (s *SoftwareService) advanceAfterTC(ctx context.Context, subTask *UpgradeSu
 			s.redis.Del(ctx, tcKey)
 		}
 
-		s.logger.Info("5G download complete, waiting for 102 UPGRADE FINISH",
+		waitEvent := "102 UPGRADE FINISH"
+		if isUPSUpgrade {
+			waitEvent = "1 BOOT software version verification"
+		}
+		s.logger.Info("download complete, waiting for post-transfer event",
 			zap.String("sub_task_id", subTask.ID.String()),
-			zap.String("device_sn", dev.SerialNumber))
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("wait_event", waitEvent))
 	}
 
 	return nil

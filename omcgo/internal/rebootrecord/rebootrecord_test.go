@@ -64,7 +64,7 @@ func TestBuildUnionBackfillsOnlyNameAndIPForRecordDisplayFields(t *testing.T) {
 	assert.Contains(t, sql, "LEFT JOIN device_info di ON di.device_id = d.id")
 	assert.Contains(t, sql, "COALESCE(NULLIF(el.device_sn, ''), d.serial_number, '') AS device_sn")
 	assert.Contains(t, sql, "COALESCE(NULLIF(el.device_name, ''), NULLIF(di.device_name, ''), d.site_name, '') AS device_name")
-	assert.Contains(t, sql, "COALESCE(NULLIF(CASE d.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(el.device_type, ''), '') AS device_type")
+	assert.Contains(t, sql, "COALESCE(NULLIF(CASE WHEN UPPER(COALESCE(d.product_class, '')) LIKE 'UPS%' THEN 'UPS' WHEN d.technology = 'nr' THEN 'gNB' WHEN d.technology = 'lte' THEN 'eNB' WHEN d.technology = 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(el.device_type, ''), '') AS device_type")
 	assert.Contains(t, sql, "COALESCE(NULLIF(NULLIF(el.operate_ip, ''), '0.0.0.0'), NULLIF(host(d.ip_address), '0.0.0.0'), '') AS operate_ip")
 	assert.Contains(t, sql, "COALESCE(NULLIF(el.software_version, ''), '') AS software_version")
 	assert.NotContains(t, sql, "d.firmware_version, '') AS software_version")
@@ -75,7 +75,7 @@ func TestBuildUnionBackfillsOnlyNameAndIPForRecordDisplayFields(t *testing.T) {
 	assert.Contains(t, sql, "COALESCE(NULLIF(fl.device_sn, ''), fd.serial_number, '') AS device_sn")
 	assert.Contains(t, sql, "COALESCE(NULLIF(fl.device_sn, ''), fd.serial_number, '') <> ''")
 	assert.Contains(t, sql, "COALESCE(NULLIF(fl.device_name, ''), NULLIF(fdi.device_name, ''), fd.site_name, '') AS device_name")
-	assert.Contains(t, sql, "COALESCE(NULLIF(CASE fd.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(fl.device_type, ''), '') AS device_type")
+	assert.Contains(t, sql, "COALESCE(NULLIF(CASE WHEN UPPER(COALESCE(fd.product_class, '')) LIKE 'UPS%' THEN 'UPS' WHEN fd.technology = 'nr' THEN 'gNB' WHEN fd.technology = 'lte' THEN 'eNB' WHEN fd.technology = 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(fl.device_type, ''), '') AS device_type")
 	assert.Contains(t, sql, "COALESCE(NULLIF(NULLIF(fl.operate_ip, ''), '0.0.0.0'), NULLIF(host(fd.ip_address), '0.0.0.0'), '') AS operate_ip")
 	assert.Contains(t, sql, "COALESCE(NULLIF(fl.software_version, ''), '') AS software_version")
 	assert.NotContains(t, sql, "fd.firmware_version, '') AS software_version")
@@ -109,13 +109,13 @@ func TestBuildUnionFaultRowsUseDetectedTimeForRebootTime(t *testing.T) {
 }
 
 func TestBuildUnionFiltersUseBackfilledSnapshotFields(t *testing.T) {
-	sql, args := buildUnion(Filter{DeviceSN: "SN-1", DeviceType: "gNB"})
+	sql, args := buildUnion(Filter{DeviceSN: "SN-1", DeviceType: "UPS"})
 
-	require.Equal(t, []interface{}{"%SN-1%", "gNB"}, args)
+	require.Equal(t, []interface{}{"%SN-1%", "UPS"}, args)
 	assert.Contains(t, sql, "COALESCE(NULLIF(el.device_sn, ''), d.serial_number, '') ILIKE $1")
 	assert.Contains(t, sql, "COALESCE(NULLIF(fl.device_sn, ''), fd.serial_number, '') ILIKE $1")
-	assert.Contains(t, sql, "COALESCE(NULLIF(CASE d.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(el.device_type, ''), '') = $2")
-	assert.Contains(t, sql, "COALESCE(NULLIF(CASE fd.technology WHEN 'nr' THEN 'gNB' WHEN 'lte' THEN 'eNB' WHEN 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(fl.device_type, ''), '') = $2")
+	assert.Contains(t, sql, "COALESCE(NULLIF(CASE WHEN UPPER(COALESCE(d.product_class, '')) LIKE 'UPS%' THEN 'UPS' WHEN d.technology = 'nr' THEN 'gNB' WHEN d.technology = 'lte' THEN 'eNB' WHEN d.technology = 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(el.device_type, ''), '') = $2")
+	assert.Contains(t, sql, "COALESCE(NULLIF(CASE WHEN UPPER(COALESCE(fd.product_class, '')) LIKE 'UPS%' THEN 'UPS' WHEN fd.technology = 'nr' THEN 'gNB' WHEN fd.technology = 'lte' THEN 'eNB' WHEN fd.technology = 'gsm' THEN 'GSM' ELSE '' END, ''), NULLIF(fl.device_type, ''), '') = $2")
 	assert.False(t, strings.Contains(sql, " device_sn ILIKE $1"), "filters must not use raw snapshot device_sn only")
 	assert.False(t, strings.Contains(sql, " device_type = $2"), "filters must not use raw snapshot device_type only")
 }

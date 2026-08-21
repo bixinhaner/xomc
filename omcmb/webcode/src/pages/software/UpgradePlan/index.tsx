@@ -905,10 +905,10 @@ export default function UpgradePlan() {
   ], [t, SUB_TASK_STATUS_MAP, TASK_TYPE_MAP]);
 
   // Failure reason renderer with i18n and source classification
-  const DEVICE_CODES = new Set(['DOWNLOAD_FAULT', 'TC_FAULT', 'UPGRADE_5G_FAILED']);
+  const DEVICE_CODES = new Set(['DOWNLOAD_FAULT', 'TC_FAULT', 'UPGRADE_5G_FAILED', 'VERSION_MISMATCH']);
   const TIMEOUT_CODES = new Set(['DOWNLOAD_TIMEOUT', 'TASK_TIMEOUT']);
   // These codes carry dynamic details (FaultCode/FaultString etc.) worth showing
-  const DYNAMIC_DETAIL_CODES = new Set(['DOWNLOAD_FAULT', 'TC_FAULT', 'UPGRADE_5G_FAILED', 'INTERNAL_ERROR', 'FIRMWARE_NOT_FOUND']);
+  const DYNAMIC_DETAIL_CODES = new Set(['DOWNLOAD_FAULT', 'TC_FAULT', 'UPGRADE_5G_FAILED', 'VERSION_MISMATCH', 'INTERNAL_ERROR', 'FIRMWARE_NOT_FOUND']);
 
   function renderFailureReason(record: UpgradeSubTaskInfo) {
     const code: string | undefined = record.failureReason;

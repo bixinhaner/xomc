@@ -59,8 +59,9 @@ func TestLoader_RecountsPersistedStatsInsteadOfTrustingXMLTotalEntries(t *testin
 	require.NoError(t, os.WriteFile(xmlPath, []byte(xmlBody), 0o600))
 
 	loader := NewLoader(pool, appconfig.ParamModelLoaderConfig{}, baseDir, zap.NewNop())
-	_, err := loader.loadParamModelFile(ctx, xmlPath)
+	_, loadedModel, err := loader.loadParamModelFile(ctx, xmlPath)
 	require.NoError(t, err)
+	assert.Equal(t, modelName, loadedModel)
 
 	var entries, objects, params int
 	err = pool.QueryRow(ctx, `

@@ -1,6 +1,10 @@
 package device
 
-import "github.com/omcgo/omcgo/internal/core/model"
+import (
+	"time"
+
+	"github.com/omcgo/omcgo/internal/core/model"
+)
 
 // DeviceDetailComposite aggregates device data from multiple sources
 // for the device detail page. Quick-query columns come from device_info;
@@ -8,11 +12,67 @@ import "github.com/omcgo/omcgo/internal/core/model"
 type DeviceDetailComposite struct {
 	Device   *model.Device  `json:"device"`
 	Info     *DeviceInfo    `json:"info"`
+	UPS      *UPSDetail     `json:"ups,omitempty"`
 	MMEPool  []MMEEntry     `json:"mme_pool"`
 	License  *LicenseDetail `json:"license,omitempty"`
 	Antenna  *AntennaInfo   `json:"antenna,omitempty"`
 	Cells    []CellInfo     `json:"cells"`
 	GSMCells []CellInfo     `json:"gsm_cells,omitempty"`
+}
+
+// UPSDetail mirrors the legacy UPS detail blocks while keeping the fields in
+// the unified device detail endpoint.
+type UPSDetail struct {
+	PowerSystem UPSPowerSystemParam      `json:"power_system_param"`
+	PowerRun    UPSPowerRunParam         `json:"power_run_param"`
+	BatteryRun  []UPSBatteryRuntimeParam `json:"battery_run_param"`
+}
+
+type UPSPowerSystemParam struct {
+	Manufacturer    *string `json:"manufacturer,omitempty"`
+	ManufacturerOUI *string `json:"manufacturer_oui,omitempty"`
+	SerialNumber    string  `json:"serial_number"`
+	HardwareVersion *string `json:"hardware_version,omitempty"`
+	SoftwareVersion *string `json:"software_version,omitempty"`
+	UpTimeSeconds   *int64  `json:"up_time_seconds,omitempty"`
+	ProductClass    string  `json:"product_class"`
+}
+
+type UPSPowerRunParam struct {
+	ExternalIP       *string    `json:"external_ip,omitempty"`
+	TotalVoltage     *string    `json:"total_voltage,omitempty"`
+	TotalTemperature *string    `json:"total_temperature,omitempty"`
+	TotalCurrent     *string    `json:"total_current,omitempty"`
+	BMSCharging      *string    `json:"bms_charging,omitempty"`
+	ACPower          *string    `json:"ac_power,omitempty"`
+	ACVoltage        *string    `json:"ac_voltage,omitempty"`
+	DCVoltage        *string    `json:"dc_voltage,omitempty"`
+	DCCurrent        *string    `json:"dc_current,omitempty"`
+	BoardTemperature *string    `json:"board_temperature,omitempty"`
+	SFPState         *string    `json:"sfp_state,omitempty"`
+	Port0State       *string    `json:"port0_state,omitempty"`
+	Port1State       *string    `json:"port1_state,omitempty"`
+	Port2State       *string    `json:"port2_state,omitempty"`
+	Port3State       *string    `json:"port3_state,omitempty"`
+	AverageSOC       *int       `json:"average_soc,omitempty"`
+	AverageSOCValues *string    `json:"average_soc_values,omitempty"`
+	PackCounts       *int       `json:"pack_counts,omitempty"`
+	LastInformAt     *time.Time `json:"last_inform_at,omitempty"`
+}
+
+type UPSBatteryRuntimeParam struct {
+	PackIndex       int     `json:"pack_index"`
+	SerialNumber    *string `json:"serial_number,omitempty"`
+	SOC             *int    `json:"soc,omitempty"`
+	SOCValues       *string `json:"soc_values,omitempty"`
+	Voltage         *string `json:"voltage,omitempty"`
+	Temperature     *string `json:"temperature,omitempty"`
+	Current         *string `json:"current,omitempty"`
+	Status          *string `json:"status,omitempty"`
+	RecycleCount    *int    `json:"recycle_count,omitempty"`
+	Charging        *string `json:"charging,omitempty"`
+	Model           *string `json:"model,omitempty"`
+	SoftwareVersion *string `json:"software_version,omitempty"`
 }
 
 // MMEEntry represents a single MME connection in the MME pool.

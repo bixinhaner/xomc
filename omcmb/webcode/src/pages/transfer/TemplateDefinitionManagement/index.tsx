@@ -35,6 +35,11 @@ import {
   useUpdateUnifiedFileTransferTaskType,
 } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useProductList } from '@core/hooks/api/useProducts';
+import { useSystemLicense } from '@core/hooks/api/useSystemLicense';
+import {
+  filterDeviceScopedItemsByLicense,
+  isDeviceStandardVisibleByLicense,
+} from '@core/utils/licenseFeatures';
 import type {
   CreateUnifiedFileTransferTypeInput,
   UnifiedFileTransferTaskType,
@@ -43,10 +48,13 @@ import type {
 import {
   buildCategoryPayload,
   buildCategoryTabs,
+  DEVICE_UPGRADE_CATEGORY,
+  filterTaskTypesByUPSLicense,
   filterTaskTypesForCategory,
   getSoftwareLibraryFileTypeLabel,
   getSoftwareLibraryFileTypeOptions,
   getStepLabels,
+  isDeviceUpgradeMember,
   localizeBuiltinCategoryLabel,
   localizeBuiltinDescription,
   localizeBuiltinTypeName,
@@ -62,9 +70,19 @@ export default function TemplateDefinitionManagement() {
   const { data: taskTypes = [], isLoading: taskTypesLoading } = useUnifiedFileTransferTaskTypes({
     refetchOnMount: 'always',
   });
+  const { data: systemLicense, isLoading: systemLicenseLoading } = useSystemLicense();
+  const showUPSOptions = isDeviceStandardVisibleByLicense(systemLicense, systemLicenseLoading, 'UPS');
+  const licensedTaskTypes = useMemo(
+    () => filterTaskTypesByUPSLicense(taskTypes, showUPSOptions),
+    [taskTypes, showUPSOptions],
+  );
   const { data: productsData } = useProductList();
   const products = useMemo(() => productsData?.items ?? [], [productsData]);
-  const categories = useMemo(() => buildCategoryTabs(taskTypes), [taskTypes]);
+  const visibleProducts = useMemo(
+    () => filterDeviceScopedItemsByLicense(products, systemLicense, systemLicenseLoading),
+    [products, systemLicense, systemLicenseLoading],
+  );
+  const categories = useMemo(() => buildCategoryTabs(licensedTaskTypes), [licensedTaskTypes]);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedTypeCode, setSelectedTypeCode] = useState('');
   const [detailType, setDetailType] = useState<UnifiedFileTransferTaskType | null>(null);
@@ -79,11 +97,11 @@ export default function TemplateDefinitionManagement() {
   const deleteTaskTypeMutation = useDeleteUnifiedFileTransferTaskType();
 
   const filteredTaskTypes = useMemo(
-    // #483：buildCategoryTabs 已把 4G/5G/2G 折叠成虚拟分类 device_upgrade，selectedCategory
-    // 可能就是它。后端没有 category==='device_upgrade' 的模板（真实是 enb/gnb/gsm_upgrade），
+    // #483/UPS：buildCategoryTabs 已把 4G/5G/2G/UPS 折叠成虚拟分类 device_upgrade，selectedCategory
+    // 可能就是它。真实模板仍按 enb/gnb/gsm/ups_upgrade 存储，
     // 故必须经 filterTaskTypesForCategory 展开成员，不能精确等值——否则虚拟分类下模板恒为空。
-    () => filterTaskTypesForCategory(taskTypes, selectedCategory),
-    [selectedCategory, taskTypes],
+    () => filterTaskTypesForCategory(licensedTaskTypes, selectedCategory),
+    [licensedTaskTypes, selectedCategory],
   );
   const builtInTypes = useMemo(
     () => filteredTaskTypes.filter((item) => item.builtIn),
@@ -109,19 +127,19 @@ export default function TemplateDefinitionManagement() {
   // #492：模板「适用范围」改为按产品英文名选择（来自产品中心-产品管理目录），
   // 取代旧的 productClass 自由文本。label 带制式 tag 便于辨识。
   const productOptions = useMemo(
-    () => products
+    () => visibleProducts
       .map((p) => ({ label: `${p.name} (${p.tech})`, value: p.name }))
       .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN')),
-    [products],
+    [visibleProducts],
   );
   const productTechByName = useMemo(() => {
     const map = new Map<string, string>();
-    products.forEach((p) => map.set(p.name, p.tech));
+    visibleProducts.forEach((p) => map.set(p.name, p.tech));
     return map;
-  }, [products]);
+  }, [visibleProducts]);
   // #492：「适用产品」空 = 适用全部产品。展示/编辑层统一把"空"呈现为"全选所有产品名"，
   // 保存时若仍是全选则回存空（保持"不限、未来新产品自动纳入"语义）。
-  const allProductNames = useMemo(() => products.map((p) => p.name), [products]);
+  const allProductNames = useMemo(() => visibleProducts.map((p) => p.name), [visibleProducts]);
   // 制式按所选产品自动派生（只读展示），不再让用户手填 techHint。
   const formProducts = Form.useWatch('products', typeForm);
   const derivedTech = useMemo(() => {
@@ -158,6 +176,13 @@ export default function TemplateDefinitionManagement() {
     () => filteredTaskTypes.find((item) => item.typeCode === selectedTypeCode),
     [filteredTaskTypes, selectedTypeCode],
   );
+
+  const getDisplayCategoryLabel = (item: UnifiedFileTransferTaskType) => {
+    if (isDeviceUpgradeMember(item.category)) {
+      return localizeBuiltinCategoryLabel(DEVICE_UPGRADE_CATEGORY, DEVICE_UPGRADE_CATEGORY, t);
+    }
+    return localizeBuiltinCategoryLabel(item.category, item.categoryLabel, t);
+  };
 
   const openTypeDetailDrawer = (record: UnifiedFileTransferTaskType) => {
     setSelectedTypeCode(record.typeCode);
@@ -405,7 +430,7 @@ export default function TemplateDefinitionManagement() {
         {detailType ? (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Descriptions column={2} size="small" bordered>
-              <Descriptions.Item label={t('ufte.template.businessView')}>{localizeBuiltinCategoryLabel(detailType.category, detailType.categoryLabel, t)}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.businessView')}>{getDisplayCategoryLabel(detailType)}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.typeCode')}>{detailType.typeCode}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.rpcType')}>{detailType.rpcType}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.fileType')}>{detailType.fileType}</Descriptions.Item>

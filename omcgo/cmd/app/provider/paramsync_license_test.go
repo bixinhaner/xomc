@@ -16,9 +16,11 @@ type fakeLicenseParamSyncSubmitter struct {
 	command paramsync.SubmitCommand
 	result  *paramsync.SubmitResult
 	err     error
+	calls   int
 }
 
 func (f *fakeLicenseParamSyncSubmitter) Submit(_ context.Context, command paramsync.SubmitCommand) (*paramsync.SubmitResult, error) {
+	f.calls++
 	f.command = command
 	return f.result, f.err
 }
@@ -111,6 +113,16 @@ func TestSubmitRegisteredDeviceSync_RetryUsesNewIdempotencyKeyAndStableSourceEve
 	assert.Equal(t, sourceID, submitter.command.SourceEventID)
 }
 
+func TestSubmitRegisteredDeviceSync_SkipsUPS(t *testing.T) {
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "ups-device", ProductClass: "UPS_M3_BMU"}
+	submitter := &fakeLicenseParamSyncSubmitter{}
+
+	err := submitRegisteredDeviceSync(context.Background(), submitter, dev, "device_registered:"+dev.ID.String())
+
+	require.NoError(t, err)
+	assert.Zero(t, submitter.calls)
+}
+
 func TestParamSyncStarter_RegisteredDeviceUsesDurableSync(t *testing.T) {
 	dev := &model.Device{ID: uuid.Nil, SerialNumber: "registered-device"}
 	submitter := &fakeLicenseParamSyncSubmitter{result: &paramsync.SubmitResult{
@@ -128,6 +140,17 @@ func TestParamSyncStarter_RegisteredDeviceUsesDurableSync(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, paramsync.TriggerDeviceRegistered, submitter.command.TriggerReason)
+}
+
+func TestParamSyncStarter_RegisteredDeviceSkipsUPS(t *testing.T) {
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "ups-device", ProductClass: "UPS/FSU2024"}
+	submitter := &fakeLicenseParamSyncSubmitter{}
+	starter := &paramSyncStarter{service: submitter}
+
+	err := starter.StartRegisteredDeviceSync(context.Background(), dev, "device_registered:"+dev.ID.String())
+
+	require.NoError(t, err)
+	assert.Zero(t, submitter.calls)
 }
 
 func TestParamSyncStarter_DeviceOnlineUsesDirectDurableFullRequest(t *testing.T) {
@@ -165,6 +188,26 @@ func TestParamSyncStarter_DeviceOnlineUsesDirectDurableFullRequest(t *testing.T)
 	assert.Equal(t, "device_online:event-1", submitter.command.IdempotencyKey)
 	assert.Equal(t, "event-1", submitter.command.SourceEventID)
 	assert.Equal(t, "device.online", submitter.command.OriginEventType)
+}
+
+func TestParamSyncStarter_DeviceOnlineSkipsUPS(t *testing.T) {
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "ups-device", ProductClass: "UPS_M3_BMU"}
+	submitter := &fakeLicenseParamSyncSubmitter{}
+	starter := &paramSyncStarter{service: submitter}
+
+	result, err := starter.SubmitDeviceOnlineFullSync(
+		context.Background(),
+		dev,
+		"device_online:event-ups",
+		"event-ups",
+		"device.online",
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "skipped", result.Status)
+	assert.Equal(t, "UPS_UNSUPPORTED", result.ResultCode)
+	assert.Zero(t, submitter.calls)
 }
 
 func TestParamSyncStarter_DeviceOnlinePreservesQueuedAutomaticBackoffResult(t *testing.T) {
@@ -212,6 +255,22 @@ func TestParamSyncStarter_OMCRedeployUsesExplicitOrigin(t *testing.T) {
 	assert.Equal(t, "omc-redeploy:event", submitter.command.SourceEventID)
 }
 
+func TestParamSyncStarter_OMCRedeploySkipsUPS(t *testing.T) {
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "ups-device", ProductClass: "UPS/FSU2024"}
+	submitter := &fakeLicenseParamSyncSubmitter{}
+	starter := &paramSyncStarter{service: submitter}
+
+	result, err := starter.SubmitStartupDeviceOnlineFullSync(
+		context.Background(), dev, "omc-redeploy:key", "omc-redeploy:event",
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "skipped", result.Status)
+	assert.Equal(t, "UPS_UNSUPPORTED", result.ResultCode)
+	assert.Zero(t, submitter.calls)
+}
+
 func TestSubmitReleaseSync_UsesCampaignAndAttemptMetadata(t *testing.T) {
 	dev := &model.Device{ID: uuid.New(), SerialNumber: "release-device"}
 	campaignID := uuid.New()
@@ -237,6 +296,17 @@ func TestSubmitReleaseSync_UsesCampaignAndAttemptMetadata(t *testing.T) {
 	assert.Equal(t, "omc_upgrade", submitter.command.OriginEventType)
 	assert.Contains(t, submitter.command.SourceEventID, campaignID.String())
 	assert.Contains(t, submitter.command.IdempotencyKey, attemptID.String())
+}
+
+func TestSubmitReleaseSync_SkipsUPS(t *testing.T) {
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "ups-device", ProductClass: "UPS_M3_BMU"}
+	submitter := &fakeLicenseParamSyncSubmitter{}
+
+	submitted, err := submitReleaseSync(context.Background(), submitter, dev, uuid.New(), uuid.New())
+
+	require.NoError(t, err)
+	assert.False(t, submitted)
+	assert.Zero(t, submitter.calls)
 }
 
 func TestParamSyncStarter_ReleaseUsesDurableSync(t *testing.T) {

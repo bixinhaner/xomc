@@ -31,10 +31,11 @@ import AutoRefreshDropdown from '../components/AutoRefreshDropdown';
 import ConfirmWithNoteModal from '../components/ConfirmWithNoteModal';
 import { useAlarmListExport } from '../hooks/useAlarmListExport';
 import { buildAlarmExportFieldDefinitions, type AlarmExportFieldKey } from '../utils/alarmExportFields';
-import { BASE_STATION_TYPE_OPTIONS, formatBaseStationTypeLabel } from '../utils/baseStationType';
+import { getBaseStationTypeOptions, formatBaseStationTypeLabel } from '../utils/baseStationType';
 import { renderSnWithTooltip } from '../utils/snTooltip';
 import styles from './CurrentAlarms.module.css';
 import { formatSystemTime } from '@core/utils/systemTime';
+import { useSystemLicense } from '@core/hooks/api/useSystemLicense';
 
 // 告警级别颜色 - 专业配色方案
 const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
@@ -134,6 +135,11 @@ export default function CurrentAlarms() {
   const exportFields = useMemo(() => buildAlarmExportFieldDefinitions(t), [t]);
   const exportFieldOptions = useMemo(() => exportFields.map(({ key, label }) => ({ key, label })), [exportFields]);
   const defaultExportFieldKeys = useMemo(() => exportFields.map(({ key }) => key), [exportFields]);
+  const { data: systemLicense, isLoading: systemLicenseLoading } = useSystemLicense();
+  const deviceStandardOptions = useMemo(
+    () => getBaseStationTypeOptions(systemLicense, systemLicenseLoading),
+    [systemLicense, systemLicenseLoading],
+  );
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
     { name: 'deviceSn', label: t('alarm.deviceSn'), type: 'input', placeholder: t('alarm.searchSnPlaceholder'), width: 180 },
@@ -144,7 +150,7 @@ export default function CurrentAlarms() {
       width: 96,
       options: [
         { label: t('common.all'), value: '' },
-        ...BASE_STATION_TYPE_OPTIONS,
+        ...deviceStandardOptions,
       ],
     },
     {
@@ -205,7 +211,7 @@ export default function CurrentAlarms() {
         { label: t('alarm.recognizeStatus.known'), value: 'false' },
       ],
     },
-  ], [t]);
+  ], [deviceStandardOptions, t]);
 
   const queryParams = useMemo(
     () => {

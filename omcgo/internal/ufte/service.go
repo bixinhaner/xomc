@@ -30,6 +30,10 @@ type ProductTechLookup func(ctx context.Context, productClass string) (tech stri
 // #492：模板 product_scope（适用产品名列表）非空时，设备候选匹配用它做"产品目录精确匹配"。
 type ProductNameLookup func(ctx context.Context, productClass string) (name string, ok bool)
 
+type LicenseFeatureChecker interface {
+	CheckFeature(ctx context.Context, path string) (bool, error)
+}
+
 type Service struct {
 	softwareService *software.SoftwareService
 	taskTypeRepo    TaskTypeRepository
@@ -84,12 +88,70 @@ type Service struct {
 	// 不降低生产安全：生产路由始终注入 reader）。CreateTask 对 req.DeviceIDs 整批校验、
 	// 各操作端点对「任务关联设备」反查后校验，统一委派 authz 包，避免越权语义在此复刻。
 	groupReader authz.GroupReader
+
+	licenseFeatureChecker LicenseFeatureChecker
 }
 
 // SetGroupReader 注入设备组归属读取器（#63 租户隔离强制层）。生产装配必注入；
 // 不注入则 authz 退化为不强制（与 device/alarm nil-safe 语义一致）。
 func (s *Service) SetGroupReader(reader authz.GroupReader) {
 	s.groupReader = reader
+}
+
+func (s *Service) SetLicenseFeatureChecker(checker LicenseFeatureChecker) {
+	s.licenseFeatureChecker = checker
+}
+
+func (s *Service) upsFeatureLicensed(ctx context.Context) bool {
+	if s.licenseFeatureChecker == nil {
+		return true
+	}
+	ok, err := s.licenseFeatureChecker.CheckFeature(ctx, "UPS.Monitor")
+	if err != nil {
+		return false
+	}
+	return ok
+}
+
+func isUPSTaskType(item TaskType) bool {
+	return item.Category == "ups_upgrade" ||
+		item.TypeCode == "UPS_AP_UPGRADE" ||
+		taskTypeProductsContain(item.Products, "UPS")
+}
+
+func isUPSTask(item Task) bool {
+	return item.Category == "ups_upgrade" ||
+		item.TypeCode == "UPS_AP_UPGRADE" ||
+		strings.EqualFold(strings.TrimSpace(item.ProductName), "UPS") ||
+		strings.HasPrefix(strings.ToUpper(strings.TrimSpace(item.ProductType)), "UPS")
+}
+
+func isUPSDeviceItem(item DeviceItem) bool {
+	return item.Category == "ups_upgrade" ||
+		item.TypeCode == "UPS_AP_UPGRADE" ||
+		strings.EqualFold(strings.TrimSpace(item.ProductName), "UPS") ||
+		strings.HasPrefix(strings.ToUpper(strings.TrimSpace(item.ProductType)), "UPS")
+}
+
+func filterUPSTaskTypesByLicense(catalog []TaskType, upsLicensed bool) []TaskType {
+	if upsLicensed {
+		return catalog
+	}
+	filtered := make([]TaskType, 0, len(catalog))
+	for _, item := range catalog {
+		if isUPSTaskType(item) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
+}
+
+func (s *Service) rejectUPSFeatureIfUnlicensed(ctx context.Context, item TaskType) error {
+	if !isUPSTaskType(item) || s.upsFeatureLicensed(ctx) {
+		return nil
+	}
+	return fmt.Errorf("UPS feature is not authorized: %w", commonerrors.ErrLicenseFeatureNotAuthorized)
 }
 
 // authorizeDevices 对一批设备 ID 做归属校验（CreateTask 用）。任一越权整批拒绝。
@@ -321,7 +383,12 @@ func (s *Service) GetOverview(ctx context.Context) (*Overview, error) {
 	running := 0
 	totalDevices30d := 0
 	successDevices30d := 0
+	upsLicensed := s.upsFeatureLicensed(ctx)
 	for _, task := range tasks {
+		mapped, mapErr := s.mapTask(ctx, catalog, &task)
+		if mapErr == nil && !upsLicensed && isUPSTask(*mapped) {
+			continue
+		}
 		if task.Status == software.TaskPending || task.Status == software.TaskInProgress || task.Status == software.TaskSuspended {
 			running++
 		}
@@ -338,7 +405,8 @@ func (s *Service) GetOverview(ctx context.Context) (*Overview, error) {
 	}
 	enabledCount := 0
 	customCount := 0
-	for _, item := range catalog {
+	visibleCatalog := filterUPSTaskTypesByLicense(catalog, upsLicensed)
+	for _, item := range visibleCatalog {
 		if item.Enabled {
 			enabledCount++
 		}
@@ -369,7 +437,7 @@ func (s *Service) GetTaskTypes(ctx context.Context) ([]TaskType, error) {
 			catalog[i].SuccessRate30d = stat.successRate
 		}
 	}
-	return catalog, nil
+	return filterUPSTaskTypesByLicense(catalog, s.upsFeatureLicensed(ctx)), nil
 }
 
 func (s *Service) EnsureBuiltInTaskTypes(ctx context.Context) (int, error) {
@@ -412,6 +480,9 @@ func (s *Service) CreateTaskType(ctx context.Context, req TaskTypeWriteRequest, 
 		typeCode = fmt.Sprintf("%s_%d", base, suffix)
 	}
 	item := taskTypeFromWriteRequest(typeCode, "CODE_"+typeCode, false, req, editor)
+	if err := s.rejectUPSFeatureIfUnlicensed(ctx, item); err != nil {
+		return nil, err
+	}
 	if err := s.taskTypeRepo.Upsert(ctx, &item); err != nil {
 		return nil, err
 	}
@@ -436,6 +507,9 @@ func (s *Service) UpdateTaskType(ctx context.Context, typeCode string, req TaskT
 	updated.techHint = existing.techHint
 	updated.TaskCount30d = existing.TaskCount30d
 	updated.SuccessRate30d = existing.SuccessRate30d
+	if err := s.rejectUPSFeatureIfUnlicensed(ctx, updated); err != nil {
+		return nil, err
+	}
 	if err := s.taskTypeRepo.Upsert(ctx, &updated); err != nil {
 		return nil, err
 	}
@@ -676,6 +750,9 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 	if !ok {
 		return nil, fmt.Errorf("%w: unsupported UFTE type %s", commonerrors.ErrInvalidInput, req.TypeCode)
 	}
+	if err := s.rejectUPSFeatureIfUnlicensed(ctx, typeDef); err != nil {
+		return nil, err
+	}
 	if len(req.DeviceIDs) == 0 {
 		return nil, fmt.Errorf("%w: device_ids is required", commonerrors.ErrInvalidInput)
 	}
@@ -750,6 +827,7 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 			TaskName:         req.TaskName,
 			TaskType:         typeDef.softwareTaskType,
 			DownloadFileType: typeDef.FileType,
+			ProductClassHint: req.ProductType,
 			IsKeepConfig:     req.IsKeepConfig,
 			Concurrency:      req.Concurrency,
 			CreateUser:       createUser,
@@ -998,6 +1076,7 @@ func (s *Service) ListTasks(ctx context.Context, filter TaskListFilter, visibleG
 			return nil, err
 		}
 	}
+	upsLicensed := s.upsFeatureLicensed(ctx)
 	items := make([]Task, 0, len(tasks))
 	for _, task := range tasks {
 		if visibleTaskIDs != nil {
@@ -1009,6 +1088,9 @@ func (s *Service) ListTasks(ctx context.Context, filter TaskListFilter, visibleG
 		mapped, err := s.mapTask(ctx, catalog, &taskCopy)
 		if err != nil {
 			s.logger.Debug("skip UFTE task", zap.String("task_id", task.ID.String()), zap.Error(err))
+			continue
+		}
+		if !upsLicensed && isUPSTask(*mapped) {
 			continue
 		}
 		if !matchesTaskFilter(*mapped, filter) {
@@ -1050,7 +1132,14 @@ func (s *Service) GetTask(ctx context.Context, rawID string, visibleGroups []uui
 	if task == nil {
 		return nil, commonerrors.ErrNotFound
 	}
-	return s.mapTask(ctx, catalog, task)
+	mapped, err := s.mapTask(ctx, catalog, task)
+	if err != nil {
+		return nil, err
+	}
+	if !s.upsFeatureLicensed(ctx) && isUPSTask(*mapped) {
+		return nil, commonerrors.ErrForbidden
+	}
+	return mapped, nil
 }
 
 // visibleTaskIDSet 用一次批量 sub_tasks 加载，算出「至少含一台可见设备」的任务 ID 集合。
@@ -1115,6 +1204,7 @@ func (s *Service) StreamDeviceItems(
 		return err
 	}
 	vis := s.newDeviceVisibility(visibleGroups) // #63 租户隔离
+	upsLicensed := s.upsFeatureLicensed(ctx)
 	deviceCache := make(map[uuid.UUID]*coremodel.Device)
 	parentCache := make(map[uuid.UUID]*software.UpgradeTask)
 	const batchSize = 200
@@ -1152,6 +1242,9 @@ func (s *Service) StreamDeviceItems(
 						zap.String("sub_task_id", subTask.ID.String()), zap.Error(mErr))
 					continue
 				}
+				if !upsLicensed && isUPSDeviceItem(*mapped) {
+					continue
+				}
 				if !matchesDeviceFilter(*mapped, filter) {
 					continue
 				}
@@ -1179,6 +1272,7 @@ func (s *Service) collectFilteredDeviceItems(ctx context.Context, filter DeviceL
 		return nil, err
 	}
 	vis := s.newDeviceVisibility(visibleGroups) // #63 租户隔离
+	upsLicensed := s.upsFeatureLicensed(ctx)
 	deviceCache := make(map[uuid.UUID]*coremodel.Device)
 	parentCache := make(map[uuid.UUID]*software.UpgradeTask)
 	items := make([]DeviceItem, 0, len(subTasks))
@@ -1198,6 +1292,9 @@ func (s *Service) collectFilteredDeviceItems(ctx context.Context, filter DeviceL
 		mapped, err := s.mapDeviceItem(ctx, catalog, subTask, parent, deviceCache)
 		if err != nil {
 			s.logger.Debug("skip UFTE sub-task mapping", zap.String("sub_task_id", subTask.ID.String()), zap.Error(err))
+			continue
+		}
+		if !upsLicensed && isUPSDeviceItem(*mapped) {
 			continue
 		}
 		if !matchesDeviceFilter(*mapped, filter) {
@@ -1226,10 +1323,23 @@ func (s *Service) ListDeviceCandidates(ctx context.Context, filter DeviceCandida
 		if !ok {
 			return nil, fmt.Errorf("%w: unsupported type_code: %s", commonerrors.ErrInvalidInput, filter.TypeCode)
 		}
+		if err := s.rejectUPSFeatureIfUnlicensed(ctx, item); err != nil {
+			return nil, err
+		}
 		typeDef = &item
 		if filter.Category == "" {
 			filter.Category = item.Category
 		}
+	}
+	upsLicensed := s.upsFeatureLicensed(ctx)
+	if !upsLicensed && filter.Category == "ups_upgrade" {
+		return &coremodel.ListResponse[DeviceItem]{
+			Items:      []DeviceItem{},
+			Total:      0,
+			Page:       filter.Page,
+			PageSize:   filter.PageSize,
+			TotalPages: 1,
+		}, nil
 	}
 	deviceFilter := device.DeviceFilter{
 		ListRequest: coremodel.ListRequest{
@@ -1258,6 +1368,9 @@ func (s *Service) ListDeviceCandidates(ctx context.Context, filter DeviceCandida
 	}
 	items := make([]DeviceItem, 0, len(devices.Items))
 	for _, item := range devices.Items {
+		if !upsLicensed && strings.HasPrefix(strings.ToUpper(strings.TrimSpace(item.ProductClass)), "UPS") {
+			continue
+		}
 		if typeDef != nil && !s.deviceMatchesTaskType(ctx, *typeDef, item.ProductClass) {
 			continue
 		}
@@ -1415,7 +1528,14 @@ func (s *Service) deviceMatchesTaskType(ctx context.Context, item TaskType, prod
 	if len(item.Products) == 0 {
 		return true
 	}
-	if productClass == "" || s.productNameLookup == nil {
+	productClass = strings.TrimSpace(productClass)
+	if productClass == "" {
+		return false
+	}
+	if taskTypeProductsContain(item.Products, "UPS") && strings.HasPrefix(productClass, "UPS") {
+		return true
+	}
+	if s.productNameLookup == nil {
 		return false
 	}
 	name, ok := s.productNameLookup(ctx, productClass)
@@ -1448,6 +1568,20 @@ func (s *Service) resolveTaskTypeForTask(
 	productClass string,
 	fileType string,
 ) (TaskType, bool) {
+	if taskType == software.TaskTypeUpgrade && strings.HasPrefix(strings.TrimSpace(productClass), "UPS") {
+		if item, ok := findTaskTypeByCode(catalog, "UPS_AP_UPGRADE"); ok {
+			return item, true
+		}
+	}
+	if taskType == software.TaskTypeUpgrade && s.productNameLookup != nil && productClass != "" {
+		if productName, ok := s.productNameLookup(ctx, productClass); ok && strings.TrimSpace(productName) != "" {
+			for _, item := range catalog {
+				if item.softwareTaskType == taskType && taskTypeProductsContain(item.Products, productName) {
+					return item, true
+				}
+			}
+		}
+	}
 	if taskType == software.TaskTypeUpgrade && s.productTechLookup != nil && productClass != "" {
 		if tech, ok := s.productTechLookup(ctx, productClass); ok && tech != "" {
 			techCode := coremodel.Technology(tech)
@@ -1462,6 +1596,19 @@ func (s *Service) resolveTaskTypeForTask(
 		}
 	}
 	return resolveTaskType(catalog, taskType, productClass, fileType)
+}
+
+func taskTypeProductsContain(products []string, productName string) bool {
+	needle := strings.TrimSpace(productName)
+	if needle == "" {
+		return false
+	}
+	for _, product := range products {
+		if strings.EqualFold(strings.TrimSpace(product), needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) mapTask(ctx context.Context, catalog []TaskType, task *software.UpgradeTask) (*Task, error) {
@@ -1840,7 +1987,7 @@ func matchesTaskFilter(item Task, filter TaskListFilter) bool {
 	if filter.Status != "" && item.Status != filter.Status {
 		return false
 	}
-	if filter.Category != "" && item.Category != filter.Category {
+	if !categoryMatchesFilter(filter.Category, item.Category) {
 		return false
 	}
 	if filter.TypeCode != "" && item.TypeCode != filter.TypeCode {
@@ -1861,7 +2008,7 @@ func matchesDeviceFilter(item DeviceItem, filter DeviceListFilter) bool {
 	if filter.Status != "" && item.Status != filter.Status {
 		return false
 	}
-	if filter.Category != "" && item.Category != filter.Category {
+	if !categoryMatchesFilter(filter.Category, item.Category) {
 		return false
 	}
 	if filter.TypeCode != "" && item.TypeCode != filter.TypeCode {

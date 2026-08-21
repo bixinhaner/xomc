@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { App, Badge, Button, Card, Checkbox, Drawer, Form, Input, InputNumber, Modal, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { App, Badge, Button, Card, Checkbox, Drawer, Form, Input, InputNumber, Modal, Popover, Progress, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   AlertOutlined,
@@ -27,7 +27,12 @@ import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
 import { prefetchDeviceDetailContext, useDeviceList, useBatchRebootDevices, useDeviceGroups, useUpdateDevice, useSyncDeviceParams } from '@core/hooks/api/useDevices';
 import { useProductList } from '@core/hooks/api/useProducts';
 import { useBatchUpdateSysConfigs, useDictionaryBatch, useSysConfigsByCategory } from '@core/hooks/api/useSystem';
+import { useSystemLicense } from '@core/hooks/api/useSystemLicense';
 import { resolveNetworkTypeLabel } from '@core/utils/networkType';
+import {
+  isDeviceStandardValueVisibleByLicense,
+  isDeviceStandardVisibleByLicense,
+} from '@core/utils/licenseFeatures';
 import { activationStatusLabelOf, displayActivationStatusLabelOf, displayActivationStatusOf } from '@core/utils/activationStatus';
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
 import { expandSelectedGroupIds } from '@core/utils/deviceGroupFilter';
@@ -91,6 +96,10 @@ const SEVERITY_COLOR: Record<string, string> = {
 const exportDeviceApi = createApiSwitch(deviceService as unknown as typeof deviceApi, deviceApi);
 // DataTable tableId,导出时据此读取"列设置"localStorage(须与 <DataTable tableId> 一致)。
 const DEVICE_LIST_TABLE_ID = 'device-list-table';
+const UPS_DEVICE_LIST_TABLE_ID = 'device-list-ups-table';
+const UPS_OFFLINE_DURATION_DEFAULT_HIDDEN_MIGRATION_KEY = `${UPS_DEVICE_LIST_TABLE_ID}:offline-duration-hidden:v1`;
+const UPS_UPTIME_AFTER_IP_ORDER_MIGRATION_KEY = `${UPS_DEVICE_LIST_TABLE_ID}:uptime-after-ip-order:v1`;
+const DEVICE_LIST_TAB_PARAM = 'deviceType';
 const ALARM_SYNC_BATCH_CONCURRENCY = 4;
 const PARAM_SYNC_BATCH_CONCURRENCY = 4;
 const PARAM_SYNC_ACTIVE_REFETCH_MS = 3000;
@@ -246,8 +255,168 @@ const URL_ARRAY_FIELDS = new Set<string>([
   'controlPhase',
 ]);
 
+type DeviceListTabKey = 'BASE_STATION' | 'UPS';
+
+const DEVICE_LIST_DEFAULT_TAB: DeviceListTabKey = 'BASE_STATION';
+const UPS_ONLY_COLUMN_KEYS = new Set<string>([
+  'upsProductModel',
+  'upsDeviceModel',
+  'upsSoftwareVersion',
+  'upsAcPower',
+  'upsAcVoltage',
+  'upsSiteId',
+  'upsAverageSoc',
+  'upsPackCounts',
+  'upsBoardTemperature',
+  'upsDcVoltage',
+  'upsDcCurrent',
+  'upsUpTime',
+]);
+const BASE_STATION_ONLY_COLUMN_KEYS = new Set<string>([
+  'networkType',
+  'deviceModel',
+  'productClass',
+  'softwareVersion',
+  'macAddress',
+  'groupName',
+  'installAddress',
+  'opState',
+  'controlSummary',
+  'lastParamSyncAt',
+  'upTime',
+  'mmeStatus',
+  'amfStatus',
+  'bscLinkStatus',
+  'ueCount',
+  'rfStatus',
+  'syncStatus',
+  'siteName',
+  'longitude',
+  'latitude',
+  'gpsHeight',
+  'gpsSatelliteCount',
+  'pci',
+  'tac',
+  'band',
+  'dlEarfcn',
+  'ulEarfcn',
+  'txPower',
+  'halobFlag',
+  'adminState',
+  'ipsecAddr',
+]);
+const UPS_FILTER_FIELD_KEYS = new Set<string>([
+  'searchText',
+  'isOnline',
+]);
+
 function parseUrlValue(key: string, value: string): unknown {
   return URL_ARRAY_FIELDS.has(key) ? value.split(',').filter(Boolean) : value;
+}
+
+function parseDeviceListTab(value: string | null | undefined): DeviceListTabKey {
+  return String(value || '').toUpperCase() === 'UPS' ? 'UPS' : DEVICE_LIST_DEFAULT_TAB;
+}
+
+function sanitizeDeviceListFiltersForTab(
+  params: Record<string, unknown>,
+  tab: DeviceListTabKey,
+): Record<string, unknown> {
+  if (tab !== 'UPS') return params;
+  const next: Record<string, unknown> = {};
+  Object.entries(params).forEach(([key, value]) => {
+    if (UPS_FILTER_FIELD_KEYS.has(key)) {
+      next[key] = value;
+    }
+  });
+  return next;
+}
+
+const upsDash = (value: string | number | undefined | null): string => {
+  if (value === undefined || value === null) return '-';
+  const text = String(value).trim();
+  return text === '' ? '-' : text;
+};
+
+const upsUnitText = (value: string | number | undefined | null, unit: string): string => {
+  const text = upsDash(value);
+  if (text === '-') return text;
+  if (unit === '°C') {
+    if (/[°℃]\s*C?$/i.test(text)) return text.replace(/[°℃]\s*C?$/i, '°C');
+    if (/c$/i.test(text)) return `${text.slice(0, -1)}°C`;
+  }
+  const escapedUnit = unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (new RegExp(`${escapedUnit}$`, 'i').test(text)) return text;
+  return `${text}${unit}`;
+};
+
+const upsSOCColor = (value: number): string => {
+  if (value < 40) return '#FF4D4F';
+  if (value < 70) return '#FAAD14';
+  return '#52C41A';
+};
+
+const upsBoardTemperatureColor = (value: string | undefined): string | undefined => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return undefined;
+  if (n <= 0 || n >= 60) return 'error';
+  if (n < 10 || n >= 40) return 'warning';
+  return 'success';
+};
+
+const isUPSDeviceRecord = (record: Device): boolean => {
+  return record.deviceType === 'UPS'
+    || record.networkType === 'UPS'
+    || String(record.productClass || '').toUpperCase().startsWith('UPS');
+};
+
+const upsProductModelText = (record: Device): string => {
+  const productClass = upsDash(record.productClass);
+  if (productClass === '-') return 'UPS';
+  const [productModel] = productClass.split('/');
+  return upsDash(productModel) === '-' ? 'UPS' : productModel;
+};
+
+const upsDeviceModelText = (record: Device): string => {
+  return upsDash(record.upsSummary?.hardwareVersion || record.deviceModel);
+};
+
+const upsSoftwareVersionText = (record: Device): string => {
+  return upsDash(record.upsSummary?.softwareVersion || record.softwareVersion || record.firmwareVersion);
+};
+
+const upsUpTimeSecondsOf = (record: Device): number | null | undefined => {
+  return record.upsSummary?.upTimeSeconds ?? record.upTime;
+};
+
+const upsAcPowerLabel = (t: TFn, value: string | undefined | null): { label: string; color: string } | null => {
+  const text = upsDash(value);
+  if (text === '-') return null;
+  const normalized = text.toUpperCase();
+  if (normalized === 'ON' || normalized === 'POWER' || normalized === 'NORMAL') {
+    return { label: t('device.ups.acPower.on'), color: 'success' };
+  }
+  if (normalized === 'OFF' || normalized === 'OUTAGE' || normalized === 'FAIL') {
+    return { label: t('device.ups.acPower.off'), color: 'error' };
+  }
+  return { label: text, color: 'default' };
+};
+
+function buildDeviceListUrlParams(filters: Record<string, unknown>, tab: DeviceListTabKey): URLSearchParams {
+  const nextParams = new URLSearchParams();
+  nextParams.set(DEVICE_LIST_TAB_PARAM, tab);
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      if (Array.isArray(value)) {
+        if (value.length > 0) {
+          nextParams.set(key, value.join(','));
+        }
+      } else {
+        nextParams.set(key, String(value));
+      }
+    }
+  });
+  return nextParams;
 }
 
 export default function DeviceList() {
@@ -305,14 +474,18 @@ export default function DeviceList() {
     const size = searchParams.get('pageSize');
     return size ? parseInt(size, 10) : 20;
   });
+  const [activeDeviceTab, setActiveDeviceTab] = useState<DeviceListTabKey>(() =>
+    parseDeviceListTab(searchParams.get(DEVICE_LIST_TAB_PARAM))
+  );
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>(() => {
+    const tab = parseDeviceListTab(searchParams.get(DEVICE_LIST_TAB_PARAM));
     const params: Record<string, unknown> = {};
     searchParams.forEach((value, key) => {
-      if (key !== 'page' && key !== 'pageSize') {
+      if (key !== 'page' && key !== 'pageSize' && key !== DEVICE_LIST_TAB_PARAM) {
         params[key] = parseUrlValue(key, value);
       }
     });
-    return params;
+    return sanitizeDeviceListFiltersForTab(params, tab);
   });
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [controlDrawerDevice, setControlDrawerDevice] = useState<Device | null>(null);
@@ -326,27 +499,30 @@ export default function DeviceList() {
   const [periodicSyncWatchUntil, setPeriodicSyncWatchUntil] = useState(0);
 
   useEffect(() => {
+    const nextTab = parseDeviceListTab(searchParams.get(DEVICE_LIST_TAB_PARAM));
+    setActiveDeviceTab((prev) => prev === nextTab ? prev : nextTab);
     const params: Record<string, unknown> = {};
     searchParams.forEach((value, key) => {
-      if (key !== 'page' && key !== 'pageSize') {
+      if (key !== 'page' && key !== 'pageSize' && key !== DEVICE_LIST_TAB_PARAM) {
         params[key] = parseUrlValue(key, value);
       }
     });
+    const sanitizedParams = sanitizeDeviceListFiltersForTab(params, nextTab);
     const currentKeys = Object.keys(filterParams);
-    const newKeys = Object.keys(params);
+    const newKeys = Object.keys(sanitizedParams);
     if (currentKeys.length !== newKeys.length) {
-      setFilterParams(params);
+      setFilterParams(sanitizedParams);
       return;
     }
     let changed = false;
     for (const key of newKeys) {
-      if (params[key] !== filterParams[key]) {
+      if (sanitizedParams[key] !== filterParams[key]) {
         changed = true;
         break;
       }
     }
     if (changed) {
-      setFilterParams(params);
+      setFilterParams(sanitizedParams);
     }
   }, [searchParams]);
 
@@ -512,17 +688,39 @@ export default function DeviceList() {
 
   const currentUser = useUserStore((s) => s.currentUser);
   const appLocale = useAppStore((s) => s.locale);
+  const { data: systemLicense, isLoading: systemLicenseLoading } = useSystemLicense();
+  const showUPSTab = isDeviceStandardVisibleByLicense(systemLicense, systemLicenseLoading, 'UPS');
+
+  useEffect(() => {
+    if (
+      systemLicenseLoading
+      || activeDeviceTab !== 'UPS'
+      || isDeviceStandardValueVisibleByLicense(activeDeviceTab, systemLicense, false)
+    ) return;
+    const nextFilters = sanitizeDeviceListFiltersForTab(filterParams, DEVICE_LIST_DEFAULT_TAB);
+    setActiveDeviceTab(DEVICE_LIST_DEFAULT_TAB);
+    setFilterParams(nextFilters);
+    setSelectedRowKeys([]);
+    setCurrentPage(1);
+    setSearchParams(buildDeviceListUrlParams(nextFilters, DEVICE_LIST_DEFAULT_TAB));
+  }, [activeDeviceTab, filterParams, setSearchParams, systemLicense, systemLicenseLoading]);
+
   // R6b: 设备分组下拉接入 device/group API（device-list-and-group-improvements-20260520.md R6b）
   const { data: groupsResp } = useDeviceGroups();
+  const effectiveFilterParams = useMemo(
+    () => sanitizeDeviceListFiltersForTab(filterParams, activeDeviceTab),
+    [activeDeviceTab, filterParams],
+  );
   const queryParams = useMemo(() => {
-    const expandedGroupIDs = expandSelectedGroupIds(filterParams.groupId as string | string[] | undefined, groupsResp?.groups ?? []);
+    const expandedGroupIDs = expandSelectedGroupIds(effectiveFilterParams.groupId as string | string[] | undefined, groupsResp?.groups ?? []);
     return {
-      ...filterParams,
+      ...effectiveFilterParams,
       ...(expandedGroupIDs ? { groupId: expandedGroupIDs } : {}),
+      deviceType: activeDeviceTab,
       page: currentPage,
       pageSize,
     } as Parameters<typeof useDeviceList>[0];
-  }, [filterParams, groupsResp?.groups, currentPage, pageSize]);
+  }, [activeDeviceTab, effectiveFilterParams, groupsResp?.groups, currentPage, pageSize]);
 
   const paramSyncPolling = periodicSyncWatchUntil > 0 || optimisticParamSyncDeviceIds.size > 0;
   const { data, isLoading, isFetching, refetch } = useDeviceList(queryParams, {
@@ -615,6 +813,7 @@ export default function DeviceList() {
   );
   const total = data?.total ?? 0;
   const stats = useMemo(() => data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0, online_count: 0, offline_count: 0 }, [data?.stats]);
+  const currentTableId = activeDeviceTab === 'UPS' ? UPS_DEVICE_LIST_TABLE_ID : DEVICE_LIST_TABLE_ID;
 
   useEffect(() => {
     if (periodicSyncWatchUntil <= Date.now()) return;
@@ -855,14 +1054,14 @@ export default function DeviceList() {
 
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
-    // --- 搜索项：文本搜索覆盖 SN/名称/IP/MAC/ECI/PCI ---
+    // --- 搜索项：文本搜索覆盖当前设备类型的核心标识字段 ---
     // 后端 BuildSearchOR 支持英文逗号分隔多关键字（最多 50 个），
     // placeholder 提示用户可粘多 SN 一次搜。
     {
       name: 'searchText',
       label: t('filter.searchText'),
       type: 'input',
-      placeholder: t('filter.searchText.multiHint'),
+      placeholder: activeDeviceTab === 'UPS' ? t('filter.searchText.upsHint') : t('filter.searchText.multiHint'),
       width: 400,
     },
 
@@ -889,7 +1088,9 @@ export default function DeviceList() {
       label: t('device.radioMode'),
       type: 'select',
       width: 160,
-      options: dictToOptions(networkTypeDict),
+      options: dictToOptions(networkTypeDict).filter((option) => (
+        isDeviceStandardValueVisibleByLicense(String(option.value), systemLicense, systemLicenseLoading)
+      )),
     },
     // 产品名称（按 devices.product_id 过滤，下拉来自 /products，value=产品 UUID）——置于产品类型之前。
     {
@@ -956,6 +1157,7 @@ export default function DeviceList() {
     },
   ], [
     t,
+    activeDeviceTab,
     productOptions,
     isOnlineDict,
     formatOnlineOptionLabel,
@@ -967,6 +1169,8 @@ export default function DeviceList() {
     softwareVersionDict,
     groupOptions,
     dictToOptions,
+    systemLicense,
+    systemLicenseLoading,
   ]);
 
   // 2026-06-03 用户决策:下拉(select/multi-select)提示统一在前面加「请选择」(无显式 placeholder 时回退 label,此处前置请选择)。
@@ -987,10 +1191,11 @@ export default function DeviceList() {
   const visibleFilterFields = useMemo(
     () =>
       filterFields.filter((f) => {
+        if (activeDeviceTab === 'UPS' && !UPS_FILTER_FIELD_KEYS.has(f.name)) return false;
         const colKey = FILTER_COLUMN_MAP[f.name];
         return !colKey || !hiddenColumnKeys.includes(colKey);
       }),
-    [filterFields, hiddenColumnKeys]
+    [activeDeviceTab, filterFields, hiddenColumnKeys]
   );
 
   useEffect(() => {
@@ -1004,6 +1209,71 @@ export default function DeviceList() {
       localStorage.setItem(storageKey, JSON.stringify(next));
       setHiddenColumnKeys((prev) => prev.filter((key) => key !== 'offlineDuration'));
       setTableMigrationVersion((prev) => prev + 1);
+    } catch {
+      // ignore malformed column settings and keep current table behavior
+    }
+  }, []);
+
+  useEffect(() => {
+    const hiddenStorageKey = `omc_col_vis_${UPS_DEVICE_LIST_TABLE_ID}`;
+    const orderStorageKey = `omc_col_order_${UPS_DEVICE_LIST_TABLE_ID}`;
+    try {
+      let migrated = false;
+      const offlineDurationMigrationDone =
+        localStorage.getItem(UPS_OFFLINE_DURATION_DEFAULT_HIDDEN_MIGRATION_KEY) === '1';
+      const uptimeOrderMigrationDone =
+        localStorage.getItem(UPS_UPTIME_AFTER_IP_ORDER_MIGRATION_KEY) === '1';
+      const storedHidden = localStorage.getItem(hiddenStorageKey);
+      if (storedHidden) {
+        const parsedHidden = JSON.parse(storedHidden) as unknown;
+        if (Array.isArray(parsedHidden)) {
+          let nextHidden = parsedHidden.filter(
+            (key): key is string => typeof key === 'string' && !BASE_STATION_ONLY_COLUMN_KEYS.has(key),
+          );
+          if (!offlineDurationMigrationDone && !nextHidden.includes('offlineDuration')) {
+            nextHidden = [...nextHidden, 'offlineDuration'];
+          }
+          const hiddenChanged = nextHidden.length !== parsedHidden.length
+            || nextHidden.some((key, index) => key !== parsedHidden[index]);
+          if (hiddenChanged) {
+            localStorage.setItem(hiddenStorageKey, JSON.stringify(nextHidden));
+            migrated = true;
+          }
+        }
+      } else if (!offlineDurationMigrationDone) {
+        localStorage.setItem(hiddenStorageKey, JSON.stringify(['offlineDuration']));
+        migrated = true;
+      }
+      if (!offlineDurationMigrationDone) {
+        localStorage.setItem(UPS_OFFLINE_DURATION_DEFAULT_HIDDEN_MIGRATION_KEY, '1');
+      }
+      const storedOrder = localStorage.getItem(orderStorageKey);
+      if (storedOrder) {
+        const parsedOrder = JSON.parse(storedOrder) as unknown;
+        if (Array.isArray(parsedOrder)) {
+          let nextOrder = parsedOrder.filter(
+            (key): key is string => typeof key === 'string' && !BASE_STATION_ONLY_COLUMN_KEYS.has(key),
+          );
+          if (!uptimeOrderMigrationDone && nextOrder.includes('upsUpTime')) {
+            const reordered = nextOrder.filter((key) => key !== 'upsUpTime');
+            const ipAddressIndex = reordered.indexOf('ipAddress');
+            if (ipAddressIndex >= 0) {
+              reordered.splice(ipAddressIndex + 1, 0, 'upsUpTime');
+              nextOrder = reordered;
+            }
+          }
+          const orderChanged = nextOrder.length !== parsedOrder.length
+            || nextOrder.some((key, index) => key !== parsedOrder[index]);
+          if (orderChanged) {
+            localStorage.setItem(orderStorageKey, JSON.stringify(nextOrder));
+            migrated = true;
+          }
+        }
+      }
+      if (!uptimeOrderMigrationDone) {
+        localStorage.setItem(UPS_UPTIME_AFTER_IP_ORDER_MIGRATION_KEY, '1');
+      }
+      if (migrated) setTableMigrationVersion((prev) => prev + 1);
     } catch {
       // ignore malformed column settings and keep current table behavior
     }
@@ -1037,30 +1307,32 @@ export default function DeviceList() {
       }
     }
 
-    setFilterParams(effective);
+    const nextFilters = sanitizeDeviceListFiltersForTab(effective, activeDeviceTab);
+    setFilterParams(nextFilters);
     setCurrentPage(1);
     // 同步到 URL
-    const newParams = new URLSearchParams();
-    Object.entries(effective).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== '') {
-        if (Array.isArray(value)) {
-          if (value.length > 0) {
-            newParams.set(key, value.join(','));
-          }
-        } else {
-          newParams.set(key, String(value));
-        }
-      }
-    });
-    setSearchParams(newParams);
-  }, [setSearchParams, message, t]);
+    setSearchParams(buildDeviceListUrlParams(nextFilters, activeDeviceTab));
+  }, [activeDeviceTab, setSearchParams, message, t]);
 
   const handleReset = useCallback(() => {
     setFilterParams({});
     setCurrentPage(1);
     // 清空 URL 参数
-    setSearchParams(new URLSearchParams());
-  }, [setSearchParams]);
+    setSearchParams(buildDeviceListUrlParams({}, activeDeviceTab));
+  }, [activeDeviceTab, setSearchParams]);
+
+  const handleDeviceTabChange = useCallback((key: string) => {
+    const nextTab = parseDeviceListTab(key);
+    if (!isDeviceStandardValueVisibleByLicense(nextTab, systemLicense, systemLicenseLoading)) {
+      return;
+    }
+    const nextFilters = sanitizeDeviceListFiltersForTab(filterParams, nextTab);
+    setActiveDeviceTab(nextTab);
+    setFilterParams(nextFilters);
+    setSelectedRowKeys([]);
+    setCurrentPage(1);
+    setSearchParams(buildDeviceListUrlParams(nextFilters, nextTab));
+  }, [filterParams, setSearchParams, systemLicense, systemLicenseLoading]);
 
   // 批量操作通用确认弹窗
   const handleBatchAction = useCallback(
@@ -1668,7 +1940,8 @@ export default function DeviceList() {
   }, [appLocale, opStateDict?.sysDictionaryDetails, t]);
 
   const columns = useMemo(
-    (): DataTableColumn<Device>[] => [
+    (): DataTableColumn<Device>[] => {
+      const allColumns: DataTableColumn<Device>[] = [
       // =====================================================================
       // 公共字段 (common) — 三制式共有或多制式共享
       // =====================================================================
@@ -1758,7 +2031,7 @@ export default function DeviceList() {
       },
       {
         key: 'alarmLevel',
-        title: t('device.alarmLevel'),
+        title: activeDeviceTab === 'UPS' ? t('alarm.stats.count') : t('device.alarmLevel'),
         dataIndex: 'alarmLevel',
         width: 100,
         // 2026-06-04 用户决策:前三列(SN/连接状态/告警级别)固定左侧,横向滚动时
@@ -1766,6 +2039,20 @@ export default function DeviceList() {
         fixed: 'left',
         group: 'common',
         render: (_val, record) => {
+          if (activeDeviceTab === 'UPS' || isUPSDeviceRecord(record)) {
+            const count = record.activeAlarmCount ?? 0;
+            return (
+              <Badge
+                count={count}
+                showZero
+                color={count > 0 ? '#FA8C16' : '#D9D9D9'}
+                style={{ cursor: count > 0 ? 'pointer' : 'default' }}
+                onClick={() => {
+                  if (count > 0) openDeviceDetail(record, 'alarms');
+                }}
+              />
+            );
+          }
           const color = SEVERITY_COLOR[record.alarmLevel] ?? 'default';
           const label = getSeverityLabel(record.alarmLevel);
           if (hasAlarmSeverity(record.alarmLevel)) {
@@ -1864,6 +2151,13 @@ export default function DeviceList() {
           );
         },
       },
+      {
+        key: 'upsUpTime',
+        title: t('device.upTime'),
+        width: 140,
+        group: 'common',
+        render: (_val, record) => fmtDuration(upsUpTimeSecondsOf(record)),
+      },
       { key: 'macAddress', title: t('device.macAddress'), dataIndex: 'macAddress', width: 150, mono: true, copyable: true, group: 'common' },
       { key: 'groupName', title: t('device.groupName'), dataIndex: 'groupName', width: 120, group: 'common' },
       {
@@ -1950,6 +2244,7 @@ export default function DeviceList() {
         key: 'offlineDuration',
         title: t('device.offlineDuration'),
         width: 120,
+        hidden: activeDeviceTab === 'UPS',
         group: 'common',
         render: (_val, record) => {
           // 仅离线设备显示
@@ -2280,9 +2575,112 @@ export default function DeviceList() {
         render: (_val, record) => fmtStatus(record.adminState, adminStateStatusMap),
       },
       { key: 'ipsecAddr', title: t('device.ipsecAddr'), dataIndex: 'ipsecAddr', width: 140, hidden: true, mono: true, group: 'common' },
-    ],
+      {
+        key: 'upsProductModel',
+        title: t('provision.productModel'),
+        width: 120,
+        group: 'common',
+        render: (_val, record) => upsProductModelText(record),
+      },
+      {
+        key: 'upsDeviceModel',
+        title: t('device.model'),
+        width: 130,
+        ellipsis: true,
+        group: 'common',
+        render: (_val, record) => upsDeviceModelText(record),
+      },
+      {
+        key: 'upsSoftwareVersion',
+        title: t('device.softwareVersion'),
+        width: 150,
+        ellipsis: true,
+        group: 'common',
+        render: (_val, record) => upsSoftwareVersionText(record),
+      },
+      {
+        key: 'upsSiteId',
+        title: 'Site ID',
+        width: 110,
+        group: 'common',
+        render: (_val, record) => upsDash(record.siteId || record.stationId),
+      },
+      {
+        key: 'upsAcPower',
+        title: t('device.ups.acPower'),
+        width: 110,
+        group: 'common',
+        render: (_val, record) => {
+          const status = upsAcPowerLabel(t, record.upsSummary?.acPower);
+          if (!status) return '-';
+          return <Tag color={status.color}>{status.label}</Tag>;
+        },
+      },
+      {
+        key: 'upsAcVoltage',
+        title: t('device.ups.acVoltage'),
+        width: 120,
+        group: 'common',
+        render: (_val, record) => upsUnitText(record.upsSummary?.acVoltage, 'V'),
+      },
+      {
+        key: 'upsAverageSoc',
+        title: t('device.ups.averageSoc'),
+        width: 120,
+        group: 'common',
+        render: (_val, record) => {
+          const value = record.upsSummary?.averageSoc;
+          if (value === undefined || value === null) return '-';
+          return (
+            <div style={{ minWidth: 88 }}>
+              <Progress percent={value} size="small" strokeColor={upsSOCColor(value)} />
+            </div>
+          );
+        },
+      },
+      {
+        key: 'upsPackCounts',
+        title: t('device.ups.packCounts'),
+        width: 110,
+        group: 'common',
+        render: (_val, record) => record.upsSummary?.packCounts ?? '-',
+      },
+      {
+        key: 'upsBoardTemperature',
+        title: t('device.ups.boardTemperature'),
+        width: 130,
+        group: 'common',
+        render: (_val, record) => {
+          const value = record.upsSummary?.boardTemperature;
+          if (!value) return '-';
+          return <Tag color={upsBoardTemperatureColor(value)}>{upsUnitText(value, '°C')}</Tag>;
+        },
+      },
+      {
+        key: 'upsDcVoltage',
+        title: t('device.ups.dcVoltage'),
+        width: 120,
+        group: 'common',
+        render: (_val, record) => upsUnitText(record.upsSummary?.dcVoltage, 'V'),
+      },
+      {
+        key: 'upsDcCurrent',
+        title: t('device.ups.dcCurrent'),
+        width: 120,
+        group: 'common',
+        render: (_val, record) => upsUnitText(record.upsSummary?.dcCurrent, 'A'),
+      },
+    ];
+
+      return allColumns.filter((column) => {
+        if (activeDeviceTab === 'UPS') {
+          return !BASE_STATION_ONLY_COLUMN_KEYS.has(column.key);
+        }
+        return !UPS_ONLY_COLUMN_KEYS.has(column.key);
+      });
+    },
     // remarkHeaderRender 暂从 dep 列表移除：remark 列定义已注释，恢复时同步加回。
-    [navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit, optimisticParamSyncDeviceIds, optimisticAlarmSyncDeviceIds, renderLocationCell]
+    [activeDeviceTab, navigate, openDeviceDetail, prefetchDeviceDetailEntry, t, fmtTime, fmtDuration, fmtStatus, adminStateStatusMap, renderMultiCellStatus, renderActivationStatus, message, mapConnStatus, getSeverityLabel, networkTypeDict?.sysDictionaryDetails, editingInstallAddressId, editingInstallAddressValue, savingInstallAddressId, saveInstallAddressEdit, cancelInstallAddressEdit, startInstallAddressEdit, optimisticParamSyncDeviceIds, optimisticAlarmSyncDeviceIds, renderLocationCell]
   );
 
   // ─── 列表导出(用户决策 2026-06-02) ──────────────────────────────────────
@@ -2325,6 +2723,30 @@ export default function DeviceList() {
         case 'adminState': {
           return adminStateLabelOf(record.adminState);
         }
+        case 'upsProductModel':
+          return upsProductModelText(record);
+        case 'upsDeviceModel':
+          return upsDeviceModelText(record);
+        case 'upsSoftwareVersion':
+          return upsSoftwareVersionText(record);
+        case 'upsSiteId':
+          return upsDash(record.siteId || record.stationId);
+        case 'upsAcPower':
+          return upsAcPowerLabel(t, record.upsSummary?.acPower)?.label ?? '-';
+        case 'upsAcVoltage':
+          return upsUnitText(record.upsSummary?.acVoltage, 'V');
+        case 'upsAverageSoc':
+          return upsUnitText(record.upsSummary?.averageSoc, '%');
+        case 'upsPackCounts':
+          return upsDash(record.upsSummary?.packCounts);
+        case 'upsBoardTemperature':
+          return upsUnitText(record.upsSummary?.boardTemperature, '°C');
+        case 'upsDcVoltage':
+          return upsUnitText(record.upsSummary?.dcVoltage, 'V');
+        case 'upsDcCurrent':
+          return upsUnitText(record.upsSummary?.dcCurrent, 'A');
+        case 'upsUpTime':
+          return fmtDuration(upsUpTimeSecondsOf(record));
         case 'ueCount': {
           const v = record.ueCount;
           return v === -1 || v == null ? '--' : String(v);
@@ -2376,7 +2798,8 @@ export default function DeviceList() {
       fetchAllPaged<Device>(
         async (page, pageSize) => {
           const resp = await exportDeviceApi.getList({
-            ...filterParams,
+            ...effectiveFilterParams,
+            deviceType: activeDeviceTab,
             page,
             pageSize,
           } as Parameters<typeof useDeviceList>[0]);
@@ -2384,14 +2807,14 @@ export default function DeviceList() {
         },
         { onProgress },
       ),
-    [filterParams]
+    [activeDeviceTab, effectiveFilterParams]
   );
 
   // 导出 — 选择格式(xlsx/csv)后触发：筛选生效 + 列以"列设置"为准。
   const handleExport = useCallback(
     async (format: 'xlsx' | 'csv') => {
       setExportModalOpen(false);
-      const exportCols = resolveVisibleExportColumns(columns, DEVICE_LIST_TABLE_ID);
+      const exportCols = resolveVisibleExportColumns(columns, currentTableId);
       if (exportCols.length === 0) {
         void message.warning(t('common.noColumnsToExport'));
         return;
@@ -2438,7 +2861,7 @@ export default function DeviceList() {
         });
       }
     },
-    [columns, message, t, fetchAllFilteredDevices, formatExportCell]
+    [columns, currentTableId, message, t, fetchAllFilteredDevices, formatExportCell]
   );
 
   const handleSavePeriodicSync = useCallback(async () => {
@@ -2469,44 +2892,44 @@ export default function DeviceList() {
     }
   }, [batchUpdateSysConfigs, message, periodicSyncConfigs, periodicSyncForm, periodicSyncLoading, refetch, t]);
 
-  const batchActions = useMemo((): BatchAction[] => [
-    {
-      key: 'batch-reboot',
-      label: t('common.batchReboot'),
-      icon: <ReloadOutlined />,
-      onClick: (keys) => handleBatchAction(t('common.batchReboot'), keys, 'batch-reboot'),
-    },
-    // batch-tr069-collect 批量按钮已移除（#179）：按需抓包统一以「运维管理 - TR069
-    // 报文跟踪」菜单为唯一入口；设备页该入口冗余且对 NAT 后设备主动呼叫超时易误触失败。
-    {
-      key: 'batch-log-collect',
-      label: t('device.action.logCollect'),
-      icon: <FileTextOutlined />,
-      onClick: (keys) => handleBatchAction(t('device.action.logCollect'), keys, 'batch-log-collect'),
-    },
-    {
-      key: 'batch-alarm-sync',
-      label: t('device.action.alarmSync'),
-      icon: <AlertOutlined />,
-      disabled: batchAlarmSyncRunning,
-      onClick: (keys) => handleBatchAction(t('device.action.alarmSync'), keys, 'batch-alarm-sync'),
-    },
-    {
-      key: 'batch-param-sync',
-      label: t('device.action.paramSync'),
-      icon: <SyncOutlined />,
-      disabled: batchParamSyncRunning,
-      onClick: (keys) => handleBatchAction(t('device.action.paramSync'), keys, 'batch-param-sync'),
-    },
+  const batchActions = useMemo((): BatchAction[] => {
+    const actions: BatchAction[] = [
+      {
+        key: 'batch-reboot',
+        label: t('common.batchReboot'),
+        icon: <ReloadOutlined />,
+        onClick: (keys) => handleBatchAction(t('common.batchReboot'), keys, 'batch-reboot'),
+      },
+    ];
+    if (activeDeviceTab !== 'UPS') {
+      actions.push(
+        // batch-tr069-collect 批量按钮已移除（#179）：按需抓包统一以「运维管理 - TR069
+        // 报文跟踪」菜单为唯一入口；设备页该入口冗余且对 NAT 后设备主动呼叫超时易误触失败。
+        {
+          key: 'batch-log-collect',
+          label: t('device.action.logCollect'),
+          icon: <FileTextOutlined />,
+          onClick: (keys) => handleBatchAction(t('device.action.logCollect'), keys, 'batch-log-collect'),
+        },
+        {
+          key: 'batch-alarm-sync',
+          label: t('device.action.alarmSync'),
+          icon: <AlertOutlined />,
+          disabled: batchAlarmSyncRunning,
+          onClick: (keys) => handleBatchAction(t('device.action.alarmSync'), keys, 'batch-alarm-sync'),
+        },
+        {
+          key: 'batch-param-sync',
+          label: t('device.action.paramSync'),
+          icon: <SyncOutlined />,
+          disabled: batchParamSyncRunning,
+          onClick: (keys) => handleBatchAction(t('device.action.paramSync'), keys, 'batch-param-sync'),
+        },
+      );
+    }
+    return actions;
     // 恢复默认配置已隐藏
-    // {
-    //   key: 'batch-reset-config',
-    //   label: t('device.action.resetConfig'),
-    //   icon: <ExclamationCircleOutlined />,
-    //   danger: true,
-    //   onClick: (keys) => handleBatchAction(t('device.action.resetConfig'), keys, 'batch-reset-config'),
-    // },
-  ], [batchAlarmSyncRunning, batchParamSyncRunning, handleBatchAction, t]);
+  }, [activeDeviceTab, batchAlarmSyncRunning, batchParamSyncRunning, handleBatchAction, t]);
 
   // 任务面板表格列定义
   const taskColumns: ColumnsType<LocalTask> = useMemo(() => [
@@ -2638,6 +3061,15 @@ export default function DeviceList() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div style={{ flex: '1 1 100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <ListPageLayout>
+          <Tabs
+            activeKey={activeDeviceTab}
+            onChange={handleDeviceTabChange}
+            items={[
+              { key: 'BASE_STATION', label: t('device.tab.baseStation') },
+              ...(showUPSTab ? [{ key: 'UPS', label: t('device.tab.ups') }] : []),
+            ]}
+            style={{ marginBottom: 8 }}
+          />
           <FilterBar
             filterId="device-list"
             fields={visibleFilterFields}
@@ -2664,8 +3096,8 @@ export default function DeviceList() {
             styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
           >
             <DataTable<Device>
-              key={tableMigrationVersion}
-              tableId="device-list-table"
+              key={`${currentTableId}-${tableMigrationVersion}`}
+              tableId={currentTableId}
               columns={columns}
               onHiddenColumnsChange={setHiddenColumnKeys}
               dataSource={devices}
@@ -2686,7 +3118,7 @@ export default function DeviceList() {
               }}
               batchActions={batchActions}
               onRefresh={handleManualRefresh}
-              extraToolbarAfterBatch={(
+              extraToolbarAfterBatch={activeDeviceTab !== 'UPS' ? (
                 <Button
                   size="small"
                   icon={<ClockCircleOutlined />}
@@ -2694,7 +3126,7 @@ export default function DeviceList() {
                 >
                   {t('device.action.autoParamSync')}
                 </Button>
-              )}
+              ) : undefined}
               extraToolbarRight={(
                 <Space size={8}>
                   <Button

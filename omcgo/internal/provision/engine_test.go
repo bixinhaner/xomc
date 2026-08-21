@@ -2047,6 +2047,31 @@ func TestHandleDeviceOnline_DurableModeStartsFullSyncAndThrottlesRepeat(t *testi
 	assert.Equal(t, event.SubjectDeviceOnline, call.originEventType)
 }
 
+func TestHandleDeviceOnline_UPSSkipsDurableFullSync(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			return &model.Device{
+				ID:           deviceID,
+				SerialNumber: "SN-UPS-ONLINE",
+				ProductClass: "UPS_M3_BMU",
+			}, nil
+		},
+	}
+	engine, _ := newOnlineHarness(t, deviceRepo)
+	submitter := &recordingDeviceOnlineFullSyncSubmitter{}
+	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
+
+	err := engine.handleDeviceOnline(context.Background(), device.DeviceOnlineEvent{
+		DeviceID:     deviceID,
+		SerialNumber: "SN-UPS-ONLINE",
+		ProductClass: "UPS_M3_BMU",
+	}, "evt-ups-online")
+
+	require.NoError(t, err)
+	assert.Empty(t, submitter.calls, "UPS online Inform must not submit durable parameter sync")
+}
+
 func TestHandleDeviceOnline_DurableAutomaticBackoffIsQueuedWithoutRetry(t *testing.T) {
 	deviceID := uuid.New()
 	deviceRepo := &mockDeviceRepo{
@@ -2434,6 +2459,34 @@ func TestHandleFirmwareChanged_BecameOnlineStartsDurableFullSync(t *testing.T) {
 	assert.Equal(t, "device_online:firmware_changed:evt-firmware-online", call.idempotencyKey)
 	assert.Equal(t, "evt-firmware-online", call.sourceEventID)
 	assert.Equal(t, event.SubjectDeviceFirmwareChanged, call.originEventType)
+}
+
+func TestHandleFirmwareChanged_UPSSkipsDurableFullSync(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			return &model.Device{
+				ID:           deviceID,
+				SerialNumber: "SN-UPS-FW",
+				ProductClass: "UPS_M3_BMU",
+			}, nil
+		},
+	}
+	engine, _ := newOnlineHarness(t, deviceRepo)
+	submitter := &recordingDeviceOnlineFullSyncSubmitter{}
+	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
+
+	err := engine.handleFirmwareChanged(context.Background(), device.DeviceFirmwareChangedEvent{
+		DeviceID:     deviceID,
+		SerialNumber: "SN-UPS-FW",
+		ProductClass: "UPS_M3_BMU",
+		OldVersion:   "UPS-1.0.0",
+		NewVersion:   "UPS-2.0.0",
+		BecameOnline: true,
+	}, "evt-ups-fw")
+
+	require.NoError(t, err)
+	assert.Empty(t, submitter.calls, "UPS firmware Inform must not submit durable parameter sync")
 }
 
 func TestHandleFirmwareChanged_ModelUploadLockDoesNotSuppressLaterOnlineSync(t *testing.T) {

@@ -643,6 +643,50 @@ func Test_OnlineSubscriber_ParamSyncCompletedHTTPSCompensationCoalescesConcurren
 	assert.Empty(t, stub.captured)
 }
 
+func Test_OnlineSubscriber_ParamSyncCompletedSkipsUPSDevice(t *testing.T) {
+	deviceID := uuid.New()
+	stub := &stubTaskCreator{}
+	parameterReader := &stubPMParameterReader{values: map[uuid.UUID]map[string]string{
+		deviceID: {
+			transfercfg.HTTPSCapabilityParameterPath: "true",
+			pmUploadURLParameterPath:                 "http://upload.example.com:8080/smallcell/FileUploadService?fileType=PM&filename=",
+		},
+	}, updatedAt: time.Now()}
+	resolver := transfercfg.NewAddressResolver(staticPMTransferProvider{snapshot: transfercfg.Snapshot{
+		ProtocolPolicy: transfercfg.ProtocolPolicyPreferHTTPS,
+		Upload: transfercfg.UploadSettings{
+			BaseURL:      "http://upload.example.com:8080",
+			HTTPSBaseURL: "https://upload.example.com:8443",
+		},
+	}}, transfercfg.NewDeviceParameterHTTPSCapabilityReader(parameterReader))
+	s := NewOnlineSubscriber(
+		stub,
+		"http://template.example.com:7557/smallcell/FileUploadService?fileType=PM&filename=",
+		"1",
+		900,
+		nil,
+	)
+	s.SetUploadAddressResolver(resolver)
+	s.SetParamSyncPMCompensationReaders(
+		stubPMDeviceLookup{devices: map[uuid.UUID]*model.Device{
+			deviceID: {
+				ID:           deviceID,
+				SerialNumber: "UPS-SN-PM-SKIP-003",
+				ProductClass: "UPS_M3_BMU",
+			},
+		}},
+		parameterReader,
+	)
+
+	require.NoError(t, s.handleParamSyncCompleted(
+		context.Background(),
+		mustParamSyncCompletedEvent(t, deviceID, string(paramsync.RunStatusSucceeded)),
+	))
+
+	assert.Empty(t, stub.captured)
+	assert.Empty(t, parameterReader.reads)
+}
+
 func Test_OnlineSubscriber_EnqueuesSingleSPVWith3Params(t *testing.T) {
 	stub := &stubTaskCreator{}
 	s := NewOnlineSubscriber(
@@ -684,6 +728,42 @@ func Test_OnlineSubscriber_EnqueuesSingleSPVWith3Params(t *testing.T) {
 	interval := pathMap["Device.FAP.PerfMgmt.Config.1.PeriodicUploadInterval"]
 	assert.Equal(t, "900", interval.Value)
 	assert.Equal(t, "xsd:unsignedInt", interval.Type)
+}
+
+func Test_OnlineSubscriber_UPSOnlineSkipsPMSetup(t *testing.T) {
+	stub := &stubTaskCreator{}
+	s := NewOnlineSubscriber(
+		stub,
+		"http://1.2.3.4:7557/smallcell/FileUploadService?fileType=PM&filename=",
+		"1", 900, nil,
+	)
+	payload := samplePayload()
+	payload.SerialNumber = "UPS-SN-PM-SKIP-001"
+	payload.ProductClass = "UPS_M3_BMU"
+
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, payload)))
+
+	assert.Empty(t, stub.captured)
+}
+
+func Test_OnlineSubscriber_UPSRegisteredSkipsPMSetup(t *testing.T) {
+	stub := &stubTaskCreator{}
+	s := NewOnlineSubscriber(
+		stub,
+		"http://1.2.3.4:7557/smallcell/FileUploadService?fileType=PM&filename=",
+		"1", 900, nil,
+	)
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, map[string]any{
+		"device_id":     uuid.NewString(),
+		"serial_number": "UPS-SN-PM-SKIP-002",
+		"product_class": "UPS_M3_BMU",
+		"created":       true,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, s.handleRegistered(context.Background(), evt))
+
+	assert.Empty(t, stub.captured)
 }
 
 func Test_OnlineSubscriber_EnvSubstitutionDefaultFallback(t *testing.T) {

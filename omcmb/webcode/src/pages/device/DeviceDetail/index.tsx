@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -105,7 +105,18 @@ const SEVERITY_COLOR: Record<string, string> = {
   none: 'default',
 };
 
+const UPS_UNSUPPORTED_DETAIL_TABS = new Set(['control', 'parameters', 'quickSettings', 'performance', 'license', 'password']);
+
 const passwordTaskStorageKey = (deviceSn: string) => `xomc:device-password-task:${deviceSn}`;
+
+function isUPSDeviceLike(device?: Pick<Device, 'deviceType' | 'networkType' | 'productClass'> | null): boolean {
+  return Boolean(
+    device
+      && (device.deviceType === 'UPS'
+        || device.networkType === 'UPS'
+        || device.productClass?.startsWith('UPS')),
+  );
+}
 
 function passwordTaskStatusTagSpec(status: DeviceTaskStatus | undefined): {
   color: string;
@@ -353,14 +364,122 @@ interface BackendDeviceDetailInfo {
   oml_remote_ip_bak?: string;
 }
 
+interface BackendUPSPowerSystemParam {
+  manufacturer?: string;
+  manufacturer_oui?: string;
+  serial_number?: string;
+  hardware_version?: string;
+  software_version?: string;
+  up_time_seconds?: number;
+  product_class?: string;
+}
+
+interface BackendUPSPowerRunParam {
+  external_ip?: string;
+  total_voltage?: string;
+  total_temperature?: string;
+  total_current?: string;
+  bms_charging?: string;
+  ac_power?: string;
+  ac_voltage?: string;
+  dc_voltage?: string;
+  dc_current?: string;
+  board_temperature?: string;
+  sfp_state?: string;
+  port0_state?: string;
+  port1_state?: string;
+  port2_state?: string;
+  port3_state?: string;
+  average_soc?: number;
+  average_soc_values?: string;
+  pack_counts?: number;
+  last_inform_at?: string;
+}
+
+interface BackendUPSBatteryRuntimeParam {
+  pack_index: number;
+  serial_number?: string;
+  soc?: number;
+  soc_values?: string;
+  voltage?: string;
+  temperature?: string;
+  current?: string;
+  status?: string;
+  recycle_count?: number;
+  charging?: string;
+  model?: string;
+  software_version?: string;
+}
+
+interface BackendUPSDetail {
+  power_system_param?: BackendUPSPowerSystemParam;
+  power_run_param?: BackendUPSPowerRunParam;
+  battery_run_param?: BackendUPSBatteryRuntimeParam[];
+}
+
+interface UPSPowerSystemParam {
+  manufacturer?: string;
+  manufacturerOui?: string;
+  serialNumber?: string;
+  hardwareVersion?: string;
+  softwareVersion?: string;
+  upTimeSeconds?: number;
+  productClass?: string;
+}
+
+interface UPSPowerRunParam {
+  externalIp?: string;
+  totalVoltage?: string;
+  totalTemperature?: string;
+  totalCurrent?: string;
+  bmsCharging?: string;
+  acPower?: string;
+  acVoltage?: string;
+  dcVoltage?: string;
+  dcCurrent?: string;
+  boardTemperature?: string;
+  sfpState?: string;
+  port0State?: string;
+  port1State?: string;
+  port2State?: string;
+  port3State?: string;
+  averageSoc?: number;
+  averageSocValues?: string;
+  packCounts?: number;
+  lastInformAt?: string;
+}
+
+interface UPSBatteryRuntimeParam {
+  packIndex: number;
+  serialNumber?: string;
+  soc?: number;
+  socValues?: string;
+  voltage?: string;
+  temperature?: string;
+  current?: string;
+  status?: string;
+  recycleCount?: number;
+  charging?: string;
+  model?: string;
+  softwareVersion?: string;
+}
+
+interface UPSDetail {
+  powerSystemParam: UPSPowerSystemParam;
+  powerRunParam: UPSPowerRunParam;
+  batteryRunParam: UPSBatteryRuntimeParam[];
+}
+
 interface BackendDeviceDetailCompositeResponse {
   info?: BackendDeviceDetailInfo;
+  ups?: BackendUPSDetail;
   cells?: BackendDeviceDetailCell[];
   gsm_cells?: BackendDeviceDetailCell[];
 }
 
 interface DeviceDetailCompositeResponse {
   info?: DeviceDetailInfo;
+  ups?: UPSDetail;
   cells?: DeviceDetailCell[];
   gsmCells?: DeviceDetailCell[];
 }
@@ -429,9 +548,62 @@ function mapDeviceDetailCell(cell: BackendDeviceDetailCell): DeviceDetailCell {
   };
 }
 
+function mapUPSDetail(ups?: BackendUPSDetail): UPSDetail | undefined {
+  if (!ups) return undefined;
+  const system = ups.power_system_param ?? {};
+  const run = ups.power_run_param ?? {};
+  return {
+    powerSystemParam: {
+      manufacturer: system.manufacturer,
+      manufacturerOui: system.manufacturer_oui,
+      serialNumber: system.serial_number,
+      hardwareVersion: system.hardware_version,
+      softwareVersion: system.software_version,
+      upTimeSeconds: system.up_time_seconds,
+      productClass: system.product_class,
+    },
+    powerRunParam: {
+      externalIp: run.external_ip,
+      totalVoltage: run.total_voltage,
+      totalTemperature: run.total_temperature,
+      totalCurrent: run.total_current,
+      bmsCharging: run.bms_charging,
+      acPower: run.ac_power,
+      acVoltage: run.ac_voltage,
+      dcVoltage: run.dc_voltage,
+      dcCurrent: run.dc_current,
+      boardTemperature: run.board_temperature,
+      sfpState: run.sfp_state,
+      port0State: run.port0_state,
+      port1State: run.port1_state,
+      port2State: run.port2_state,
+      port3State: run.port3_state,
+      averageSoc: run.average_soc,
+      averageSocValues: run.average_soc_values,
+      packCounts: run.pack_counts,
+      lastInformAt: run.last_inform_at,
+    },
+    batteryRunParam: (ups.battery_run_param ?? []).map((battery) => ({
+      packIndex: battery.pack_index,
+      serialNumber: battery.serial_number,
+      soc: battery.soc,
+      socValues: battery.soc_values,
+      voltage: battery.voltage,
+      temperature: battery.temperature,
+      current: battery.current,
+      status: battery.status,
+      recycleCount: battery.recycle_count,
+      charging: battery.charging,
+      model: battery.model,
+      softwareVersion: battery.software_version,
+    })),
+  };
+}
+
 function mapDeviceDetailCompositeResponse(data: BackendDeviceDetailCompositeResponse): DeviceDetailCompositeResponse {
   return {
     info: mapDeviceDetailInfo(data.info),
+    ups: mapUPSDetail(data.ups),
     cells: data.cells?.map(mapDeviceDetailCell),
     gsmCells: data.gsm_cells?.map(mapDeviceDetailCell),
   };
@@ -882,6 +1054,307 @@ const renderFieldGroup = (group: FieldGroup, device: DetailDevice) => (
       </Descriptions.Item>
     ))}
   </Descriptions>
+);
+
+const upsText = (value: string | number | undefined | null) => {
+  if (value === undefined || value === null) return '--';
+  const text = String(value).trim();
+  return text === '' ? '--' : text;
+};
+
+const upsValueWithUnit = (value: string | number | undefined | null, unit: string) => {
+  const text = upsText(value);
+  return text === '--' ? text : `${text}${unit}`;
+};
+
+const upsMetricTokenWithUnit = (value: string | number, unit: string) => {
+  const text = String(value).trim();
+  if (!text || !unit) return text;
+  const escapedUnit = unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`${escapedUnit}$`, 'i').test(text) ? text : `${text}${unit}`;
+};
+
+const splitUPSMultiMetric = (value: string | number | undefined | null): string[] => {
+  const text = upsText(value);
+  if (text === '--') return [];
+  return text
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item !== '' && item !== '--');
+};
+
+type UPSMetricTone = 'voltage' | 'temperature' | 'soc' | 'default';
+
+const UPS_METRIC_TONE_STYLES: Record<UPSMetricTone, { color: string; background: string; border: string }> = {
+  voltage: { color: '#0958d9', background: '#e6f4ff', border: '#91caff' },
+  temperature: { color: '#08979c', background: '#e6fffb', border: '#87e8de' },
+  soc: { color: '#389e0d', background: '#f6ffed', border: '#b7eb8f' },
+  default: { color: '#4b5563', background: '#f9fafb', border: '#d1d5db' },
+};
+
+const renderUPSMetricTag = (
+  content: ReactNode,
+  tone: UPSMetricTone,
+  maxWidth: number,
+) => {
+  const token = UPS_METRIC_TONE_STYLES[tone];
+  return (
+    <Tag
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 22,
+        marginInlineEnd: 0,
+        maxWidth,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        fontVariantNumeric: 'tabular-nums',
+        verticalAlign: 'top',
+        color: token.color,
+        background: token.background,
+        borderColor: token.border,
+        lineHeight: '20px',
+      }}
+    >
+      {content}
+    </Tag>
+  );
+};
+
+const renderUPSMultiMetric = (
+  value: string | number | undefined | null,
+  unit: string,
+  options?: { previewCount?: number; tone?: UPSMetricTone; forceTag?: boolean },
+): ReactNode => {
+  const values = splitUPSMultiMetric(value);
+  if (values.length === 0) return '--';
+  const tone = options?.tone ?? 'default';
+  if (values.length === 1) {
+    const content = upsMetricTokenWithUnit(values[0], unit);
+    return options?.forceTag ? renderUPSMetricTag(content, tone, 130) : content;
+  }
+
+  const previewCount = options?.previewCount ?? 4;
+  const preview = values.slice(0, previewCount);
+  const restCount = values.length - preview.length;
+  const fullTitle = (
+    <div style={{ maxWidth: 420 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '4px 12px' }}>
+        {values.map((item, index) => (
+          <span key={`${item}-${index}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+            {upsMetricTokenWithUnit(item, unit)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <Tooltip title={fullTitle} placement="topLeft">
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          flexWrap: 'nowrap',
+          gap: 4,
+          maxWidth: '100%',
+          overflow: 'hidden',
+          cursor: 'default',
+        }}
+      >
+        {preview.map((item, index) => (
+          <Fragment key={`${item}-${index}`}>
+            {renderUPSMetricTag(
+              upsMetricTokenWithUnit(item, unit),
+              tone,
+              116,
+            )}
+          </Fragment>
+        ))}
+        {restCount > 0 && (
+          renderUPSMetricTag(`+${restCount}`, 'default', 72)
+        )}
+      </span>
+    </Tooltip>
+  );
+};
+
+const renderUPSStatusTag = (
+  value: string | undefined,
+  successValues: string[],
+  faultValues: string[] = ['FAULT', 'OFF'],
+) => {
+  const text = upsText(value);
+  if (text === '--') return text;
+  const normalized = text.toUpperCase();
+  const color = successValues.includes(normalized)
+    ? 'success'
+    : faultValues.includes(normalized)
+      ? 'error'
+      : 'default';
+  return <Tag color={color}>{text}</Tag>;
+};
+
+const renderUPSDetail = (
+  ups: UPSDetail | undefined,
+  device: DetailDevice,
+  t: ReturnType<typeof useT>,
+) => {
+  const system = ups?.powerSystemParam ?? {};
+  const run = ups?.powerRunParam ?? {};
+  const batteries = ups?.batteryRunParam ?? [];
+  const batteryColumns = [
+    { title: t('device.ups.packIndex'), dataIndex: 'packIndex', key: 'packIndex', width: 80 },
+    { title: t('device.ups.batterySerialNumber'), dataIndex: 'serialNumber', key: 'serialNumber', width: 180, render: upsText },
+    {
+      title: t('device.ups.soc'),
+      dataIndex: 'socValues',
+      key: 'soc',
+      width: 220,
+      render: (_value: string | undefined, record: UPSBatteryRuntimeParam) => renderUPSMultiMetric(record.socValues ?? record.soc, '%', { tone: 'soc', forceTag: true }),
+    },
+    { title: t('device.ups.voltage'), dataIndex: 'voltage', key: 'voltage', width: 260, render: (value: string | undefined) => renderUPSMultiMetric(value, 'V', { tone: 'voltage', forceTag: true }) },
+    { title: t('device.ups.temperature'), dataIndex: 'temperature', key: 'temperature', width: 260, render: (value: string | undefined) => renderUPSMultiMetric(value, '°C', { tone: 'temperature', forceTag: true }) },
+    { title: t('device.ups.current'), dataIndex: 'current', key: 'current', width: 100, render: (value: string | undefined) => upsValueWithUnit(value, 'A') },
+    { title: t('device.ups.status'), dataIndex: 'status', key: 'status', width: 110, render: (value: string | undefined) => renderUPSStatusTag(value, ['NORMAL']) },
+    { title: t('device.ups.recycleCount'), dataIndex: 'recycleCount', key: 'recycleCount', width: 110, render: upsText },
+    { title: t('device.ups.charging'), dataIndex: 'charging', key: 'charging', width: 130, render: (value: string | undefined) => renderUPSStatusTag(value, ['CHARGING', 'STANDBY'], ['DISCHARGING', 'FAULT']) },
+    { title: t('device.model'), dataIndex: 'model', key: 'model', width: 140, render: upsText },
+    { title: t('device.softwareVersion'), dataIndex: 'softwareVersion', key: 'softwareVersion', width: 150, render: upsText },
+  ];
+
+  return (
+    <>
+      <Descriptions
+        title={t('device.group.other')}
+        bordered
+        column={{ xs: 1, sm: 2, md: 3, lg: 4 }}
+        size="small"
+        style={{ marginBottom: 16 }}
+      >
+        <Descriptions.Item label={t('device.firstOnlineTime')}>{fmtTime(device.firstOnlineTime)}</Descriptions.Item>
+        <Descriptions.Item label={t('device.lastOnline')}>{fmtTime(device.lastOnlineTime)}</Descriptions.Item>
+        <Descriptions.Item label={t('device.offlineTime')}>{fmtTime(device.offlineTime)}</Descriptions.Item>
+        <Descriptions.Item label={t('device.onlineDuration')}>{fmtDuration(computeCurrentOnlineDurationSeconds({
+          isOnline: device.isOnline,
+          onlineTime: device.onlineTime,
+          offlineTime: device.offlineTime,
+          fallbackOnlineDuration: device.onlineDuration,
+        }))}</Descriptions.Item>
+        <Descriptions.Item label={t('device.upTime')}>{fmtDuration(system.upTimeSeconds ?? device.upTime)}</Descriptions.Item>
+        <Descriptions.Item label={t('device.cumulativeOnlineDuration')}>{fmtDuration(computeCumulativeOnlineDurationSeconds({
+          isOnline: device.isOnline,
+          onlineTime: device.onlineTime,
+          offlineTime: device.offlineTime,
+          fallbackOnlineDuration: device.onlineDuration,
+          cumulativeOnlineDuration: device.cumulativeOnlineDuration,
+        }))}</Descriptions.Item>
+        <Descriptions.Item label={t('device.lastInformTime')}>{fmtTime(run.lastInformAt ?? device.lastInformTime)}</Descriptions.Item>
+        <Descriptions.Item label={t('device.lastOfflineReason')}>{device.lastOfflineReason ? t(`device.lastOfflineReason.${device.lastOfflineReason}`) : '-'}</Descriptions.Item>
+      </Descriptions>
+
+      <Descriptions
+        title={t('device.ups.powerSystemParam')}
+        bordered
+        column={{ xs: 1, sm: 2, md: 3, lg: 4 }}
+        size="small"
+        style={{ marginBottom: 16 }}
+      >
+        <Descriptions.Item label={t('table.manufacturer')}>{upsText(system.manufacturer ?? device.vendor)}</Descriptions.Item>
+        <Descriptions.Item label={t('device.oui')}>{upsText(system.manufacturerOui ?? device.oui)}</Descriptions.Item>
+        <Descriptions.Item label={t('device.serialNumber')}>{upsText(system.serialNumber ?? device.sn)}</Descriptions.Item>
+        <Descriptions.Item label={t('device.hardwareVersion')}>{upsText(system.hardwareVersion)}</Descriptions.Item>
+        <Descriptions.Item label={t('device.softwareVersion')}>{upsText(system.softwareVersion ?? device.softwareVersion)}</Descriptions.Item>
+        <Descriptions.Item label={t('device.upTime')}>{fmtDuration(system.upTimeSeconds)}</Descriptions.Item>
+        <Descriptions.Item label={t('device.productClass')}>{upsText(system.productClass ?? device.productClass)}</Descriptions.Item>
+      </Descriptions>
+
+      <Descriptions
+        title={t('device.ups.powerRunParam')}
+        bordered
+        column={{ xs: 1, sm: 2, md: 3, lg: 4 }}
+        size="small"
+        style={{ marginBottom: 16 }}
+      >
+        <Descriptions.Item label={t('device.ipAddress')}>{upsText(run.externalIp ?? device.ipAddress)}</Descriptions.Item>
+        <Descriptions.Item label={t('device.ups.bmsCharging')}>{renderUPSStatusTag(run.bmsCharging, ['CHARGING', 'STANDBY'], ['DISCHARGING', 'FAULT'])}</Descriptions.Item>
+        <Descriptions.Item label={t('device.ups.acPower')}>{renderUPSStatusTag(run.acPower, ['ON'])}</Descriptions.Item>
+        <Descriptions.Item label={t('device.ups.acVoltage')}>{upsValueWithUnit(run.acVoltage, 'V')}</Descriptions.Item>
+        <Descriptions.Item label={t('device.ups.dcVoltage')}>{upsValueWithUnit(run.dcVoltage, 'V')}</Descriptions.Item>
+        <Descriptions.Item label={t('device.ups.dcCurrent')}>{upsValueWithUnit(run.dcCurrent, 'A')}</Descriptions.Item>
+        <Descriptions.Item label={t('device.ups.boardTemperature')}>{renderUPSMultiMetric(run.boardTemperature, '°C', { tone: 'temperature', forceTag: true })}</Descriptions.Item>
+        <Descriptions.Item label={t('device.ups.sfpState')}>{renderUPSStatusTag(run.sfpState, ['PLUGIN', 'UP'])}</Descriptions.Item>
+        <Descriptions.Item label={t('device.ups.port0State')}>{renderUPSStatusTag(run.port0State, ['UP'])}</Descriptions.Item>
+        <Descriptions.Item label={t('device.ups.port1State')}>{renderUPSStatusTag(run.port1State, ['UP'])}</Descriptions.Item>
+        <Descriptions.Item label={t('device.ups.port2State')}>{renderUPSStatusTag(run.port2State, ['UP'])}</Descriptions.Item>
+        <Descriptions.Item label={t('device.ups.port3State')}>{renderUPSStatusTag(run.port3State, ['UP'])}</Descriptions.Item>
+        <Descriptions.Item label={t('device.ups.averageSoc')}>{renderUPSMultiMetric(run.averageSocValues ?? run.averageSoc, '%', { tone: 'soc', forceTag: true })}</Descriptions.Item>
+        <Descriptions.Item label={t('device.ups.packCounts')}>{upsText(run.packCounts)}</Descriptions.Item>
+        <Descriptions.Item label={t('device.lastInformTime')}>{fmtTime(run.lastInformAt)}</Descriptions.Item>
+      </Descriptions>
+
+      <Table<UPSBatteryRuntimeParam>
+        title={() => t('device.ups.batteryRunParam')}
+        rowKey={(row) => `${row.packIndex}-${row.serialNumber ?? ''}`}
+        columns={batteryColumns}
+        dataSource={batteries}
+        pagination={false}
+        size="small"
+        scroll={{ x: 'max-content' }}
+        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('common.noData')} /> }}
+      />
+    </>
+  );
+};
+
+interface UPSSettingsDraft {
+  siteId: string;
+  deviceName: string;
+}
+
+const renderUPSSettings = (
+  draft: UPSSettingsDraft,
+  onChange: (patch: Partial<UPSSettingsDraft>) => void,
+  onSave: () => void,
+  saving: boolean,
+  t: ReturnType<typeof useT>,
+) => (
+  <Card
+    size="small"
+    title={t('device.ups.basicSetting')}
+    style={{ maxWidth: 720 }}
+    actions={[
+      <Button key="save" type="primary" loading={saving} onClick={onSave}>
+        {t('common.save')}
+      </Button>,
+    ]}
+  >
+    <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+      <div>
+        <Text strong>Site ID</Text>
+        <Input
+          value={draft.siteId}
+          maxLength={64}
+          style={{ marginTop: 8 }}
+          placeholder="Site ID"
+          onChange={(event) => onChange({ siteId: event.target.value })}
+        />
+      </div>
+      <div>
+        <Text strong>{t('device.rules.deviceName')}</Text>
+        <Input
+          value={draft.deviceName}
+          maxLength={128}
+          style={{ marginTop: 8 }}
+          placeholder={t('device.rules.deviceName')}
+          onChange={(event) => onChange({ deviceName: event.target.value })}
+          onPressEnter={onSave}
+        />
+      </div>
+    </Space>
+  </Card>
 );
 
 const BM_OPTICAL_MODULE_FIELDS = [
@@ -1421,7 +1894,12 @@ export default function DeviceDetail() {
   const [locationSourceEditorOpen, setLocationSourceEditorOpen] = useState(false);
   const [locationSourceDraft, setLocationSourceDraft] = useState<'tr069' | 'external'>('tr069');
   const [locationSourceSaving, setLocationSourceSaving] = useState(false);
-  const { data: paramSyncStatus, refetch: refetchParamSyncStatus } = useSyncStatus(device?.id ?? '');
+  const [upsSettingsDraft, setUPSSettingsDraft] = useState<UPSSettingsDraft>({ siteId: '', deviceName: '' });
+  const [upsSettingsSaving, setUPSSettingsSaving] = useState(false);
+  const isLoadedUPSDevice = isUPSDeviceLike(device);
+  const { data: paramSyncStatus, refetch: refetchParamSyncStatus } = useSyncStatus(
+    isLoadedUPSDevice ? '' : device?.id ?? '',
+  );
   const [quickSettingsSyncTargetPaths, setQuickSettingsSyncTargetPaths] = useState<string[]>([]);
   const [licenseSyncTargetPaths, setLicenseSyncTargetPaths] = useState<string[]>([]);
   const quickSettingsSync = useQuickSettingsFeedbackStore((s) => (device?.id ? s.quickSettingsSyncs[device.id] : undefined));
@@ -1458,7 +1936,16 @@ export default function DeviceDetail() {
       groupName: buildDeviceGroupDisplayName(merged, groups, appLocale),
     };
   }, [appLocale, detailComposite?.info, device, deviceGroupsData?.groups]);
+  const isUPSDetailDevice = isUPSDeviceLike(displayDevice);
   const alarmRefreshPending = alarmRefreshState?.deviceSn === displayDevice?.sn;
+
+  useEffect(() => {
+    if (!isUPSDetailDevice || !displayDevice) return;
+    setUPSSettingsDraft({
+      siteId: displayDevice.siteId || '',
+      deviceName: displayDevice.name || displayDevice.deviceName || '',
+    });
+  }, [displayDevice?.deviceName, displayDevice?.id, displayDevice?.name, displayDevice?.siteId, isUPSDetailDevice]);
 
   useEffect(() => {
     alarmRefreshAbortRef.current?.abort();
@@ -1548,16 +2035,17 @@ export default function DeviceDetail() {
   }, [device?.id, device?.macAddress, queryClient]);
 
   const handleBackToList = useCallback(() => {
+    const listPath = isUPSDetailDevice ? '/device/list?deviceType=UPS' : '/device/list';
     openTab({
       key: 'device-list',
       label: 'nav.device.list',
       labelRaw: false,
-      path: '/device/list',
+      path: listPath,
       closable: true,
     });
     closeTab(detailTabKey);
-    void navigate('/device/list');
-  }, [closeTab, detailTabKey, navigate, openTab]);
+    void navigate(listPath);
+  }, [closeTab, detailTabKey, isUPSDetailDevice, navigate, openTab]);
 
   // 内部 tab 以 URL ?tab= 作为单一真相源 ——
   // 1) 离开详情页（组件卸载）再切回时，能从 URL 还原内部 tab，不丢状态；
@@ -1573,6 +2061,14 @@ export default function DeviceDetail() {
       return next;
     }, { replace: true });
   }, [setSearchParams, urlTab]);
+  useEffect(() => {
+    if (!isUPSDetailDevice || !UPS_UNSUPPORTED_DETAIL_TABS.has(urlTab)) return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', 'basic');
+      return next;
+    }, { replace: true });
+  }, [isUPSDetailDevice, setSearchParams, urlTab]);
 
   // 将设备详情页注册为按 SN 唯一的 TabBar 项。
   // 同一设备复用同 key，并用 path 刷新当前 ?tab=alarm/gps 等深链接；
@@ -1610,8 +2106,8 @@ export default function DeviceDetail() {
   const {
     data: quickSettingsData,
     isLoading: quickSettingsLoading,
-  } = useQuickSettingsGroups(device?.id);
-  const showQuickSettingsTab = !quickSettingsLoading && (quickSettingsData?.groups?.length ?? 0) > 0;
+  } = useQuickSettingsGroups(isLoadedUPSDevice ? undefined : device?.id);
+  const showQuickSettingsTab = !isUPSDetailDevice && !quickSettingsLoading && (quickSettingsData?.groups?.length ?? 0) > 0;
   useEffect(() => {
     if (!device?.id) return;
     if (quickSettingsLoading) return;
@@ -1772,7 +2268,11 @@ export default function DeviceDetail() {
         }
         break;
       case 'alarms':
-        startAlarmRefresh();
+        if (isUPSDetailDevice) {
+          void queryClient.invalidateQueries({ queryKey: ['alarms', 'current'] });
+        } else {
+          startAlarmRefresh();
+        }
         break;
       case 'quickSettings':
         if (deviceId) {
@@ -1801,7 +2301,7 @@ export default function DeviceDetail() {
       default:
         break;
     }
-  }, [activeTab, device?.id, licenseSyncTargetPaths, modal, queryClient, quickSettingsSyncTargetPaths, refetch, startAlarmRefresh, submitScopedParamRefresh, t]);
+  }, [activeTab, device?.id, isUPSDetailDevice, licenseSyncTargetPaths, modal, queryClient, quickSettingsSyncTargetPaths, refetch, startAlarmRefresh, submitScopedParamRefresh, t]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -2031,13 +2531,22 @@ export default function DeviceDetail() {
       return;
     }
     try {
-      await renameMutation.mutateAsync(nextName);
+      if (isUPSDeviceLike(displayDevice) && displayDevice?.id) {
+        await deviceApi.updateInfo(displayDevice.id, { deviceName: nextName });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['devices', 'list'] }),
+          queryClient.invalidateQueries({ queryKey: ['devices', 'sn', displayDevice.sn] }),
+          queryClient.invalidateQueries({ queryKey: ['devices', 'detail', displayDevice.id] }),
+        ]);
+      } else {
+        await renameMutation.mutateAsync(nextName);
+      }
       setOmcNameEditorOpen(false);
       void message.success(t('device.nameSync.editOmcNameSuccess'));
     } catch {
       void message.error(t('common.operationFailed'));
     }
-  }, [message, omcNameDraft, renameMutation, t]);
+  }, [displayDevice, message, omcNameDraft, queryClient, renameMutation, t]);
 
   const handleOpenLocationSourceEditor = useCallback(() => {
     if (!displayDevice) return;
@@ -2063,6 +2572,32 @@ export default function DeviceDetail() {
       setLocationSourceSaving(false);
     }
   }, [displayDevice, locationSourceDraft, message, queryClient, t]);
+
+  const handleSaveUPSSettings = useCallback(async () => {
+    if (!displayDevice?.id) return;
+    const deviceName = upsSettingsDraft.deviceName.trim();
+    const siteId = upsSettingsDraft.siteId.trim();
+    if (!deviceName) {
+      void message.error(t('device.ups.deviceNameRequired'));
+      return;
+    }
+    setUPSSettingsSaving(true);
+    try {
+      await deviceApi.updateInfo(displayDevice.id, { deviceName, siteId });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['devices', 'list'] }),
+        queryClient.invalidateQueries({ queryKey: ['devices', 'sn', displayDevice.sn] }),
+        queryClient.invalidateQueries({ queryKey: ['devices', 'detail', displayDevice.id] }),
+        queryClient.invalidateQueries({ queryKey: ['devices', 'detail-composite-v2', displayDevice.id] }),
+      ]);
+      await refetch();
+      void message.success(t('common.operationSuccess'));
+    } catch {
+      void message.error(t('common.operationFailed'));
+    } finally {
+      setUPSSettingsSaving(false);
+    }
+  }, [displayDevice?.id, displayDevice?.sn, message, queryClient, refetch, t, upsSettingsDraft.deviceName, upsSettingsDraft.siteId]);
 
   const renderDeviceNetworkType = useCallback<FieldItem['render']>(
     (d) => {
@@ -2228,7 +2763,7 @@ export default function DeviceDetail() {
                 </Tag>
               );
             })()}
-            {displayDevice.controlSummary && (
+            {!isUPSDetailDevice && displayDevice.controlSummary && (
               <Tooltip
                 title={`${displayDevice.controlSummary.sourceName || t('device.control.source.geofence')} · ${formatSystemTime(displayDevice.controlSummary.triggeredAt)}`}
               >
@@ -2250,7 +2785,7 @@ export default function DeviceDetail() {
             )}
           </div>
           <Space>
-            {passwordTaskTag}
+            {!isUPSDetailDevice && passwordTaskTag}
             {/* parameters tab 自带全量同步入口；quickSettings/license 使用页头刷新触发同一套参数同步。 */}
             {activeTab !== 'parameters' && activeTab !== 'password' && activeTab !== 'control' && (
               <Button
@@ -2283,104 +2818,131 @@ export default function DeviceDetail() {
               label: t('common.detail'),
               children: (
                 <div style={{ padding: '16px 0' }}>
-                  {detailGroups[0] && renderFieldGroup(detailGroups[0], displayDevice)}
-                  {isBmProduct && (
-                    <Descriptions
-                      title={t('device.group.opticalModule')}
-                      bordered
-                      column={{ xs: 1, sm: 2, md: 3, lg: 4 }}
-                      size="small"
-                      style={{ marginBottom: 16 }}
-                    >
-                      {BM_OPTICAL_MODULE_FIELDS.map(([leaf, labelKey]) => {
-                        const rawValue = opticalModuleValues.get(`Device.DeviceInfo.OpticalModInfo.1.${leaf}`);
-                        const value = rawValue == null || String(rawValue).trim() === '' ? '-' : String(rawValue);
-                        const content = leaf === 'linkStatus' && value !== '-'
-                          ? (
-                            <Tag color={value.toLowerCase() === 'true' || value === '1' ? 'success' : 'default'}>
-                              {t(value.toLowerCase() === 'true' || value === '1' ? 'status.online' : 'status.offline')}
-                            </Tag>
-                          )
-                          : value;
-                        return (
-                          <Descriptions.Item key={leaf} label={t(labelKey)}>
-                            {opticalModuleLoading ? <Skeleton.Input active size="small" /> : content}
-                          </Descriptions.Item>
-                        );
-                      })}
-                    </Descriptions>
-                  )}
-                  {cellGroup && (
-                    <Card
-                      size="small"
-                      title={cellGroup.title}
-                      extra={bmCellTechOptions.length > 1 ? (
-                        <Space size={8}>
-                          <Text type="secondary">{t('device.cellViewTech')}</Text>
-                          <Radio.Group
+                  {isUPSDetailDevice ? (
+                    renderUPSDetail(detailComposite?.ups, displayDevice, t)
+                  ) : (
+                    <>
+                      {detailGroups[0] && renderFieldGroup(detailGroups[0], displayDevice)}
+                      {isBmProduct && (
+                        <Descriptions
+                          title={t('device.group.opticalModule')}
+                          bordered
+                          column={{ xs: 1, sm: 2, md: 3, lg: 4 }}
+                          size="small"
+                          style={{ marginBottom: 16 }}
+                        >
+                          {BM_OPTICAL_MODULE_FIELDS.map(([leaf, labelKey]) => {
+                            const rawValue = opticalModuleValues.get(`Device.DeviceInfo.OpticalModInfo.1.${leaf}`);
+                            const value = rawValue == null || String(rawValue).trim() === '' ? '-' : String(rawValue);
+                            const content = leaf === 'linkStatus' && value !== '-'
+                              ? (
+                                <Tag color={value.toLowerCase() === 'true' || value === '1' ? 'success' : 'default'}>
+                                  {t(value.toLowerCase() === 'true' || value === '1' ? 'status.online' : 'status.offline')}
+                                </Tag>
+                              )
+                              : value;
+                            return (
+                              <Descriptions.Item key={leaf} label={t(labelKey)}>
+                                {opticalModuleLoading ? <Skeleton.Input active size="small" /> : content}
+                              </Descriptions.Item>
+                            );
+                          })}
+                        </Descriptions>
+                      )}
+                      {cellGroup && (
+                        <Card
+                          size="small"
+                          title={cellGroup.title}
+                          extra={bmCellTechOptions.length > 1 ? (
+                            <Space size={8}>
+                              <Text type="secondary">{t('device.cellViewTech')}</Text>
+                              <Radio.Group
+                                size="small"
+                                optionType="button"
+                                buttonStyle="solid"
+                                value={activeBmTech}
+                                onChange={(event) => setActiveBmTech(event.target.value as BmCellTech)}
+                              >
+                                {bmCellTechOptions.map((tech) => (
+                                  <Radio.Button key={tech} value={tech}>
+                                    {tech === 'LTE' ? t('device.cellViewTech.lte') : t('device.cellViewTech.gsm')}
+                                  </Radio.Button>
+                                ))}
+                              </Radio.Group>
+                            </Space>
+                          ) : undefined}
+                        >
+                          <Table<CellRecord>
+                            rowKey="key"
+                            columns={cellColumns}
+                            dataSource={displayCellRecords}
+                            pagination={false}
                             size="small"
-                            optionType="button"
-                            buttonStyle="solid"
-                            value={activeBmTech}
-                            onChange={(event) => setActiveBmTech(event.target.value as BmCellTech)}
-                          >
-                            {bmCellTechOptions.map((tech) => (
-                              <Radio.Button key={tech} value={tech}>
-                                {tech === 'LTE' ? t('device.cellViewTech.lte') : t('device.cellViewTech.gsm')}
-                              </Radio.Button>
-                            ))}
-                          </Radio.Group>
-                        </Space>
-                      ) : undefined}
-                    >
-                      <Table<CellRecord>
-                        rowKey="key"
-                        columns={cellColumns}
-                        dataSource={displayCellRecords}
-                        pagination={false}
-                        size="small"
-                        scroll={{ x: 'max-content' }}
-                      />
-                    </Card>
+                            scroll={{ x: 'max-content' }}
+                          />
+                        </Card>
+                      )}
+                      {detailGroups.slice(1).map((group) => renderFieldGroup(group, displayDevice))}
+                    </>
                   )}
-                  {detailGroups.slice(1).map((group) => renderFieldGroup(group, displayDevice))}
                 </div>
               ),
             },
-            {
-              key: 'control',
-              label: (
-                <span>
-                  {t('device.control.tabTitle')}
-                  {displayDevice.controlSummary && <Badge status="error" style={{ marginLeft: 6 }} />}
-                </span>
-              ),
-              children: (
-                <div style={{ padding: '16px 0' }}>
-                  <ErrorBoundary>
-                    <DeviceControlReasonContent device={displayDevice} enabled={activeTab === 'control'} />
-                  </ErrorBoundary>
-                </div>
-              ),
-            },
-            {
-              key: 'parameters',
-              label: t('device.parameterTree'),
-              // 细粒度 ErrorBoundary：参数树独立拉取大量数据，渲染异常时仅此页签降级，
-              // 不连累设备头部与其他页签。
-              children: (
-                <ErrorBoundary>
-                  <ParameterTreeTab
-                    deviceId={device.id}
-                    lastScopedSync={lastQuickSettingsParamSync}
-                    syncBusy={isDeviceParamSyncBusy}
-                    onFullSyncStarted={() => {
-                      if (device?.id) useQuickSettingsFeedbackStore.getState().clearLastScopedSync(device.id);
-                    }}
-                  />
-                </ErrorBoundary>
-              ),
-            },
+            ...(isUPSDetailDevice
+              ? [{
+                  key: 'settings',
+                  label: t('device.ups.setting'),
+                  children: (
+                    <div style={{ padding: '16px 0' }}>
+                      {renderUPSSettings(
+                        upsSettingsDraft,
+                        (patch) => setUPSSettingsDraft((prev) => ({ ...prev, ...patch })),
+                        handleSaveUPSSettings,
+                        upsSettingsSaving,
+                        t,
+                      )}
+                    </div>
+                  ),
+                }]
+              : []),
+            ...(!isUPSDetailDevice
+              ? [{
+                  key: 'control',
+                  label: (
+                    <span>
+                      {t('device.control.tabTitle')}
+                      {displayDevice.controlSummary && <Badge status="error" style={{ marginLeft: 6 }} />}
+                    </span>
+                  ),
+                  children: (
+                    <div style={{ padding: '16px 0' }}>
+                      <ErrorBoundary>
+                        <DeviceControlReasonContent device={displayDevice} enabled={activeTab === 'control'} />
+                      </ErrorBoundary>
+                    </div>
+                  ),
+                }]
+              : []),
+            ...(!isUPSDetailDevice
+              ? [{
+                  key: 'parameters',
+                  label: t('device.parameterTree'),
+                  // 细粒度 ErrorBoundary：参数树独立拉取大量数据，渲染异常时仅此页签降级，
+                  // 不连累设备头部与其他页签。
+                  children: (
+                    <ErrorBoundary>
+                      <ParameterTreeTab
+                        deviceId={device.id}
+                        lastScopedSync={lastQuickSettingsParamSync}
+                        syncBusy={isDeviceParamSyncBusy}
+                        onFullSyncStarted={() => {
+                          if (device?.id) useQuickSettingsFeedbackStore.getState().clearLastScopedSync(device.id);
+                        }}
+                      />
+                    </ErrorBoundary>
+                  ),
+                }]
+              : []),
             ...(showQuickSettingsTab
               ? [{
                   key: 'quickSettings',
@@ -2439,48 +3001,52 @@ export default function DeviceDetail() {
                 </div>
               ),
             },
-            {
-              key: 'performance',
-              label: 'KPI',
-              children: (
-                <ErrorBoundary>
-                  <KPITabContent device={displayDevice} t={t} />
-                </ErrorBoundary>
-              ),
-            },
-            {
-              key: 'license',
-              label: t('device.licenseParam.title'),
-              forceRender: true,
-              children: (
-                <div style={{ padding: '0 0 16px' }}>
-                  <ErrorBoundary>
-                    <LicenseParamsTab
-                      deviceId={device.id}
-                      onSyncTargetPathsChange={setLicenseSyncTargetPaths}
-                    />
-                  </ErrorBoundary>
-                </div>
-              ),
-            },
-            {
-              key: 'password',
-              label: t('device.password.title'),
-              forceRender: true,
-              children: (
-                <ErrorBoundary>
-                  <PasswordManagementTab
-                    deviceId={device.id}
-                    deviceSn={displayDevice.sn}
-                    productClass={displayDevice.productClass}
-                    deviceModel={displayDevice.deviceModel}
-                    networkType={displayDevice.networkType}
-                    onTaskSubmitted={handlePasswordTaskSubmitted}
-                    onTaskCleared={handlePasswordTaskCleared}
-                  />
-                </ErrorBoundary>
-              ),
-            },
+            ...(!isUPSDetailDevice
+              ? [
+                  {
+                    key: 'performance',
+                    label: 'KPI',
+                    children: (
+                      <ErrorBoundary>
+                        <KPITabContent device={displayDevice} t={t} />
+                      </ErrorBoundary>
+                    ),
+                  },
+                  {
+                    key: 'license',
+                    label: t('device.licenseParam.title'),
+                    forceRender: true,
+                    children: (
+                      <div style={{ padding: '0 0 16px' }}>
+                        <ErrorBoundary>
+                          <LicenseParamsTab
+                            deviceId={device.id}
+                            onSyncTargetPathsChange={setLicenseSyncTargetPaths}
+                          />
+                        </ErrorBoundary>
+                      </div>
+                    ),
+                  },
+                  {
+                    key: 'password',
+                    label: t('device.password.title'),
+                    forceRender: true,
+                    children: (
+                      <ErrorBoundary>
+                        <PasswordManagementTab
+                          deviceId={device.id}
+                          deviceSn={displayDevice.sn}
+                          productClass={displayDevice.productClass}
+                          deviceModel={displayDevice.deviceModel}
+                          networkType={displayDevice.networkType}
+                          onTaskSubmitted={handlePasswordTaskSubmitted}
+                          onTaskCleared={handlePasswordTaskCleared}
+                        />
+                      </ErrorBoundary>
+                    ),
+                  },
+                ]
+              : []),
           ]}
         />
       </Card>

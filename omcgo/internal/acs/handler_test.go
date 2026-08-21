@@ -280,6 +280,70 @@ const acsHInformPeriodicXML = `<?xml version="1.0" encoding="UTF-8"?>
   </soap:Body>
 </soap:Envelope>`
 
+// UPS VALUE CHANGE Inform carrying InternetGatewayDevice.FaultMgmt.CurrentAlarm.* parameters.
+const acsHInformUPSValueChangeCurrentAlarmXML = `<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+               xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">UPS-ALM-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:Inform>
+      <DeviceId>
+        <Manufacturer>Baicells</Manufacturer>
+        <OUI>001122</OUI>
+        <ProductClass>UPS_M3_BMU</ProductClass>
+        <SerialNumber>UPS-SN-ALARM-001</SerialNumber>
+      </DeviceId>
+      <Event soap:arrayType="cwmp:EventStruct[1]">
+        <EventStruct>
+          <EventCode>4 VALUE CHANGE</EventCode>
+          <CommandKey></CommandKey>
+        </EventStruct>
+      </Event>
+      <MaxEnvelopes>1</MaxEnvelopes>
+      <CurrentTime>2026-08-20T10:00:00Z</CurrentTime>
+      <RetryCount>0</RetryCount>
+      <ParameterList soap:arrayType="cwmp:ParameterValueStruct[8]">
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.DeviceInfo.ProductClass</Name>
+          <Value xsi:type="xsd:string">UPS_M3_BMU</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.FaultMgmt.CurrentAlarm.1.AlarmIdentifier</Name>
+          <Value xsi:type="xsd:string">42000</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.FaultMgmt.CurrentAlarm.1.PerceivedSeverity</Name>
+          <Value xsi:type="xsd:string">Major</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.FaultMgmt.CurrentAlarm.1.EventType</Name>
+          <Value xsi:type="xsd:string">30003</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.FaultMgmt.CurrentAlarm.1.ProbableCause</Name>
+          <Value xsi:type="xsd:string">AC Power Off</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.FaultMgmt.CurrentAlarm.1.SpecificProblem</Name>
+          <Value xsi:type="xsd:string">AC Power Off</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.FaultMgmt.CurrentAlarm.1.AlarmRaisedTime</Name>
+          <Value xsi:type="xsd:dateTime">2026-08-20T10:00:00Z</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.FaultMgmt.CurrentAlarm.1.ManagedObjectInstance</Name>
+          <Value xsi:type="xsd:string">InternetGatewayDevice.FaultMgmt.CurrentAlarm.</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+    </cwmp:Inform>
+  </soap:Body>
+</soap:Envelope>`
+
 // GetParameterValuesResponse SOAP body.
 const acsHGetParamRespXML = `<?xml version="1.0" encoding="UTF-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
@@ -663,6 +727,64 @@ func TestServeHTTP_Inform_Periodic_EnqueuesUECountQuery(t *testing.T) {
 	assert.Equal(t, ueCountGPVDescription, taskSvc.tasks[0].Description)
 }
 
+func TestServeHTTP_Inform_UPSBootstrap_SkipsInformPeriodPolicy(t *testing.T) {
+	h := newTestACSHandler()
+	taskSvc := h.taskService.(*acsHTaskService)
+	h.informPeriodPolicy = NewInformPeriodPolicy(
+		mockInformPeriodLookup(map[string]string{
+			"device:enbInformPeriodAdjustEnable": "true",
+			"device:enbInformPeriod":             "60",
+		}),
+		taskSvc,
+		zap.NewNop(),
+	)
+	body := strings.ReplaceAll(acsHInformBootstrapXML,
+		"<ProductClass>SmallCell-LTE</ProductClass>",
+		"<ProductClass>UPS_M3_BMU</ProductClass>",
+	)
+	body = strings.ReplaceAll(body,
+		"<SerialNumber>TEST-SN-001</SerialNumber>",
+		"<SerialNumber>UPS-SN-BOOTSTRAP-001</SerialNumber>",
+	)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(body))
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	taskSvc.mu.Lock()
+	defer taskSvc.mu.Unlock()
+	assert.Empty(t, taskSvc.tasks)
+}
+
+func TestServeHTTP_Inform_UPSPeriodic_SkipsUECountPolicy(t *testing.T) {
+	h := newTestACSHandler()
+	h.ueCountPolicy = NewUECountPolicy(
+		&stubUECountPathResolver{paths: []string{"Device.DeviceInfo.UE_Count"}},
+		&stubUECountTaskService{},
+		stubUECountProbeGate{acquired: true},
+		zap.NewNop(),
+	)
+	body := strings.ReplaceAll(acsHInformPeriodicXML,
+		"<ProductClass>SmallCell-LTE</ProductClass>",
+		"<ProductClass>UPS_M3_BMU</ProductClass>",
+	)
+	body = strings.ReplaceAll(body,
+		"<SerialNumber>TEST-SN-002</SerialNumber>",
+		"<SerialNumber>UPS-SN-PERIODIC-001</SerialNumber>",
+	)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(body))
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, h.ueCountPolicy.queue)
+	h.ueCountPolicy.pendingMu.Lock()
+	defer h.ueCountPolicy.pendingMu.Unlock()
+	assert.Empty(t, h.ueCountPolicy.pending)
+}
+
 func TestHasExpeditedEventParams_InternetGatewayDevicePrefix(t *testing.T) {
 	params := []tr069.ParameterValueStruct{
 		{Name: "InternetGatewayDevice.DeviceInfo.Manufacturer", Value: "Baicells"},
@@ -683,6 +805,51 @@ func TestFilterExpeditedEventParams_InternetGatewayDevicePrefix(t *testing.T) {
 	assert.Len(t, filtered, 2)
 	for _, p := range filtered {
 		assert.Contains(t, p.Name, "FaultMgmt.ExpeditedEvent.")
+	}
+}
+
+func TestHasCurrentAlarmParams_InternetGatewayDevicePrefix(t *testing.T) {
+	params := []tr069.ParameterValueStruct{
+		{Name: "InternetGatewayDevice.DeviceInfo.Manufacturer", Value: "Baicells"},
+		{Name: "InternetGatewayDevice.FaultMgmt.CurrentAlarm.1.AlarmIdentifier", Value: "42000"},
+	}
+
+	assert.True(t, hasCurrentAlarmParams(params))
+}
+
+func TestServeHTTP_Inform_UPSValueChangeCurrentAlarmPublishesAlarmEvent(t *testing.T) {
+	bus := &acsHEventBus{}
+	h := newTestACSHandlerWithDeps(newAcsHSessionStore(), bus)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformUPSValueChangeCurrentAlarmXML))
+	req.RemoteAddr = "192.168.2.10:5000"
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "InformResponse")
+
+	bus.mu.Lock()
+	published := append([]acsHPublishedEvent(nil), bus.published...)
+	bus.mu.Unlock()
+
+	require.Len(t, published, 2)
+	assert.Equal(t, event.SubjectDeviceValueChange, published[0].Subject)
+	assert.Equal(t, event.SubjectDeviceAlarm, published[1].Subject)
+
+	var alarmPayload struct {
+		DeviceID      tr069.DeviceId               `json:"device_id"`
+		Events        []string                     `json:"events"`
+		ParameterList []tr069.ParameterValueStruct `json:"parameter_list"`
+	}
+	require.NoError(t, published[1].Event.DecodePayload(&alarmPayload))
+	assert.Equal(t, "UPS-SN-ALARM-001", alarmPayload.DeviceID.SerialNumber)
+	assert.Equal(t, "UPS_M3_BMU", alarmPayload.DeviceID.ProductClass)
+	assert.Equal(t, []string{tr069.EventValueChange}, alarmPayload.Events)
+	assert.True(t, hasCurrentAlarmParams(alarmPayload.ParameterList))
+
+	for _, publishedEvent := range published {
+		assert.NotEqual(t, event.SubjectDeviceExpeditedAlarm, publishedEvent.Subject)
 	}
 }
 

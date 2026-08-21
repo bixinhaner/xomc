@@ -48,6 +48,7 @@ const BUILTIN_TYPE_CODES = new Set([
   'ENB_IMG_UPGRADE', 'ENB_PATCH_UPGRADE', 'ENB_FPGA_UPGRADE',
   'GNB_IMG_UPGRADE', 'GNB_FPGA_UPGRADE',
   'GSM_IMG_UPGRADE', // qa-614 c6 #365 #373：2G/GSM 升级
+  'UPS_AP_UPGRADE',
   'VERSION_ROLLBACK',
   'RUNTIME_LOG_COLLECT', 'FAULT_LOG_COLLECT',
   'CONFIG_BACKUP', 'CONFIG_BACKUP_NV', 'CONFIG_BACKUP_XML',
@@ -58,7 +59,8 @@ const BUILTIN_TYPE_CODES = new Set([
 const BUILTIN_CATEGORY_CODES = new Set([
   'enb_upgrade', 'gnb_upgrade',
   'gsm_upgrade', // qa-614 c6 #365 #373：2G/GSM 升级分类
-  'device_upgrade', // qa-614 c6 #368：4G/5G 合并的虚拟『设备升级』分类
+  'ups_upgrade',
+  'device_upgrade', // qa-614 c6 #368 / UPS：4G/5G/2G/UPS 合并的虚拟『设备升级』分类
   'version_rollback',
   'station_log', 'config_backup', 'config_restore', 'license_upgrade',
   // F05：MR 测量虚拟分类（不走 UFTE 模板，作为入口聚合按钮跳到 /mr/tasks）
@@ -67,7 +69,7 @@ const BUILTIN_CATEGORY_CODES = new Set([
   'kpi_export',
 ]);
 
-// qa-614 c6 #368：4G(enb_upgrade) + 5G(gnb_upgrade) 在展示层合并为虚拟分类
+// qa-614 c6 #368：4G(enb_upgrade) + 5G(gnb_upgrade) + 2G(gsm_upgrade) + UPS(ups_upgrade) 在展示层合并为虚拟分类
 // 'device_upgrade'（『设备升级』）。聚合/展开逻辑下沉到 frontend-core（页面共享，
 // 见 @core/utils/ufteCategory），v1 这里只做 re-export 保持现有 import 路径不变。
 export {
@@ -76,6 +78,9 @@ export {
   isDeviceUpgradeMember,
   resolveBackendCategoryParam,
   filterTaskTypesForCategory,
+  filterTaskTypesByUPSLicense,
+  filterFileTransferItemsByUPSLicense,
+  isUPSFileTransferScope,
 } from '@core/utils/ufteCategory';
 import {
   DEVICE_UPGRADE_CATEGORY as DEVICE_UPGRADE_CATEGORY_LOCAL,
@@ -119,8 +124,8 @@ export function localizeBuiltinDescription(
 }
 
 export const DEFAULT_CATEGORY_ORDER = [
-  // #368/#483：4G/5G/2G 全部折叠进单个『设备升级』虚拟分类（buildCategoryTabs 已折叠），
-  // 故这里不再单列 enb/gnb/gsm_upgrade —— 只放折叠后的 device_upgrade。
+  // #368/#483/UPS：4G/5G/2G/UPS 全部折叠进单个『设备升级』虚拟分类（buildCategoryTabs 已折叠），
+  // 故这里不再单列 enb/gnb/gsm/ups_upgrade。
   'device_upgrade',
   'version_rollback',
   'station_log',
@@ -144,6 +149,7 @@ export const TYPE_DRAWER_DEFAULT_STEPS: TransferStepId[] = [
 export const UPGRADE_LIKE_CATEGORIES = new Set([
   'gnb_upgrade', 'enb_upgrade',
   'gsm_upgrade', // qa-614 c6 #365 #373
+  'ups_upgrade',
   'device_upgrade', // qa-614 c6 #368：合并虚拟分类
   // 版本回退（version_rollback）不再归入「升级类」列布局：它是独立业务，套升级列会多出
   // 无意义的「升级类型」列、且任务/设备列与「设备升级」逐列雷同（很不统一）。摘出后落入
@@ -160,6 +166,7 @@ export const TASK_NAME_PREFIX_BY_TYPE_I18N: Record<string, { zh: string; en: str
   ENB_IMG_UPGRADE:     { zh: '4G升级',         en: 'Upgrade' },
   GNB_IMG_UPGRADE:     { zh: '5G升级',         en: 'Upgrade' },
   GSM_IMG_UPGRADE:     { zh: '2G升级',         en: 'Upgrade' }, // qa-614 c6 #365 #373
+  UPS_AP_UPGRADE:      { zh: 'UPS升级',        en: 'UPSUpgrade' },
   ENB_PATCH_UPGRADE:   { zh: '基站补丁升级',   en: 'Upgrade' },
   ENB_FPGA_UPGRADE:    { zh: 'FPGA升级',       en: 'Upgrade' },
   VERSION_ROLLBACK:    { zh: '版本回退',       en: 'Rollback' },
@@ -243,7 +250,7 @@ export function getSoftwareLibraryFileTypeLabel(value: FirmwareLibraryFileType |
 export function buildCategoryTabs(taskTypes: UnifiedFileTransferTaskType[]): CategoryTabItem[] {
   const categoryMap = new Map<string, CategoryTabItem>();
   taskTypes.forEach((item) => {
-    // qa-614 c6 #368：4G(enb_upgrade) + 5G(gnb_upgrade) 在展示层折叠为单个
+    // qa-614 c6 #368：4G(enb_upgrade) + 5G(gnb_upgrade) + 2G(gsm_upgrade) + UPS(ups_upgrade) 在展示层折叠为单个
     // 虚拟分类 device_upgrade（『设备升级』）。categoryLabel 用 key，渲染时由
     // localizeBuiltinCategoryLabel('device_upgrade') 翻译。
     const displayCategory = isDeviceUpgradeMemberLocal(item.category)

@@ -114,6 +114,50 @@ func TestExpeditedEventReceiver_NewAlarm(t *testing.T) {
 	}
 }
 
+func TestExpeditedEventReceiver_UPSNewAlarmAddsSerialEquipmentInfo(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	bus := newMockEventBus()
+	deviceSN := "SN-UPS-EXP-001"
+	deviceLookup := &mockDeviceLookup{
+		devices: map[string]*model.Device{
+			deviceSN: {
+				ID:           uuid.New(),
+				SerialNumber: deviceSN,
+				ProductClass: "UPS_M3_BMU",
+				Carrier:      model.CarrierCMCC,
+				Status:       model.DeviceActive,
+			},
+		},
+	}
+	receiver := NewExpeditedEventReceiver(engine, deviceLookup, bus, zap.NewNop())
+
+	params := []tr069.ParameterValueStruct{
+		makeParam("InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.NotificationType", "NewAlarm"),
+		makeParam("InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.AlarmIdentifier", "42001"),
+		makeParam("InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.PerceivedSeverity", "Major"),
+		makeParam("InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.ProbableCause", "UPS alarm"),
+		makeParam("InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.EventTime", "2026-08-19T09:03:01"),
+	}
+
+	payload := ExpeditedEventPayload{
+		DeviceSN:        deviceSN,
+		ParameterValues: params,
+	}
+	payloadJSON, _ := json.Marshal(payload)
+	evt := event.Event{ID: "ups-expedited", Subject: event.SubjectDeviceExpeditedAlarm, Payload: payloadJSON}
+
+	err := receiver.handleExpeditedAlarmEvent(context.Background(), evt)
+	require.NoError(t, err)
+
+	require.Len(t, store.active, 1)
+	for _, alarm := range store.active {
+		assert.Equal(t, "42001", alarm.AlarmIdentifier)
+		assert.Equal(t, deviceSN, alarm.DeviceSN)
+		assert.Equal(t, "SN="+deviceSN, alarm.AdditionalInfo[additionalInfoEquipmentInfo])
+	}
+}
+
 func TestExpeditedEventReceiver_ChangedAlarm(t *testing.T) {
 	store := newMockAlarmStore()
 	engine := newTestEngine(store)

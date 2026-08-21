@@ -9,12 +9,14 @@
  *   或后端 409(data.overwritable=true)→ Modal.confirm「已存在,确认覆盖?」→
  *   确认后带 force=true 重试,后端覆盖归属文件并自动备份旧文件 .bak.<ts>。
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal, Form, Upload, message, Button, Space, Typography } from 'antd';
 import type { UploadFile, UploadProps } from 'antd/es/upload/interface';
 import { InboxOutlined } from '@ant-design/icons';
 import type { AxiosError } from 'axios';
 import { useAlarmUploadXml, useAlarmNeTypeStats } from '@core/hooks/api/useAlarmDefinitions';
+import { useSystemLicense } from '@core/hooks/api/useSystemLicense';
+import { isDeviceStandardValueVisibleByLicense } from '@core/utils/licenseFeatures';
 import { extractXmlRootAttr } from '@core/utils/xmlRootAttr';
 import { useT } from '@/hooks/useT';
 
@@ -32,6 +34,7 @@ export default function AlarmUploadXmlModal({ open, onClose }: Props) {
   const [derivedName, setDerivedName] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | undefined>();
   const uploadMut = useAlarmUploadXml();
+  const { data: systemLicense, isLoading: systemLicenseLoading } = useSystemLicense();
 
   // 上传前查重:ne-types 聚合行的 neType / loadedFrom basename(大小写不敏感)对比。
   const { data: neTypesData } = useAlarmNeTypeStats();
@@ -50,6 +53,13 @@ export default function AlarmUploadXmlModal({ open, onClose }: Props) {
     setFileError(undefined);
     onClose();
   };
+
+  useEffect(() => {
+    if (!derivedName || systemLicenseLoading) return;
+    if (!isDeviceStandardValueVisibleByLicense(derivedName, systemLicense, false)) {
+      setFileError(t('systemLicense.deviceStandardImportDenied', { standard: derivedName }));
+    }
+  }, [derivedName, systemLicense, systemLicenseLoading, t]);
 
   // 实际上传(force = 二次确认后的覆盖);成功后关弹窗,失败统一 message。
   const doUpload = async (file: File, force: boolean) => {
@@ -94,6 +104,14 @@ export default function AlarmUploadXmlModal({ open, onClose }: Props) {
     // neType 属性是名称唯一来源 —— 读不到直接拒绝(后端也会 400)
     if (!derivedName) {
       setFileError(t('product.upload.missingAttr', { attr: 'neType' }));
+      return;
+    }
+    if (systemLicenseLoading) {
+      setFileError(t('common.loading'));
+      return;
+    }
+    if (!isDeviceStandardValueVisibleByLicense(derivedName, systemLicense, false)) {
+      setFileError(t('systemLicense.deviceStandardImportDenied', { standard: derivedName }));
       return;
     }
     const file = fileList[0].originFileObj;

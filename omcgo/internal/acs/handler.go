@@ -31,6 +31,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/middleware"
 	"github.com/omcgo/omcgo/internal/core/tracing"
+	devicetype "github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/netutil"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/trace"
@@ -665,10 +666,12 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	// 发布事件
 	h.publishInformEvents(r.Context(), inform, eventCodes, accessContext, log)
 
+	productClass := inform.DeviceId.ProductClass
+	isUPS := devicetype.IsUPSProductClass(productClass)
+
 	// #746: 心跳周期自动调整 — BOOTSTRAP/BOOT 事件时入队 GPV 查询当前心跳周期。
 	// GPV 响应后由 handleRPCResponse 中的 processInformPeriodGPV 比较并决定是否 SPV。
-	if h.informPeriodPolicy.ShouldTrigger(eventCodes) {
-		productClass := inform.DeviceId.ProductClass
+	if !isUPS && h.informPeriodPolicy.ShouldTrigger(eventCodes) {
 		if h.durableReadbackEnabled && h.informPeriodPolicy.ShouldProbe(r.Context(), productClass) &&
 			h.requestDurableReadback(r.Context(), deviceSN, "inform_period_probe",
 				[]string{"Device.ManagementServer.PeriodicInformInterval"}, "inform-period:"+deviceSN+":"+sessionID, log) {
@@ -682,7 +685,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 
 	// #220: 周期 Inform 会话中查询当前产品支持的 UE Count 参数。普通 GPV 回包
 	// 复用既有 device_parameters 入库与 device_info 投影链路。
-	if h.ueCountPolicy.ShouldTrigger(eventCodes) {
+	if !isUPS && h.ueCountPolicy.ShouldTrigger(eventCodes) {
 		if err := h.ueCountPolicy.Enqueue(r.Context(), deviceSN); err != nil {
 			log.Warn("enqueue UE count GPV task failed (non-blocking)",
 				zap.String("device_sn", deviceSN),
@@ -2028,6 +2031,22 @@ func (h *Handler) publishInformEvents(
 		zap.String("event_id", evt.ID),
 		zap.Strings("event_codes", eventCodes))
 
+	// VALUE CHANGE may carry FaultMgmt.CurrentAlarm parameters. UPS reports
+	// alarms this way, so publish a second normalized alarm event while keeping
+	// the original value_change event for device state updates.
+	if tr069.IsValueChange(inform.Event) && hasCurrentAlarmParams(inform.ParameterList) {
+		alarmEvt, err := event.NewEvent(event.SubjectDeviceAlarm, payload)
+		if err != nil {
+			log.Error("create current alarm event failed", zap.Error(err))
+		} else if err := h.eventBus.Publish(ctx, event.SubjectDeviceAlarm, alarmEvt); err != nil {
+			log.Error("publish current alarm event failed", zap.Error(err))
+		} else {
+			log.Info("current alarm event published",
+				zap.String("device_sn", inform.DeviceId.SerialNumber),
+				zap.String("event_id", alarmEvt.ID))
+		}
+	}
+
 	// Additional: if VALUE CHANGE contains ExpeditedEvent parameters, publish expedited alarm event.
 	if tr069.IsValueChange(inform.Event) && hasExpeditedEventParams(inform.ParameterList) {
 		expPayload := map[string]interface{}{
@@ -3042,6 +3061,20 @@ func filterExpeditedEventParams(params []tr069.ParameterValueStruct) []tr069.Par
 func isExpeditedEventParamName(name string) bool {
 	return strings.HasPrefix(name, "Device.FaultMgmt.ExpeditedEvent.") ||
 		strings.HasPrefix(name, "InternetGatewayDevice.FaultMgmt.ExpeditedEvent.")
+}
+
+func hasCurrentAlarmParams(params []tr069.ParameterValueStruct) bool {
+	for _, p := range params {
+		if isCurrentAlarmParamName(p.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+func isCurrentAlarmParamName(name string) bool {
+	return strings.HasPrefix(name, "Device.FaultMgmt.CurrentAlarm.") ||
+		strings.HasPrefix(name, "InternetGatewayDevice.FaultMgmt.CurrentAlarm.")
 }
 
 // translateTaskParamsInPlace 在 ACS 出队时把 task.Params 内的 standardPath 翻译为 privatePath。

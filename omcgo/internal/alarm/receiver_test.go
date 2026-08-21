@@ -30,9 +30,16 @@ type rcvMockEventBus struct {
 	subscribedQueue   string
 	subscribedHandler event.EventHandler
 	subscribeErr      error
+	published         map[string][]event.Event
 }
 
-func (b *rcvMockEventBus) Publish(_ context.Context, _ string, _ event.Event) error { return nil }
+func (b *rcvMockEventBus) Publish(_ context.Context, subject string, evt event.Event) error {
+	if b.published == nil {
+		b.published = map[string][]event.Event{}
+	}
+	b.published[subject] = append(b.published[subject], evt)
+	return nil
+}
 func (b *rcvMockEventBus) Subscribe(_ string, _ event.EventHandler) (event.Subscription, error) {
 	return &rcvMockSubscription{}, nil
 }
@@ -60,7 +67,7 @@ func (r *rcvMockDeviceReader) GetByID(_ context.Context, id uuid.UUID) (*model.D
 		return nil, nil
 	}
 	return r.deviceByID[id], nil
-	}
+}
 
 func (r *rcvMockDeviceReader) GetBySerialNumber(_ context.Context, sn string) (*model.Device, error) {
 	if r.deviceBySN == nil {
@@ -149,15 +156,15 @@ func TestHandleAlarmEvent_Success(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 
 	payload := AlarmPayload{
-		DeviceID:    deviceID.String(),
-		DeviceSN:    "SN-RCV-001",
-		Carrier:     "cmcc",
-		AlarmIdentifier:   "ALM_TEST_01",
-		AlarmType:   "equipment",
-		Description: "test alarm from receiver",
-		Severity:    2,
-		RaisedAt:    now,
-		Additional:  map[string]string{"key": "value"},
+		DeviceID:        deviceID.String(),
+		DeviceSN:        "SN-RCV-001",
+		Carrier:         "cmcc",
+		AlarmIdentifier: "ALM_TEST_01",
+		AlarmType:       "equipment",
+		Description:     "test alarm from receiver",
+		Severity:        2,
+		RaisedAt:        now,
+		Additional:      map[string]string{"key": "value"},
 	}
 
 	evt := makeRcvEvent(t, payload)
@@ -179,11 +186,11 @@ func TestHandleAlarmEvent_InvalidDeviceID(t *testing.T) {
 	receiver := NewAlarmReceiver(engine, nil, zap.NewNop())
 
 	payload := AlarmPayload{
-		DeviceID:  "not-a-valid-uuid",
-		DeviceSN:  "SN-RCV-002",
+		DeviceID:        "not-a-valid-uuid",
+		DeviceSN:        "SN-RCV-002",
 		AlarmIdentifier: "ALM_TEST_02",
-		Severity:  1,
-		RaisedAt:  time.Now(),
+		Severity:        1,
+		RaisedAt:        time.Now(),
 	}
 
 	evt := makeRcvEvent(t, payload)
@@ -199,9 +206,9 @@ func TestHandleAlarmEvent_BackfillsTechnologyFromDevice(t *testing.T) {
 	receiver := NewAlarmReceiver(engine, nil, zap.NewNop()).WithDeviceReader(&rcvMockDeviceReader{
 		deviceByID: map[uuid.UUID]*model.Device{
 			deviceID: {
-				ID:         deviceID,
+				ID:           deviceID,
 				SerialNumber: "SN-RCV-003",
-				Technology: model.TechNR,
+				Technology:   model.TechNR,
 			},
 		},
 	})
@@ -225,6 +232,34 @@ func TestHandleAlarmEvent_BackfillsTechnologyFromDevice(t *testing.T) {
 	for _, alarm := range store.active {
 		require.NotNil(t, alarm.Technology)
 		assert.Equal(t, string(model.TechNR), *alarm.Technology)
+	}
+}
+
+func TestHandleAlarmEvent_UPSAlarmSourceBackfillsTechnology(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	deviceID := uuid.New()
+	receiver := NewAlarmReceiver(engine, nil, zap.NewNop())
+
+	payload := AlarmPayload{
+		DeviceID:        deviceID.String(),
+		DeviceSN:        "SN-UPS-RCV-001",
+		Carrier:         "cmcc",
+		AlarmIdentifier: "42000",
+		AlarmType:       "equipment",
+		AlarmSource:     "UPS/FSU2024",
+		Description:     "UPS alarm without technology payload",
+		Severity:        2,
+		RaisedAt:        time.Now(),
+	}
+
+	err := receiver.handleAlarmEvent(context.Background(), makeRcvEvent(t, payload))
+	require.NoError(t, err)
+
+	require.Len(t, store.active, 1)
+	for _, alarm := range store.active {
+		require.NotNil(t, alarm.Technology)
+		assert.Equal(t, "UPS", *alarm.Technology)
 	}
 }
 
@@ -279,6 +314,55 @@ func TestHandleAlarmEvent_GenericInformPayloadAlarmInfo(t *testing.T) {
 		require.NotNil(t, alarm.Technology)
 		assert.Equal(t, string(model.TechNR), *alarm.Technology)
 	}
+}
+
+func TestHandleAlarmEvent_UPSCurrentAlarmAddsSerialEquipmentInfo(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	bus := &rcvMockEventBus{}
+	deviceID := uuid.New()
+	deviceSN := "SN-UPS-ALARM-001"
+	receiver := NewAlarmReceiver(engine, bus, zap.NewNop()).WithDeviceReader(&rcvMockDeviceReader{
+		deviceBySN: map[string]*model.Device{
+			deviceSN: {
+				ID:           deviceID,
+				SerialNumber: deviceSN,
+				Carrier:      model.CarrierCMCC,
+				ProductClass: "UPS_M3_BMU",
+				DeviceName:   "UPS-1",
+			},
+		},
+	})
+
+	payload := informAlarmEventPayload{
+		DeviceID: tr069.DeviceId{
+			ProductClass: "UPS_M3_BMU",
+			SerialNumber: deviceSN,
+		},
+		Events:      []string{"101 ALARM"},
+		CurrentTime: time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC),
+		ParameterList: []tr069.ParameterValueStruct{
+			{Name: "InternetGatewayDevice.FaultMgmt.CurrentAlarm.1.AlarmIdentifier", Value: "42000"},
+			{Name: "InternetGatewayDevice.FaultMgmt.CurrentAlarm.1.PerceivedSeverity", Value: "Major"},
+			{Name: "InternetGatewayDevice.FaultMgmt.CurrentAlarm.1.EventType", Value: "equipment"},
+			{Name: "InternetGatewayDevice.FaultMgmt.CurrentAlarm.1.SpecificProblem", Value: "UPS battery fault"},
+		},
+	}
+
+	err := receiver.handleAlarmEvent(context.Background(), makeRcvEvent(t, payload))
+	require.NoError(t, err)
+
+	require.Len(t, store.active, 1)
+	for _, alarm := range store.active {
+		assert.Equal(t, deviceID, alarm.DeviceID)
+		assert.Equal(t, deviceSN, alarm.DeviceSN)
+		assert.Equal(t, "42000", alarm.AlarmIdentifier)
+		assert.Equal(t, "UPS_M3_BMU", *alarm.AlarmSource)
+		require.NotNil(t, alarm.Technology)
+		assert.Equal(t, "UPS", *alarm.Technology)
+		assert.Equal(t, "SN="+deviceSN, alarm.AdditionalInfo[additionalInfoEquipmentInfo])
+	}
+	assert.Empty(t, bus.published[event.SubjectAlarmSyncRequested])
 }
 
 func TestHandleAlarmEvent_GenericInformPayload_OverridesSeverityFromDefinition(t *testing.T) {

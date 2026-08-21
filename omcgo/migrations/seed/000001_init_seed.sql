@@ -2661,7 +2661,7 @@ UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_USERS'] WHERE id = '11
 UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_USERS'] WHERE id = '11111111-1111-1111-1111-111111111110';
 UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_LOGS_OPERATION'] WHERE id = '11111111-1111-1111-1111-111111111112';
 UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_VIEW'] WHERE id = 'aaaa0002-1000-0000-0000-000000000010';
-UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = '11111111-1111-1111-1111-111111111102';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR','CODE_UPS'] WHERE id = '11111111-1111-1111-1111-111111111102';
 UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = '11111111-1111-1111-1111-111111111103';
 UPDATE public.menus SET feature_code = ARRAY['CODE_PLUG_AND_PLAY'] WHERE id = 'aaaa0010-1000-0000-0000-000000000001';
 UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_DEVICE_REGISTER','CODE_GNB_DEVICE_REGISTER','CODE_CPE_DEVICE'] WHERE id = '11111111-1111-1111-1111-111111111104';
@@ -2688,15 +2688,15 @@ UPDATE public.menus SET feature_code = ARRAY['CODE_TOPO'] WHERE id = 'aaaa0004-1
 UPDATE public.menus SET feature_code = ARRAY['CODE_TOPO'] WHERE id = 'aaaa0004-1000-0005-0000-000000000001';
 UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_BATCH_CONFIG','CODE_GNB_BATCH_CONFIG'] WHERE id = 'aaaa0120-1000-0000-0000-000000000001';
 -- 新 OMC 模块菜单映射到已有 code（产品中心/文件传输/运维/系统新功能/下钻页）；旧 license 无对应，按最近语义挂靠，可调
-UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0098-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR','CODE_UPS'] WHERE id = 'aaaa0098-1000-0000-0000-000000000001';
 UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0098-1000-0000-0000-000000000002';
 UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0098-1000-0000-0000-000000000006';
 UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MANAGEMENT'] WHERE id = 'aaaa0098-1000-0000-0000-000000000003';
 UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_LIBRARY'] WHERE id = 'aaaa0098-1000-0000-0000-000000000004';
 UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0098-1000-0000-0000-000000000005';
-UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_FILE','CODE_GNB_UPGRADE_FILE','CODE_CPE_UPGRADE_FILE'] WHERE id = 'aaaa000b-1000-0000-0000-000000000001';
-UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_FILE','CODE_GNB_UPGRADE_FILE','CODE_CPE_UPGRADE_FILE'] WHERE id = 'aaaa000b-1000-0000-0000-000000000002';
-UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_FILE','CODE_GNB_UPGRADE_FILE','CODE_CPE_UPGRADE_FILE'] WHERE id = 'aaaa000b-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_FILE','CODE_GNB_UPGRADE_FILE','CODE_CPE_UPGRADE_FILE','CODE_UPS'] WHERE id = 'aaaa000b-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_FILE','CODE_GNB_UPGRADE_FILE','CODE_CPE_UPGRADE_FILE','CODE_UPS'] WHERE id = 'aaaa000b-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_FILE','CODE_GNB_UPGRADE_FILE','CODE_CPE_UPGRADE_FILE','CODE_UPS'] WHERE id = 'aaaa000b-1000-0000-0000-000000000003';
 UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa000a-1000-0000-0000-000000000001';
 UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa000a-1000-0000-0000-000000000002';
 UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa000a-1000-0000-0000-000000000003';
@@ -2709,7 +2709,7 @@ UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_SETTINGS'] WHERE id = 
 UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_SETTINGS'] WHERE id = 'aaaa0008-1000-0000-0000-000000000010';
 UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0126-1000-0000-0000-000000000001';
 UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0126-1000-0000-0000-000000000002';
-UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0007-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR','CODE_UPS'] WHERE id = 'aaaa0007-1000-0000-0000-000000000002';
 UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MANAGEMENT'] WHERE id = 'aaaa0126-1000-0000-0000-000000000004';
 UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_VIEW'] WHERE id = 'aaaa0011-1000-0000-0000-000000000003';
 -- issue #311: 北向配置菜单受 license 控制（北向接口设置）；license 未含该 code 时菜单不显示
@@ -11186,7 +11186,8 @@ INSERT INTO public.ufte_task_types VALUES
 	('GNB_IMG_UPGRADE', 'gnb_upgrade', '5G升级', '5G 基站软件升级', '复用现网 5G 升级调测通过的下载与升级完成事件链路。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE", "WAIT_INFORM_EVENT"]', '102 UPGRADE FINISH', 'CODE_GNB_UPGRADE_IMAGE', '["5G gNB", "BBU-XSS", "BBU-QSS"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true, 'firmware/{minio_path}', '{firmware_name}', '{firmware_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/img/{path}', 'system', '2026-05-31 11:28:47.906664+08', '2026-06-12 18:16:52.42469+08', NULL, 10, '["BNQ"]'),
 	('ENB_PATCH_UPGRADE', 'enb_upgrade', '4G升级', '4G Patch 增量升级', '复用软件管理补丁升级任务链路，统一收口到 UFTE 任务入口。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_ENB_UPGRADE_PATCH', '["4G eNB", "QAFA", "QAFB", "PATCH"]', 'X {OUI} Software Upgrade Patch', 'X {OUI} Software Upgrade Patch', true, 'firmware/{patch_path}', '{patch_name}', '{patch_name}', 'firmware.fileSize', 'firmware.md5', 'true', 0, '/smallcell/FileDownloadService/firmware/patch/{path}', 'system', '2026-05-31 11:28:47.906664+08', '2026-06-12 18:16:52.42469+08', NULL, 15, '["BLQ", "BLX", "QRTB", "MLQ", "MLN", "BM", "CICT SC3400(L1821)", "Datang fBS3251 Series", "Third-party FDD-LTE-Enterprise", "Huawei TCELL Series", "Comba LTE-FDD_N Series", "Comba femto_au"]'),
 	('ENB_FPGA_UPGRADE', 'enb_upgrade', '4G升级', '4G FPGA 升级', '复用 4G 侧 FPGA 升级任务链路，统一到 UFTE 任务中心。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_ENB_UPGRADE_FPGA', '["4G eNB", "QAFA", "QAFB", "FPGA"]', 'Firmware Upgrade Fpga', 'Firmware Upgrade Fpga', true, 'firmware/{fpga_path}', '{fpga_name}', '{fpga_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/fpga/{path}', 'system', '2026-05-31 11:28:47.906664+08', '2026-06-12 18:16:52.42469+08', NULL, 18, '["BLQ", "BLX", "QRTB", "MLQ", "MLN", "BM", "CICT SC3400(L1821)", "Datang fBS3251 Series", "Third-party FDD-LTE-Enterprise", "Huawei TCELL Series", "Comba LTE-FDD_N Series", "Comba femto_au"]'),
-	('GSM_IMG_UPGRADE', 'gsm_upgrade', '2G升级', '2G 基站软件升级', '复用现网软件升级链路，统一承载 2G(GSM) 基站镜像升级任务。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_GSM_UPGRADE_IMAGE', '["2G BSC", "2G BTS", "BSC", "BTS", "PGSM"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true, 'firmware/{minio_path}', '{firmware_name}', '{firmware_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/img/{path}', 'system', '2026-06-17 20:08:35.602533+08', '2026-06-17 20:08:35.602533+08', NULL, 19, '["BSC", "BTS"]') ON CONFLICT DO NOTHING;
+	('GSM_IMG_UPGRADE', 'gsm_upgrade', '2G升级', '2G 基站软件升级', '复用现网软件升级链路，统一承载 2G(GSM) 基站镜像升级任务。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_GSM_UPGRADE_IMAGE', '["2G BSC", "2G BTS", "BSC", "BTS", "PGSM"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true, 'firmware/{minio_path}', '{firmware_name}', '{firmware_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/img/{path}', 'system', '2026-06-17 20:08:35.602533+08', '2026-06-17 20:08:35.602533+08', NULL, 19, '["BSC", "BTS"]'),
+	('UPS_AP_UPGRADE', 'ups_upgrade', 'UPS升级', 'UPS 软件升级', '复用 TR-069 Download + TransferComplete + 1 BOOT 版本确认链路，统一承载 UPS AP 固件升级任务。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE", "WAIT_REBOOT_COMPLETE"]', '', 'CODE_UPS_UPGRADE_IMAGE', '["UPS"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true, 'firmware/{ap_path}', '{firmware_name}', '{firmware_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/ap/{path}', 'system', '2026-08-19 00:00:00+08', '2026-08-19 00:00:00+08', 5, 25, '["UPS"]') ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.ufte_task_types ENABLE TRIGGER ALL;
@@ -26638,7 +26639,8 @@ WITH scope(type_code, product_scope) AS (
         ('ENB_PATCH_UPGRADE', '["BLQ", "BLX", "QRTB", "MLQ", "MLN", "BM", "CICT SC3400(L1821)", "Datang fBS3251 Series", "Third-party FDD-LTE-Enterprise", "Huawei TCELL Series", "Comba LTE-FDD_N Series", "Comba femto_au"]'::jsonb),
         ('ENB_FPGA_UPGRADE', '["BLQ", "BLX", "QRTB", "MLQ", "MLN", "BM", "CICT SC3400(L1821)", "Datang fBS3251 Series", "Third-party FDD-LTE-Enterprise", "Huawei TCELL Series", "Comba LTE-FDD_N Series", "Comba femto_au"]'::jsonb),
         ('GNB_IMG_UPGRADE', '["BNQ"]'::jsonb),
-        ('GSM_IMG_UPGRADE', '["BSC", "BTS"]'::jsonb)
+        ('GSM_IMG_UPGRADE', '["BSC", "BTS"]'::jsonb),
+        ('UPS_AP_UPGRADE', '["UPS"]'::jsonb)
 )
 UPDATE public.ufte_task_types AS tt
 SET product_scope = scope.product_scope,
@@ -27457,6 +27459,23 @@ ON CONFLICT (role_id, menu_id) DO NOTHING;
 -- 放回放段：P7-A 块属 goose 一次性区域，已建库环境只有此段每次 migrate 会重放。
 UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_NORTH_INTERFACE','CODE_NINF_SNMP','CODE_NINF_SOCKET']
 WHERE id = 'aaaa0120-1000-0000-0000-000000000008';
+
+-- UPS license replay: 已建库环境把 UPS 能力追加到设备列表、启动记录、产品管理和文件传输入口；
+-- 用追加方式避免覆盖现场已有菜单授权配置。
+UPDATE public.menus
+SET feature_code = CASE
+    WHEN feature_code IS NULL THEN ARRAY['CODE_UPS']
+    WHEN 'CODE_UPS' = ANY(feature_code) THEN feature_code
+    ELSE feature_code || ARRAY['CODE_UPS']
+END
+WHERE id IN (
+    '11111111-1111-1111-1111-111111111102', -- 设备列表
+    'aaaa0007-1000-0000-0000-000000000002', -- 启动记录
+    'aaaa0098-1000-0000-0000-000000000001', -- 产品管理
+    'aaaa000b-1000-0000-0000-000000000001', -- 文件传输 / 任务管理
+    'aaaa000b-1000-0000-0000-000000000002', -- 文件传输 / 模板配置
+    'aaaa000b-1000-0000-0000-000000000003'  -- 文件传输 / 文件管理
+);
 -- +omcgo MainReconcileEnd
 
 INSERT INTO public.role_menus (role_id, menu_id)

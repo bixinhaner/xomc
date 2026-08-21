@@ -1519,7 +1519,7 @@ export default function CustomAlarmStats() {
                     <div style={{ width: 40 }}></div>
                     <div style={{ flex: 1 }}>设备编码</div>
                     <div style={{ flex: 1 }}>设备名称</div>
-                    <div style={{ width: 80, textAlign: 'center' }}>基站制式</div>
+                    <div style={{ width: 80, textAlign: 'center' }}>设备制式</div>
                   </div>
                   {/* 表体 */}
                   {paginatedDevices.map(device => (

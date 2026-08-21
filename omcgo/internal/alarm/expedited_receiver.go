@@ -124,6 +124,7 @@ func (r *ExpeditedEventReceiver) handleExpeditedAlarmEvent(ctx context.Context, 
 		switch exp.NotificationType {
 		case NotificationNewAlarm:
 			alarm := exp.ToModel(dev.ID, payload.DeviceSN, dev.Carrier)
+			addUPSEquipmentInfo(dev, alarm.AdditionalInfo)
 			drop, err := applyUnknownAlarmFallback(ctx, r.alarmDefRegistry, r.productResolver, r.defMetrics, r.logger, alarm, dev.ProductClass)
 			if err != nil {
 				r.logger.Warn("apply expedited alarm fallback failed (proceed without fallback)",
@@ -145,6 +146,7 @@ func (r *ExpeditedEventReceiver) handleExpeditedAlarmEvent(ctx context.Context, 
 
 		case NotificationChangedAlarm:
 			alarm := exp.ToModel(dev.ID, payload.DeviceSN, dev.Carrier)
+			addUPSEquipmentInfo(dev, alarm.AdditionalInfo)
 			if err := applyAlarmDefinitionSeverity(ctx, r.alarmDefRegistry, alarm); err != nil {
 				r.logger.Warn("resolve expedited alarm definition severity failed (proceed with source severity)",
 					zap.Error(err),
@@ -163,6 +165,7 @@ func (r *ExpeditedEventReceiver) handleExpeditedAlarmEvent(ctx context.Context, 
 
 		case NotificationClearedAlarm:
 			alarm := exp.ToModel(dev.ID, payload.DeviceSN, dev.Carrier)
+			addUPSEquipmentInfo(dev, alarm.AdditionalInfo)
 			if err := r.engine.AutoClear(ctx, alarm); err != nil {
 				r.logger.Error("process ClearedAlarm",
 					zap.Error(err),

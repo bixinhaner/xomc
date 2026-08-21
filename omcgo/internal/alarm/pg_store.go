@@ -399,7 +399,7 @@ var activeColumns = []string{
 	"alarms_active.description", "alarms_active.status", "alarms_active.raised_at", "alarms_active.acknowledged_at", "alarms_active.acknowledged_by", "alarms_active.ack_note",
 	"alarms_active.additional_info", "alarms_active.created_at", "alarms_active.updated_at",
 	// 增强字段
-	"alarms_active.device_name", "COALESCE(alarms_active.technology, d.technology) AS technology", "alarms_active.alarm_source", "alarms_active.event_type",
+	"alarms_active.device_name", alarmTechnologySelectExpr("alarms_active", "d"), "alarms_active.alarm_source", "alarms_active.event_type",
 	"alarms_active.network_location", "alarms_active.explicit_cause", "alarms_active.is_read", "alarms_active.ack_count",
 	"alarms_active.first_raised_at", "alarms_active.last_updated_at", "alarms_active.probable_cause",
 	// T-0098 P2-10
@@ -479,7 +479,7 @@ func historyAlarmSelect(loc appcontext.Locale) squirrel.SelectBuilder {
 		"alarms_history.status", "alarms_history.raised_at",
 		"alarms_history.acknowledged_at", "alarms_history.cleared_at", "alarms_history.acknowledged_by", "alarms_history.ack_note",
 		"alarms_history.additional_info",
-		"alarms_history.device_name", "COALESCE(alarms_history.technology, d.technology) AS technology", "alarms_history.alarm_source", "alarms_history.event_type",
+		"alarms_history.device_name", alarmTechnologySelectExpr("alarms_history", "d"), "alarms_history.alarm_source", "alarms_history.event_type",
 		"alarms_history.ack_count", "alarms_history.updated_at",
 		"alarms_history.cleared_by", "alarms_history.clear_note",
 		localizedProbableCauseExpr(loc, "alarms_history"),
@@ -495,7 +495,7 @@ func historyAlarmRawSelect() squirrel.SelectBuilder {
 		"alarms_history.status", "alarms_history.raised_at",
 		"alarms_history.acknowledged_at", "alarms_history.cleared_at", "alarms_history.acknowledged_by", "alarms_history.ack_note",
 		"alarms_history.additional_info",
-		"alarms_history.device_name", "COALESCE(alarms_history.technology, d.technology) AS technology", "alarms_history.alarm_source", "alarms_history.event_type",
+		"alarms_history.device_name", alarmTechnologySelectExpr("alarms_history", "d"), "alarms_history.alarm_source", "alarms_history.event_type",
 		"alarms_history.ack_count", "alarms_history.updated_at",
 		"alarms_history.cleared_by", "alarms_history.clear_note",
 		"alarms_history.probable_cause",
@@ -614,7 +614,7 @@ func applyActiveFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.Selec
 	if f.DeviceName != nil {
 		qb = qb.Where(squirrel.Like{"alarms_active.device_name": "%" + *f.DeviceName + "%"})
 	}
-	if technologyExpr := normalizedTechnologyExpr("COALESCE(alarms_active.technology, d.technology)", f.Technologies); technologyExpr != nil {
+	if technologyExpr := normalizedTechnologyExpr(alarmTechnologyExpr("alarms_active", "d"), f.Technologies); technologyExpr != nil {
 		qb = qb.Where(technologyExpr)
 	}
 	if f.Keyword != nil {
@@ -664,7 +664,7 @@ func applyHistoryFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.Sele
 	if f.EventType != nil {
 		qb = qb.Where(normalizedEventTypeExpr("alarms_history.event_type", *f.EventType))
 	}
-	if technologyExpr := normalizedTechnologyExpr("COALESCE(alarms_history.technology, d.technology)", f.Technologies); technologyExpr != nil {
+	if technologyExpr := normalizedTechnologyExpr(alarmTechnologyExpr("alarms_history", "d"), f.Technologies); technologyExpr != nil {
 		qb = qb.Where(technologyExpr)
 	}
 	if f.Keyword != nil {
@@ -695,6 +695,24 @@ func normalizedEventTypeExpr(column string, raw string) squirrel.Sqlizer {
 		strings.Join(placeholders, ", "),
 	)
 	return squirrel.Expr(expr, args...)
+}
+
+func alarmTechnologyExpr(alarmTable string, deviceAlias string) string {
+	alarmTechnology := alarmTable + ".technology"
+	deviceTechnology := deviceAlias + ".technology"
+	deviceProductClass := deviceAlias + ".product_class"
+	alarmSource := alarmTable + ".alarm_source"
+	return fmt.Sprintf(
+		"CASE WHEN UPPER(COALESCE(NULLIF(%s, ''), NULLIF(%s, ''), '')) LIKE 'UPS%%' THEN 'UPS' ELSE COALESCE(NULLIF(%s, ''), NULLIF(%s, ''), '') END",
+		deviceProductClass,
+		alarmSource,
+		alarmTechnology,
+		deviceTechnology,
+	)
+}
+
+func alarmTechnologySelectExpr(alarmTable string, deviceAlias string) string {
+	return alarmTechnologyExpr(alarmTable, deviceAlias) + " AS technology"
 }
 
 func normalizedTechnologyExpr(column string, values []string) squirrel.Sqlizer {
@@ -784,6 +802,7 @@ func normalizedTechnologyAliases(raw string) []string {
 		"5gnr":   {"gnb", "nr", "5gnr", "gnodeb"},
 		"gnodeb": {"gnb", "nr", "5gnr", "gnodeb"},
 		"gsm":    {"gsm"},
+		"ups":    {"ups"},
 	}
 
 	if aliases, ok := buckets[key]; ok {

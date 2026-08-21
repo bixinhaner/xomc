@@ -233,6 +233,9 @@ func (p *paramSyncFullRunProjection) Refresh(ctx context.Context, deviceID uuid.
 	if dev == nil {
 		return fmt.Errorf("device %s not found for parameter sync projection", deviceID)
 	}
+	if isUPSParamSyncDevice(dev) {
+		return nil
+	}
 	if _, err := p.info.SyncFromParameters(ctx, deviceID, dev.Carrier, dev.Technology, dev.ProductClass); err != nil {
 		return fmt.Errorf("refresh device_info from parameters: %w", err)
 	}
@@ -259,7 +262,14 @@ type paramSyncStarter struct {
 	devices device.DeviceRepository
 }
 
+func isUPSParamSyncDevice(dev *model.Device) bool {
+	return dev != nil && device.IsUPSProductClass(dev.ProductClass)
+}
+
 func submitLicenseParamSync(ctx context.Context, submitter licenseParamSyncSubmitter, dev *model.Device, sourceID string, paths []string) (int, error) {
+	if isUPSParamSyncDevice(dev) {
+		return 0, nil
+	}
 	result, err := submitter.Submit(ctx, paramsync.SubmitCommand{
 		DeviceID: dev.ID, DeviceSN: dev.SerialNumber, CallerType: "license",
 		TriggerReason: paramsync.TriggerLicense, Scope: paramsync.SyncScopePartial,
@@ -284,6 +294,9 @@ func submitRegisteredDeviceSync(
 	sourceID string,
 	idempotencyKeys ...string,
 ) error {
+	if isUPSParamSyncDevice(dev) {
+		return nil
+	}
 	idempotencyKey := sourceID
 	if len(idempotencyKeys) > 0 {
 		idempotencyKey = idempotencyKeys[0]
@@ -323,6 +336,9 @@ func submitReleaseSync(
 	campaignID uuid.UUID,
 	attemptID uuid.UUID,
 ) (bool, error) {
+	if isUPSParamSyncDevice(dev) {
+		return false, nil
+	}
 	attemptKey := fmt.Sprintf(
 		"omc_upgrade:%s:%s:%s",
 		campaignID,
@@ -389,6 +405,12 @@ func (s *paramSyncStarter) SubmitDeviceOnlineFullSync(
 	if dev == nil {
 		return nil, fmt.Errorf("durable device-online parameter sync requires a device")
 	}
+	if isUPSParamSyncDevice(dev) {
+		return &provision.DeviceOnlineFullSyncResult{
+			Status:     "skipped",
+			ResultCode: "UPS_UNSUPPORTED",
+		}, nil
+	}
 	result, err := s.service.Submit(ctx, paramsync.SubmitCommand{
 		DeviceID:        dev.ID,
 		DeviceSN:        dev.SerialNumber,
@@ -431,6 +453,9 @@ func (s *paramSyncStarter) StartReleaseSync(
 }
 
 func (s *paramSyncStarter) SubmitModelUploadParamSync(ctx context.Context, dev *model.Device, sourceID string, modelUploadID uuid.UUID, status string) (bool, int, error) {
+	if isUPSParamSyncDevice(dev) {
+		return true, 0, nil
+	}
 	result, err := s.service.Submit(ctx, paramsync.SubmitCommand{
 		DeviceID: dev.ID, DeviceSN: dev.SerialNumber, CallerType: "provision",
 		TriggerReason: paramsync.TriggerModelUpload, Scope: paramsync.SyncScopeFull,
@@ -456,6 +481,13 @@ func (s *paramSyncStarter) SubmitConfigPull(ctx context.Context, deviceSN string
 	}
 	if dev == nil {
 		return config.DurablePullResult{}, fmt.Errorf("config-pull device %s not found", deviceSN)
+	}
+	if isUPSParamSyncDevice(dev) {
+		return config.DurablePullResult{
+			Handled:    true,
+			Status:     string(paramsync.RequestStatusRejected),
+			ResultCode: "UPS_UNSUPPORTED",
+		}, nil
 	}
 	if key == "" {
 		key = uuid.NewString()
@@ -486,6 +518,9 @@ func (s *paramSyncStarter) SubmitConfigPull(ctx context.Context, deviceSN string
 }
 
 func (s *paramSyncStarter) StartDurableSync(ctx context.Context, dev *model.Device, sourceID, reason string, paths []string) (bool, int, error) {
+	if isUPSParamSyncDevice(dev) {
+		return true, 0, nil
+	}
 	trigger := paramsync.TriggerReason(reason)
 	if trigger == "" {
 		return true, 0, fmt.Errorf("durable parameter sync trigger reason is required")
@@ -528,6 +563,12 @@ func (s *paramSyncStarter) StartDurableSync(ctx context.Context, dev *model.Devi
 // SubmitStartupDeviceOnlineFullSync uses the exact device.online durable full
 // sync semantics for startup reconciliation of every online device.
 func (s *paramSyncStarter) SubmitStartupDeviceOnlineFullSync(ctx context.Context, dev *model.Device, idempotencyKey, sourceEventID string) (*provision.DeviceOnlineFullSyncResult, error) {
+	if isUPSParamSyncDevice(dev) {
+		return &provision.DeviceOnlineFullSyncResult{
+			Status:     "skipped",
+			ResultCode: "UPS_UNSUPPORTED",
+		}, nil
+	}
 	result, err := s.service.Submit(ctx, paramsync.SubmitCommand{
 		DeviceID: dev.ID, DeviceSN: dev.SerialNumber, CallerType: "provision",
 		TriggerReason: paramsync.TriggerDeviceOnline, Scope: paramsync.SyncScopeFull,
@@ -545,6 +586,13 @@ func (s *paramSyncStarter) SubmitStartupDeviceOnlineFullSync(ctx context.Context
 }
 
 func (s *paramSyncStarter) StartManualSyncDetailed(ctx context.Context, dev *model.Device, sourceID string, paths []string) (*device.ManualParamSyncStart, error) {
+	if isUPSParamSyncDevice(dev) {
+		return &device.ManualParamSyncStart{
+			Used:       false,
+			Status:     "skipped",
+			ResultCode: "UPS_UNSUPPORTED",
+		}, nil
+	}
 	scope := paramsync.SyncScopeFull
 	if len(paths) > 0 {
 		scope = paramsync.SyncScopePartial

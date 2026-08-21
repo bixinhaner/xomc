@@ -10,6 +10,9 @@ type UpdateDeviceInfoRequest struct {
 	// DeviceName 设备名称
 	DeviceName *string `json:"device_name"`
 
+	// SiteID 站点 ID。UPS 设备写入 device_ups_info，基站仍走 devices.site_id 更新接口。
+	SiteID *string `json:"site_id"`
+
 	// Address 安装地址
 	Address *string `json:"address"`
 

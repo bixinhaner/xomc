@@ -68,3 +68,18 @@ func TestLoadLegacyFeatureMappingHiddenStillAuthorized(t *testing.T) {
 	require.True(t, HasFeature(FeatureList(raw), "eNB", "Monitor"),
 		"hidden monitor code must still authorize eNB.Monitor")
 }
+
+func TestLoadLegacyFeatureMappingUPSAuthorizesMonitor(t *testing.T) {
+	mapping, err := LoadLegacyFeatureMapping(filepath.Join("..", "..", "data", "license-feature-mapping.json"))
+	require.NoError(t, err)
+
+	features := mapping.Normalize([]string{"81"}, nil)
+	require.Len(t, features, 1)
+	require.Equal(t, "CODE_UPS", features[0].FeatureCode)
+
+	tree := mapping.AuthorizationTree([]string{"81"}, nil)
+	raw, err := json.Marshal(tree)
+	require.NoError(t, err)
+	require.True(t, HasFeature(FeatureList(raw), "UPS", "Monitor"),
+		"CODE_UPS should authorize UPS.Monitor through UPS=All")
+}

@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	coreerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -223,6 +224,25 @@ func TestErrAlarmSyncInProgressMapsToConflict(t *testing.T) {
 	t.Parallel()
 
 	assert.True(t, errors.Is(ErrAlarmSyncInProgress, coreerrors.ErrAlreadyExists))
+}
+
+func TestTriggerSync_UPSDeviceSkipsGPV(t *testing.T) {
+	t.Parallel()
+
+	svc := (&AlarmSyncService{logger: zap.NewNop()}).
+		WithDeviceReader(&rcvMockDeviceReader{
+			deviceBySN: map[string]*model.Device{
+				"UPS-SN-001": {
+					SerialNumber: "UPS-SN-001",
+					ProductClass: "UPS_M3_BMU",
+				},
+			},
+		})
+
+	syncTask, err := svc.TriggerSync(context.Background(), " UPS-SN-001 ")
+
+	require.NoError(t, err)
+	assert.Nil(t, syncTask)
 }
 
 func TestSubscribeRegistersTaskTerminalSubjects(t *testing.T) {
