@@ -2688,6 +2688,260 @@
     "github.com/omcgo/omcgo/internal/agentruntime.(*Handler).resolveRuntimeProxyContext-fm": {
       "found": true
     },
+    "github.com/omcgo/omcgo/internal/alarm.(*AlarmEmailSubscriptionHandler).CreateSubscription-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "AlarmEmailSubscription",
+          "properties": {
+            "alarm_identifiers": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "alarm_sources": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "created_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            },
+            "created_by": {
+              "format": "uuid",
+              "goType": "uuid.UUID",
+              "nullable": true,
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "device_group_ids": {
+              "items": {
+                "format": "uuid",
+                "goType": "uuid.UUID",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "device_ids": {
+              "items": {
+                "format": "uuid",
+                "goType": "uuid.UUID",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "event_types": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "id": {
+              "format": "uuid",
+              "goType": "uuid.UUID",
+              "type": "string"
+            },
+            "include_default_recipients": {
+              "type": "boolean"
+            },
+            "interval_minutes": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "recipients": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "severities": {
+              "items": {
+                "goType": "int16",
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "tolerance_minutes": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            },
+            "updated_by": {
+              "format": "uuid",
+              "goType": "uuid.UUID",
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/alarm.(*AlarmEmailSubscriptionHandler).DeleteSubscription-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/alarm.(*AlarmEmailSubscriptionHandler).GetGlobalSetting-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/alarm.(*AlarmEmailSubscriptionHandler).ListSubscriptions-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/alarm.(*AlarmEmailSubscriptionHandler).UpdateGlobalSetting-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "updateAlarmEmailGlobalSettingRequest",
+          "properties": {
+            "default_recipients": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/alarm.(*AlarmEmailSubscriptionHandler).UpdateSubscription-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "AlarmEmailSubscription",
+          "properties": {
+            "alarm_identifiers": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "alarm_sources": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "created_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            },
+            "created_by": {
+              "format": "uuid",
+              "goType": "uuid.UUID",
+              "nullable": true,
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "device_group_ids": {
+              "items": {
+                "format": "uuid",
+                "goType": "uuid.UUID",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "device_ids": {
+              "items": {
+                "format": "uuid",
+                "goType": "uuid.UUID",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "event_types": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "id": {
+              "format": "uuid",
+              "goType": "uuid.UUID",
+              "type": "string"
+            },
+            "include_default_recipients": {
+              "type": "boolean"
+            },
+            "interval_minutes": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "recipients": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "severities": {
+              "items": {
+                "goType": "int16",
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "tolerance_minutes": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            },
+            "updated_by": {
+              "format": "uuid",
+              "goType": "uuid.UUID",
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/alarm.(*AlarmEmailSubscriptionHandler).authorizeOwner-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/alarm.(*AlarmEmailSubscriptionHandler).authorizeScope-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/alarm.(*AlarmEmailSubscriptionHandler).requireSuperAdmin-fm": {
+      "found": true
+    },
     "github.com/omcgo/omcgo/internal/alarm.(*FilterHandler).Create-fm": {
       "found": true,
       "requestBody": {
@@ -3531,10 +3785,16 @@
     },
     "github.com/omcgo/omcgo/internal/alarm/definition.(*FileHandler).DownloadFile-fm": {
       "found": true,
-      "description": "DownloadFile GET /api/v1/alarm-definitions/file-content?loaded_from=alarm-definitions/\u003cfile\u003e.xml\n\n下载 XML 原文件(2026-06-05 操作列下载功能)。builtin 与 custom 均可下载(只读无守门);\n路径校验与 DeleteFile 同口径:validAlarmFilePath + pathContainedIn 双重防遍历。",
+      "description": "DownloadFile GET /api/v1/alarm-definitions/file-content\n\n两种模式(#268):\n  - ?loaded_from=alarm-definitions/\u003cfile\u003e.xml — 下载磁盘原文件(builtin 与 custom\n    均可,只读无守门);路径校验与 DeleteFile 同口径:validAlarmFilePath +\n    pathContainedIn 双重防遍历。\n  - ?ne_type=ENB(不带 loaded_from) — 手工新增行没有落盘文件,从 DB 取该\n    ne_type 下 loaded_from 为空的全量定义,动态生成 alarmModel XML 返回。\n    字段与导入格式对齐(severity 用名称 / isShow Y|N / eventType 数字),\n    导出文件可直接回传 upload-xml。",
       "queryParams": [
         {
           "name": "loaded_from",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "ne_type",
           "in": "query",
           "required": false,
           "type": "string"
@@ -3558,6 +3818,18 @@
           "in": "form",
           "required": false,
           "type": "file"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/alarm/definition.(*FileHandler).downloadGenerated-fm": {
+      "found": true,
+      "description": "downloadGenerated 是 DownloadFile 的生成模式:按 ne_type 从 DB 生成手工新增\n告警的 alarmModel XML。description 是 DB 侧备注字段、XML 格式没有,导出即丢;\ndeviceType 未入库,省略(回传导入只校验根元素与 neType 属性,不受影响)。",
+      "queryParams": [
+        {
+          "name": "ne_type",
+          "in": "query",
+          "required": false,
+          "type": "string"
         }
       ]
     },
@@ -3766,6 +4038,10 @@
     "github.com/omcgo/omcgo/internal/authz.(*Resolver).FromContext-fm": {
       "found": true,
       "description": "FromContext 解析 gin ctx 中主体的可见设备组。\n\n成功返回 (groups, true)；任一失败（拿不到 user_id / perm 报错）会 abort c\n（403/500）并返回 (nil, false)，调用方在 ok==false 时必须立即 return。\n\n未装配强制（perm == nil）时返回 (nil, true)，即「超管等价、不限制」，保持既有\ndev/test 退化行为；生产装配始终注入 perm。"
+    },
+    "github.com/omcgo/omcgo/internal/authz.(*Resolver).ResolveFromContext-fm": {
+      "found": true,
+      "description": "ResolveFromContext resolves visible groups without writing an HTTP response.\nHandlers that need module-specific logging or public error normalization can\nuse this method and render the returned error through their normal error path."
     },
     "github.com/omcgo/omcgo/internal/backup.(*Handler).BatchDeleteLicenses-fm": {
       "found": true,
@@ -6008,13 +6284,20 @@
     },
     "github.com/omcgo/omcgo/internal/dashboard.(*Handler).GetAlarmTrend-fm": {
       "found": true,
-      "description": "GetAlarmTrend handles GET /api/v1/dashboard/alarm-trend?days=7.",
+      "description": "GetAlarmTrend handles GET /api/v1/dashboard/alarm-trend?days=7\u0026metric=raised.",
       "queryParams": [
         {
           "name": "days",
           "in": "query",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "metric",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "raised"
         }
       ]
     },
@@ -6058,6 +6341,12 @@
         },
         {
           "name": "granularity",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "include_partial",
           "in": "query",
           "required": false,
           "type": "string"
@@ -6113,6 +6402,10 @@
     "github.com/omcgo/omcgo/internal/dashboard.(*Handler).GetSummary-fm": {
       "found": true,
       "description": "GetSummary handles GET /api/v1/dashboard/summary."
+    },
+    "github.com/omcgo/omcgo/internal/dashboard.(*Handler).GetTopAlarmDevices-fm": {
+      "found": true,
+      "description": "GetTopAlarmDevices handles GET /api/v1/dashboard/top-alarm-devices."
     },
     "github.com/omcgo/omcgo/internal/dashboard.(*Handler).GetWidgets-fm": {
       "found": true,
@@ -6224,6 +6517,26 @@
       "found": true,
       "description": "GetAntennaSectors handles GET /api/v1/devices/:id/antenna-sectors."
     },
+    "github.com/omcgo/omcgo/internal/device.(*DeviceInfoHandler).GetDeviceControlActions-fm": {
+      "found": true,
+      "description": "GetDeviceControlActions returns the durable OMC-control evidence for one device.",
+      "queryParams": [
+        {
+          "name": "page",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "1"
+        },
+        {
+          "name": "page_size",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "20"
+        }
+      ]
+    },
     "github.com/omcgo/omcgo/internal/device.(*DeviceInfoHandler).GetDeviceDetail-fm": {
       "found": true,
       "description": "GetDeviceDetail handles GET /api/v1/devices/:id/detail.\nReturns a composite view aggregating device, device_info, and device_parameters data."
@@ -6235,6 +6548,45 @@
     "github.com/omcgo/omcgo/internal/device.(*DeviceInfoHandler).GetEnums-fm": {
       "found": true,
       "description": "GetEnums handles GET /api/v1/devices/enums."
+    },
+    "github.com/omcgo/omcgo/internal/device.(*DeviceInfoHandler).UpdateAntennaSectorPlan-fm": {
+      "found": true,
+      "description": "UpdateAntennaSectorPlan saves OMC-local planning values for one sector.",
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "UpdateAntennaSectorPlanRequest",
+          "properties": {
+            "antenna_height": {
+              "goType": "float64",
+              "nullable": true,
+              "type": "number"
+            },
+            "azimuth": {
+              "goType": "float64",
+              "nullable": true,
+              "type": "number"
+            },
+            "horizontal_beamwidth": {
+              "goType": "float64",
+              "nullable": true,
+              "type": "number"
+            },
+            "mechanical_downtilt": {
+              "goType": "float64",
+              "nullable": true,
+              "type": "number"
+            },
+            "vertical_beamwidth": {
+              "goType": "float64",
+              "nullable": true,
+              "type": "number"
+            }
+          },
+          "type": "object"
+        }
+      }
     },
     "github.com/omcgo/omcgo/internal/device.(*DeviceInfoHandler).UpdateDeviceInfo-fm": {
       "found": true,
@@ -6282,6 +6634,18 @@
       "queryParams": [
         {
           "name": "carrier",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "control_phase",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "control_source",
           "in": "query",
           "required": false,
           "type": "string"
@@ -6610,6 +6974,18 @@
         },
         {
           "name": "cell_status",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "control_phase",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "control_source",
           "in": "query",
           "required": false,
           "type": "string"
@@ -7119,6 +7495,11 @@
               "nullable": true,
               "type": "number"
             },
+            "location_source_mode": {
+              "goType": "model.LocationSourceMode",
+              "nullable": true,
+              "type": "string"
+            },
             "longitude": {
               "goType": "float64",
               "nullable": true,
@@ -7446,6 +7827,115 @@
       "found": true,
       "description": "resolveVisibleGroups 解析调用者可见设备组（三态：nil 超管 / [] 无权限 / [g...] 限定）。\n返回 ok=false 表示解析失败已 abort（403/500），调用方应立即 return。\npermService 为 nil（dev/test）→ 返回 (nil, true) 不过滤。"
     },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*ContextActorResolver).ResolveActor-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).CreateDraft-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).DeleteDraft-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).GetPolicyVersion-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).GetRuntimeSettings-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).GetStateDetail-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).ListAccessEntries-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "entry_type",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).ListActions-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "page",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "1"
+        },
+        {
+          "name": "page_size",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "20"
+        },
+        {
+          "name": "serial_number",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).ListCandidates-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "review_status",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).ListPolicyVersions-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).ListStates-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "state",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).Publish-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).ReevaluateOne-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).RetryAction-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).ReviewCandidate-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).UpdateRuntimeSettings-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).UpsertList-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).actor-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).logAudit-fm": {
+      "found": true
+    },
     "github.com/omcgo/omcgo/internal/eventlog.(*Handler).Get-fm": {
       "found": true,
       "description": "Get 详情"
@@ -7704,6 +8194,628 @@
         }
       ]
     },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).ArchiveDefinition-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "properties": {
+            "preview_fingerprint": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "preview_fingerprint",
+            "reason"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).BatchUpdateDeviceLocation-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "thirdPartyLocationRequestPayload",
+          "properties": {
+            "devices": {
+              "items": {
+                "goType": "thirdPartyLocationDevicePayload",
+                "properties": {
+                  "latitude": {
+                    "type": "string"
+                  },
+                  "longitude": {
+                    "type": "string"
+                  },
+                  "serialName": {
+                    "type": "string"
+                  },
+                  "serialNumber": {
+                    "type": "string"
+                  },
+                  "updateTime": {
+                    "type": "string"
+                  },
+                  "updatetime": {
+                    "type": "string"
+                  },
+                  "vesselName": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).CreateDefinition-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "createDefinitionBody",
+          "properties": {
+            "carrier": {
+              "type": "string"
+            },
+            "geometry": {
+              "goType": "json.RawMessage",
+              "type": "object"
+            },
+            "name": {
+              "type": "string"
+            },
+            "owner_device_id": {
+              "format": "uuid",
+              "goType": "uuid.UUID",
+              "nullable": true,
+              "type": "string"
+            },
+            "policy": {
+              "goType": "json.RawMessage",
+              "type": "object"
+            },
+            "rule_type": {
+              "goType": "RuleType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "carrier",
+            "geometry",
+            "name",
+            "policy",
+            "rule_type"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).CreateDraftVersion-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "properties": {
+            "geometry": {
+              "goType": "json.RawMessage",
+              "type": "object"
+            },
+            "policy": {
+              "goType": "json.RawMessage",
+              "type": "object"
+            }
+          },
+          "required": [
+            "geometry",
+            "policy"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).CreateManualBindJob-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "manualBindingBody",
+          "properties": {
+            "device_ids": {
+              "items": {
+                "format": "uuid",
+                "goType": "uuid.UUID",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "device_sns": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "preview_fingerprint": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "scheduled_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).DisableDefinition-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "properties": {
+            "preview_fingerprint": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "preview_fingerprint",
+            "reason"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).EnableDefinition-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "properties": {
+            "preview_fingerprint": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "preview_fingerprint",
+            "reason"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).ExportBindings-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "keyword",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).GetAvailability-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).GetDefinition-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).GetManualBindJob-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).GetSettings-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).ListBindings-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "keyword",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).ListControlActions-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).ListDefinitions-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "carrier",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).ListManualBindItems-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "status",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).ListMapDefinitions-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "bounds",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "carrier",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).ListVersions-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).PreviewArchive-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).PreviewDisable-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).PreviewEnable-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).PreviewGeofenceCandidates-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).PreviewManualBindings-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "manualBindingBody",
+          "properties": {
+            "device_ids": {
+              "items": {
+                "format": "uuid",
+                "goType": "uuid.UUID",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "device_sns": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "preview_fingerprint": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "scheduled_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).PreviewSettings-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "Settings",
+          "properties": {
+            "carriers": {
+              "items": {
+                "goType": "CarrierSetting",
+                "properties": {
+                  "carrier": {
+                    "type": "string"
+                  },
+                  "default_baseline_radius_meters": {
+                    "goType": "float64",
+                    "type": "number"
+                  },
+                  "effective_mode": {
+                    "goType": "RuntimeMode",
+                    "type": "string"
+                  },
+                  "mode": {
+                    "goType": "RuntimeMode",
+                    "type": "string"
+                  },
+                  "updated_at": {
+                    "format": "date-time",
+                    "goType": "time.Time",
+                    "type": "string"
+                  },
+                  "updated_by": {
+                    "format": "uuid",
+                    "goType": "uuid.UUID",
+                    "nullable": true,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "system_mode": {
+              "goType": "RuntimeMode",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).PublishDraft-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "properties": {
+            "version_id": {
+              "format": "uuid",
+              "goType": "uuid.UUID",
+              "type": "string"
+            }
+          },
+          "required": [
+            "version_id"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).RemoveBinding-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "properties": {
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).RenameDefinition-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).ResumeBinding-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "properties": {
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).SuspendBinding-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "properties": {
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).UpdateSettings-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "Settings",
+          "properties": {
+            "carriers": {
+              "items": {
+                "goType": "CarrierSetting",
+                "properties": {
+                  "carrier": {
+                    "type": "string"
+                  },
+                  "default_baseline_radius_meters": {
+                    "goType": "float64",
+                    "type": "number"
+                  },
+                  "effective_mode": {
+                    "goType": "RuntimeMode",
+                    "type": "string"
+                  },
+                  "mode": {
+                    "goType": "RuntimeMode",
+                    "type": "string"
+                  },
+                  "updated_at": {
+                    "format": "date-time",
+                    "goType": "time.Time",
+                    "type": "string"
+                  },
+                  "updated_by": {
+                    "format": "uuid",
+                    "goType": "uuid.UUID",
+                    "nullable": true,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "system_mode": {
+              "goType": "RuntimeMode",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).abort-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).authorizeBindingRoute-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).authorizeDefinitionRoute-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).authorizeSettingsChange-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).previewDefinitionTransition-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).requireActor-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).requireVisibleGroups-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).resolveVisibleGroups-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/geofence.(*Handler).transitionDefinition-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "properties": {
+            "preview_fingerprint": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "preview_fingerprint",
+            "reason"
+          ],
+          "type": "object"
+        }
+      }
+    },
     "github.com/omcgo/omcgo/internal/interop.(*Handler).ExportReport-fm": {
       "found": true,
       "description": "ExportReport executes the same conformance run as RunTests but streams the\nresults as a downloadable report (CSV today; PDF / markdown reserved for\nfuture T-0115 iterations). Format is selected via the ?format= query\nparameter and defaults to csv.\n\nT-0115 Phase 1: CSV only — gives operator QA a sign-off artefact without\nneeding to scrape the JSON RunTests response.",
@@ -7815,6 +8927,18 @@
         }
       ]
     },
+    "github.com/omcgo/omcgo/internal/license.(*SystemLicenseHandler).CheckFeature-fm": {
+      "found": true,
+      "description": "CheckFeature — GET /api/v1/system-license/feature-check?path=eNB.Monitor.Settings.",
+      "queryParams": [
+        {
+          "name": "path",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
     "github.com/omcgo/omcgo/internal/license.(*SystemLicenseHandler).GetCurrent-fm": {
       "found": true,
       "description": "GetCurrent — GET /api/v1/system-license。\n\n200 + SystemLicense（含 devices_support / feature_list / signature_status）\n404 + 12113 当 system_license 表空。"
@@ -7882,7 +9006,7 @@
     },
     "github.com/omcgo/omcgo/internal/license.(*SystemLicenseHandler).Update-fm": {
       "found": true,
-      "description": "Update — POST /api/v1/system-license。\n\nBody：{\"raw_content\": \"\u003clicense JSON 文件原文\u003e\"}\n\n成功：201 + UpdateResult{Current, Replaced}\n  - Current  = 刚生效的 license\n  - Replaced = 被替换的旧 license history 行（首次上传时为 null）\n\n错误：\n  - JSON 解析 / 必填缺失 → 400 + 12111\n  - 签名校验失败（strict） → 400 + 12109\n  - license_id 已存在     → 409 + 12110",
+      "description": "Update — POST /api/v1/system-license。\n\nBody：{\"raw_content\": \"\u003c旧项目 .lic 二进制的 Base64\u003e\", \"raw_content_encoding\": \"base64\"}\n\n成功：201 + UpdateResult{Current, Replaced}\n  - Current  = 刚生效的 license\n  - Replaced = 被替换的旧 license history 行（首次上传时为 null）\n\n错误：\n  - .lic 解密 / 字段 / 验签失败 → 400 + 12111\n  - license_id 已存在     → 409 + 12110",
       "requestBody": {
         "contentType": "application/json",
         "required": true,
@@ -7890,6 +9014,9 @@
           "goType": "UpdateRequest",
           "properties": {
             "raw_content": {
+              "type": "string"
+            },
+            "raw_content_encoding": {
               "type": "string"
             }
           },
@@ -8731,6 +9858,13 @@
                     "format": "uuid",
                     "goType": "uuid.UUID",
                     "type": "string"
+                  },
+                  "instance_indices": {
+                    "items": {
+                      "goType": "int",
+                      "type": "integer"
+                    },
+                    "type": "array"
                   },
                   "instance_selectors": {
                     "additionalProperties": {
@@ -10845,6 +11979,21 @@
         }
       }
     },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).apiUserLogin-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).attachLegacyParamSyncParameterResults-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).authorizeDeviceListScope-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).deviceIDsFromLegacyBody-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).findParamSyncRequestBySourceID-fm": {
+      "found": true
+    },
     "github.com/omcgo/omcgo/internal/northbound.(*Router).fullSync-fm": {
       "found": true,
       "queryParams": [
@@ -10858,6 +12007,23 @@
       ]
     },
     "github.com/omcgo/omcgo/internal/northbound.(*Router).getCircuitBreaker-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).getDevice-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).getDeviceParameters-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "root",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).getTask-fm": {
       "found": true
     },
     "github.com/omcgo/omcgo/internal/northbound.(*Router).incrementalSync-fm": {
@@ -10878,6 +12044,287 @@
         }
       ]
     },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyAddDevicesToGroup-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyCollectDeviceLog-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "logType",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "log_type",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "typeCode",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "type_code",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyCreateAPIUser-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyCreateDeviceGroup-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyCreateDeviceTask-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "northboundCreateDeviceTaskRequest",
+          "properties": {
+            "command_key": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "expires_in": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "max_retries": {
+              "goType": "int",
+              "nullable": true,
+              "type": "integer"
+            },
+            "method": {
+              "type": "string"
+            },
+            "params": {
+              "goType": "json.RawMessage",
+              "type": "object"
+            },
+            "priority": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "retry_interval_seconds": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "source_id": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyCreateRegistration-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyDeleteAPIUser-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyDeleteDeviceGroup-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyDeleteRegistration-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyDeviceBySN-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyDeviceBySNOnly-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyDeviceGroupTree-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyDeviceInfo-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyDeviceQuery-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyDeviceStatus-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyExportAPILogs-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyGetDeviceParameters-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyGetTask-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyListAPILogs-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyListAPIUsers-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "operatorCode",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "operator_code",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyListRegistrations-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "carrier",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "operatorCode",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "operator_code",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "serialNumber",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "serial_number",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "sn",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyListTasks-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyParamSyncParameterResultItems-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyQueryDeviceParameters-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyRebootDevice-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyResetDevice-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacySetDeviceName-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacySetDeviceParameters-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "northboundSetParametersRequest",
+          "properties": {
+            "parameters": {
+              "items": {
+                "goType": "device.ParameterValueItem",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "pathList": {
+              "items": {
+                "goType": "device.ParameterValueItem",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "path_list": {
+              "items": {
+                "goType": "device.ParameterValueItem",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyUpdateAPIUser-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyUpdateDeviceGroup-fm": {
+      "found": true
+    },
     "github.com/omcgo/omcgo/internal/northbound.(*Router).listDeadLetters-fm": {
       "found": true,
       "queryParams": [
@@ -10897,7 +12344,81 @@
         }
       ]
     },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).listDevices-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "carrier",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "group_id",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "is_online",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "lifecycle_state",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "product_class",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "search",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "sn",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "sn_list",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "technology",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
     "github.com/omcgo/omcgo/internal/northbound.(*Router).listTargets-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).lookupParamSyncJob-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).northboundAPIConfigName-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).queueLegacyDeviceTask-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).rebootDevice-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).refreshLegacyDeviceInfoFromParameters-fm": {
       "found": true
     },
     "github.com/omcgo/omcgo/internal/northbound.(*Router).removeTarget-fm": {
@@ -10906,8 +12427,136 @@
     "github.com/omcgo/omcgo/internal/northbound.(*Router).replayDeadLetter-fm": {
       "found": true
     },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).requireDeviceFacade-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).requireGroupFacade-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).requirePageConfigFacade-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).requirePageConfiguredAPI-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).requirePageConfiguredAPIClient-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).requireRegistrationFacade-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).requireTaskFacade-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).requireTransferFacade-fm": {
+      "found": true
+    },
     "github.com/omcgo/omcgo/internal/northbound.(*Router).resetCircuitBreaker-fm": {
       "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).setDeviceParameters-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "northboundSetParametersRequest",
+          "properties": {
+            "parameters": {
+              "items": {
+                "goType": "device.ParameterValueItem",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "pathList": {
+              "items": {
+                "goType": "device.ParameterValueItem",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "path_list": {
+              "items": {
+                "goType": "device.ParameterValueItem",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound.(*Router).syncDeviceParameters-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "northboundSyncParametersRequest",
+          "properties": {
+            "parameter_names": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "parameter_paths": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "pathList": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "path_list": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        }
+      }
     },
     "github.com/omcgo/omcgo/internal/northbound.(*Scoper).AuthorizeDevice-fm": {
       "found": true,
@@ -10987,6 +12636,1379 @@
         }
       }
     },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).CreateFileProfile-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "FileProfile",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "created_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "flags": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "groups": {
+              "items": {
+                "goType": "FileGroup",
+                "properties": {
+                  "compression_enabled": {
+                    "type": "boolean"
+                  },
+                  "compression_format": {
+                    "goType": "CompressionFormat",
+                    "type": "string"
+                  },
+                  "csv_separator": {
+                    "type": "string"
+                  },
+                  "domain": {
+                    "goType": "Domain",
+                    "type": "string"
+                  },
+                  "file_name_template": {
+                    "type": "string"
+                  },
+                  "format": {
+                    "goType": "OutputFormat",
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "objects": {
+                    "items": {
+                      "goType": "ScenarioObject",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "profile": {
+                          "type": "string"
+                        },
+                        "tech": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "path_template": {
+                    "type": "string"
+                  },
+                  "period": {
+                    "goType": "Period",
+                    "type": "string"
+                  },
+                  "selected_fields": {
+                    "description": "SelectedFields narrows which fields this group exports.\nEmpty/nil = export all fields for each object (default, backward compatible).\nNon-PM domains store FieldDefinition.Key; PM stores metric IDs/paths because\ngenerated columns come from the PM indicator dictionary.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "start_minute": {
+                    "goType": "int",
+                    "type": "integer"
+                  },
+                  "start_time": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "scenario_name": {
+              "type": "string"
+            },
+            "scenario_name_en": {
+              "type": "string"
+            },
+            "status": {
+              "goType": "ProfileStatus",
+              "type": "string"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            },
+            "vendor": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).DownloadRun-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).GetEvent-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).GetRun-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).ListAPIClients-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).ListAPIConfigs-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).ListAPIInvocationLogs-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "api_key",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "create_user",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "end_time",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "ip_address",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "keyword",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "method",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "offset",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "page",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "1"
+        },
+        {
+          "name": "pageSize",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "page_size",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "path",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "start_time",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).ListAPIUsers-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).ListDeliveryTargets-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "owner_code",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "scope",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).ListEvents-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "capability",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "event_type",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "include_payload",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "true"
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "50"
+        },
+        {
+          "name": "offset",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "0"
+        },
+        {
+          "name": "owner_code",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "target_key",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).ListFields-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "domain",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "object",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "profile",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "tech",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).ListFileProfiles-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).ListInventoryProfiles-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).ListRuns-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "latest_per_profile",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "false"
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "50"
+        },
+        {
+          "name": "offset",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "0"
+        },
+        {
+          "name": "profile_code",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "profile_kind",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).ListSNMPAlarmTargets-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).ListSocketAlarmConfigs-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).LoginAPIUser-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "APIUserLoginRequest",
+          "properties": {
+            "password": {
+              "type": "string"
+            },
+            "username": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).Overview-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).PreviewFileProfile-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).ReplaceAPIClients-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "ReplaceAPIClientsRequest",
+          "properties": {
+            "items": {
+              "items": {
+                "goType": "APIClient",
+                "properties": {
+                  "allowed_api_keys": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "client_key": {
+                    "type": "string"
+                  },
+                  "created_at": {
+                    "format": "date-time",
+                    "goType": "time.Time",
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "expires_at": {
+                    "format": "date-time",
+                    "goType": "time.Time",
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "ip_whitelist": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "token_secret": {
+                    "type": "string"
+                  },
+                  "token_set": {
+                    "type": "boolean"
+                  },
+                  "updated_at": {
+                    "format": "date-time",
+                    "goType": "time.Time",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).ReplaceAPIUsers-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "ReplaceAPIUsersRequest",
+          "properties": {
+            "items": {
+              "items": {
+                "goType": "APIUser",
+                "properties": {
+                  "created_at": {
+                    "format": "date-time",
+                    "goType": "time.Time",
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "password_set": {
+                    "type": "boolean"
+                  },
+                  "updated_at": {
+                    "format": "date-time",
+                    "goType": "time.Time",
+                    "type": "string"
+                  },
+                  "username": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).ReplaceDeliveryTargets-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "ReplaceDeliveryTargetsRequest",
+          "properties": {
+            "items": {
+              "items": {
+                "goType": "DeliveryTarget",
+                "properties": {
+                  "auth_mode": {
+                    "goType": "DeliveryAuthMode",
+                    "type": "string"
+                  },
+                  "created_at": {
+                    "format": "date-time",
+                    "goType": "time.Time",
+                    "type": "string"
+                  },
+                  "credential": {
+                    "type": "string"
+                  },
+                  "credential_set": {
+                    "type": "boolean"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "host": {
+                    "type": "string"
+                  },
+                  "host_key_fingerprint": {
+                    "type": "string"
+                  },
+                  "host_key_policy": {
+                    "goType": "DeliveryHostKeyPolicy",
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "owner_code": {
+                    "type": "string"
+                  },
+                  "passive_mode": {
+                    "type": "boolean"
+                  },
+                  "port": {
+                    "goType": "int",
+                    "type": "integer"
+                  },
+                  "protocol": {
+                    "goType": "DeliveryProtocol",
+                    "type": "string"
+                  },
+                  "remote_root": {
+                    "type": "string"
+                  },
+                  "retry_times": {
+                    "goType": "int",
+                    "type": "integer"
+                  },
+                  "scope": {
+                    "goType": "DeliveryScope",
+                    "type": "string"
+                  },
+                  "timeout_seconds": {
+                    "goType": "int",
+                    "type": "integer"
+                  },
+                  "updated_at": {
+                    "format": "date-time",
+                    "goType": "time.Time",
+                    "type": "string"
+                  },
+                  "username": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "owner_code": {
+              "type": "string"
+            },
+            "scope": {
+              "goType": "DeliveryScope",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).RunFileProfile-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "RunProfileRequest",
+          "properties": {
+            "group_id": {
+              "type": "string"
+            },
+            "limit": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "trigger_reason": {
+              "type": "string"
+            },
+            "window_end": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "nullable": true,
+              "type": "string"
+            },
+            "window_start": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).RunInventoryProfile-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "RunProfileRequest",
+          "properties": {
+            "group_id": {
+              "type": "string"
+            },
+            "limit": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "trigger_reason": {
+              "type": "string"
+            },
+            "window_end": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "nullable": true,
+              "type": "string"
+            },
+            "window_start": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).TestAPIConfig-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).TestDeliveryTarget-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "DeliveryTarget",
+          "properties": {
+            "auth_mode": {
+              "goType": "DeliveryAuthMode",
+              "type": "string"
+            },
+            "created_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            },
+            "credential": {
+              "type": "string"
+            },
+            "credential_set": {
+              "type": "boolean"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "host": {
+              "type": "string"
+            },
+            "host_key_fingerprint": {
+              "type": "string"
+            },
+            "host_key_policy": {
+              "goType": "DeliveryHostKeyPolicy",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "owner_code": {
+              "type": "string"
+            },
+            "passive_mode": {
+              "type": "boolean"
+            },
+            "port": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "protocol": {
+              "goType": "DeliveryProtocol",
+              "type": "string"
+            },
+            "remote_root": {
+              "type": "string"
+            },
+            "retry_times": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "scope": {
+              "goType": "DeliveryScope",
+              "type": "string"
+            },
+            "timeout_seconds": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            },
+            "username": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).TestSNMPAlarmTarget-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).TestSocketAlarmConfig-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).UpdateAPIConfig-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).UpdateAllAPIConfigs-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).UpdateFileProfile-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "UpdateFileProfileRequest",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "enabled": {
+              "nullable": true,
+              "type": "boolean"
+            },
+            "flags": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "groups": {
+              "items": {
+                "goType": "FileGroup",
+                "properties": {
+                  "compression_enabled": {
+                    "type": "boolean"
+                  },
+                  "compression_format": {
+                    "goType": "CompressionFormat",
+                    "type": "string"
+                  },
+                  "csv_separator": {
+                    "type": "string"
+                  },
+                  "domain": {
+                    "goType": "Domain",
+                    "type": "string"
+                  },
+                  "file_name_template": {
+                    "type": "string"
+                  },
+                  "format": {
+                    "goType": "OutputFormat",
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "objects": {
+                    "items": {
+                      "goType": "ScenarioObject",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "profile": {
+                          "type": "string"
+                        },
+                        "tech": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "path_template": {
+                    "type": "string"
+                  },
+                  "period": {
+                    "goType": "Period",
+                    "type": "string"
+                  },
+                  "selected_fields": {
+                    "description": "SelectedFields narrows which fields this group exports.\nEmpty/nil = export all fields for each object (default, backward compatible).\nNon-PM domains store FieldDefinition.Key; PM stores metric IDs/paths because\ngenerated columns come from the PM indicator dictionary.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "start_minute": {
+                    "goType": "int",
+                    "type": "integer"
+                  },
+                  "start_time": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "name": {
+              "type": "string"
+            },
+            "scenario_name": {
+              "type": "string"
+            },
+            "scenario_name_en": {
+              "type": "string"
+            },
+            "status": {
+              "goType": "ProfileStatus",
+              "type": "string"
+            },
+            "vendor": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).UpdateInventoryProfile-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "UpdateInventoryProfileRequest",
+          "properties": {
+            "compression_enabled": {
+              "nullable": true,
+              "type": "boolean"
+            },
+            "compression_format": {
+              "goType": "CompressionFormat",
+              "type": "string"
+            },
+            "enabled": {
+              "nullable": true,
+              "type": "boolean"
+            },
+            "fields": {
+              "items": {
+                "goType": "InventoryFieldConfig",
+                "properties": {
+                  "data_type": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "output_alias": {
+                    "type": "string"
+                  },
+                  "renderer": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "system_field": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "file_name_template": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "object_code": {
+              "type": "string"
+            },
+            "path_template": {
+              "type": "string"
+            },
+            "period": {
+              "goType": "Period",
+              "type": "string"
+            },
+            "start_minute": {
+              "goType": "int",
+              "nullable": true,
+              "type": "integer"
+            },
+            "status": {
+              "goType": "ProfileStatus",
+              "type": "string"
+            },
+            "tech": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).UpdateSNMPAlarmTarget-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "SNMPAlarmTarget",
+          "properties": {
+            "auth_credential": {
+              "type": "string"
+            },
+            "auth_credential_set": {
+              "type": "boolean"
+            },
+            "auth_protocol": {
+              "type": "string"
+            },
+            "clear_severity_policy": {
+              "type": "string"
+            },
+            "community": {
+              "type": "string"
+            },
+            "community_set": {
+              "type": "boolean"
+            },
+            "created_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "id": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "listen_ip": {
+              "type": "string"
+            },
+            "listen_port": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "mib_fields": {
+              "items": {
+                "goType": "SNMPAlarmField",
+                "properties": {
+                  "definition": {
+                    "type": "string"
+                  },
+                  "field": {
+                    "type": "string"
+                  },
+                  "oid": {
+                    "type": "string"
+                  },
+                  "order": {
+                    "goType": "int",
+                    "type": "integer"
+                  },
+                  "required": {
+                    "type": "boolean"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "mib_query_enabled": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "notification_type": {
+              "type": "string"
+            },
+            "priv_credential": {
+              "type": "string"
+            },
+            "priv_credential_set": {
+              "type": "boolean"
+            },
+            "priv_protocol": {
+              "type": "string"
+            },
+            "retries": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "security_name": {
+              "type": "string"
+            },
+            "target_host": {
+              "type": "string"
+            },
+            "target_port": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "timeout_seconds": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).UpdateSocketAlarmConfig-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "SocketAlarmConfig",
+          "properties": {
+            "accounts": {
+              "items": {
+                "goType": "SocketAccount",
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  },
+                  "credential": {
+                    "type": "string"
+                  },
+                  "credential_set": {
+                    "type": "boolean"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "username": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "client_sync_enabled": {
+              "type": "boolean"
+            },
+            "created_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "heartbeat_seconds": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "heartbeat_times": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "id": {
+              "type": "string"
+            },
+            "idle_timeout_seconds": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "key": {
+              "type": "string"
+            },
+            "listen_ip": {
+              "type": "string"
+            },
+            "listen_port": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "max_clients": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "realtime_push_enabled": {
+              "type": "boolean"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).Validate-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "ValidateRequest",
+          "properties": {
+            "compression_enabled": {
+              "type": "boolean"
+            },
+            "compression_format": {
+              "goType": "CompressionFormat",
+              "type": "string"
+            },
+            "domain": {
+              "goType": "Domain",
+              "type": "string"
+            },
+            "fields": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "format": {
+              "goType": "OutputFormat",
+              "type": "string"
+            },
+            "metric_paths": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "objects": {
+              "items": {
+                "goType": "ScenarioObject",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "profile": {
+                    "type": "string"
+                  },
+                  "tech": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "period": {
+              "goType": "Period",
+              "type": "string"
+            },
+            "profile_kind": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).auditPageConfig-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).bindRunProfileRequest-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "RunProfileRequest",
+          "properties": {
+            "group_id": {
+              "type": "string"
+            },
+            "limit": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "trigger_reason": {
+              "type": "string"
+            },
+            "window_end": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "nullable": true,
+              "type": "string"
+            },
+            "window_start": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).handleUpdateError-fm": {
+      "found": true
+    },
     "github.com/omcgo/omcgo/internal/notification.(*AlertWebhookHandler).handle-fm": {
       "found": true,
       "requestBody": {
@@ -11027,6 +14049,100 @@
               "type": "string"
             }
           },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/notification.(*EmailRunHistoryHandler).List-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "business_type",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "page",
+          "in": "query",
+          "required": false,
+          "type": "integer",
+          "schema": {
+            "goType": "int",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "page_size",
+          "in": "query",
+          "required": false,
+          "type": "integer",
+          "schema": {
+            "goType": "int",
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "sort_by",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "sort_dir",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "enum": [
+            "asc",
+            "desc"
+          ],
+          "schema": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          }
+        },
+        {
+          "name": "status",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/notification.(*EmailRunHistoryHandler).ListDeliveries-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/notification.(*EmailSettingsHandler).SendTest-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "sendTestEmailRequest",
+          "properties": {
+            "recipient": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "recipient"
+          ],
           "type": "object"
         }
       }
@@ -12592,8 +15708,14 @@
     },
     "github.com/omcgo/omcgo/internal/pm.(*Handler).ListAggregatedMetrics-fm": {
       "found": true,
-      "description": "ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - start_time / end_time：RFC3339\n  - limit / offset\n  - page_by=pivot_row：limit / offset 按透视表行 key 分页，total 返回透视表行总数\n\n没注入 aggregator（兼容老部署）时返 503。",
+      "description": "ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - technology / technologies：制式过滤（lte/nr/gsm）\n  - start_time / end_time：RFC3339\n  - limit / offset\n  - page_by=pivot_row：limit / offset 按透视表行 key 分页，total 返回透视表行总数\n  - count_mode=n_plus_one：取 limit+1 判断 truncated，不执行精确 COUNT\n\n没注入 aggregator（兼容老部署）时返 503。",
       "queryParams": [
+        {
+          "name": "count_mode",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
         {
           "name": "device_group_id",
           "in": "query",
@@ -12692,6 +15814,18 @@
         },
         {
           "name": "start_time",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "technologies",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "technology",
           "in": "query",
           "required": false,
           "type": "string"
@@ -12814,7 +15948,7 @@
     },
     "github.com/omcgo/omcgo/internal/pm.(*Handler).ListKPIDefinitions-fm": {
       "found": true,
-      "description": "ListKPIDefinitions 返回 KPI 元数据目录，供前端\"性能管理→指标列表\"等界面消费。\n\nT-0164-P1 改造前：数据源是 carrier 适配器代码里硬编码的 KPIDefinitions 列表。\n现在改为枚举 perf_indicators_{enb,gsm,gnb}（is_counter='0' 的行），\nplatform_name 维度的具体公式在 KPIEngine 计算路径上由 router 路由解析，\n这里只暴露\"系统支持哪些 KPI 指标\"。\n\n查询参数（向后兼容老前端的 carrier 模糊搜索）：\n  - keyword：name/cn_name/id 模糊匹配\n  - device_type：ENB / GSM / GNB（不传 → 三表合并枚举）\n  - include_counters：可选开关（缺省 false）。false 时维持 is_counter='0'（仅 KPI），\n    行为与历史完全一致；true 时不按 is_counter 过滤，返回 KPI + 计数器，供向导穿梭框消费。\n\n响应每条在历史字段（name/display_name/formula/unit）之外，补 id（= perf_indicators 行 ID，\nK/C 编号）与 is_counter（\"0\" KPI / \"1\" 计数器）。默认调用方只读历史字段，零回归。",
+      "description": "ListKPIDefinitions 返回 KPI 元数据目录，供前端\"性能管理→指标列表\"等界面消费。\n\nT-0164-P1 改造前：数据源是 carrier 适配器代码里硬编码的 KPIDefinitions 列表。\n现在改为枚举 perf_indicators_{enb,gsm,gnb}（is_counter='0' 的行），\nplatform_name 维度的具体公式在 KPIEngine 计算路径上由 router 路由解析，\n这里只暴露\"系统支持哪些 KPI 指标\"。\n\n查询参数（向后兼容老前端的 carrier 模糊搜索）：\n  - keyword：name/cn_name/id 模糊匹配\n  - device_type：ENB / GSM / GNB（不传 → 三表合并枚举）\n  - include_counters：可选开关（缺省 false）。false 时维持 is_counter='0'（仅 KPI），\n    行为与历史完全一致；true 时不按 is_counter 过滤，返回 KPI + 计数器，供向导穿梭框消费。\n  - only_enabled：可选开关（缺省 false）。true 时只返回 operator_code='default' 下已启用指标，\n    供性能查询、设备性能查看、首页 KPI 配置和自定义聚合候选使用。\n\n响应每条在历史字段（name/display_name/formula/unit）之外，补 id（= perf_indicators 行 ID，\nK/C 编号）与 is_counter（\"0\" KPI / \"1\" 计数器）。默认调用方只读历史字段，零回归。",
       "queryParams": [
         {
           "name": "carrier",
@@ -12835,7 +15969,25 @@
           "type": "string"
         },
         {
+          "name": "isEnabled",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "is_enabled",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
           "name": "keyword",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "only_enabled",
           "in": "query",
           "required": false,
           "type": "string"
@@ -13520,7 +16672,6 @@
               "items": {
                 "type": "string"
               },
-              "minItems": 1,
               "type": "array"
             },
             "is_builtin": {
@@ -13536,7 +16687,6 @@
             },
             "mode": {
               "enum": [
-                "oneshot",
                 "continuous"
               ],
               "type": "string"
@@ -13550,6 +16700,22 @@
                 "type": "string"
               },
               "type": "array"
+            },
+            "planned_end_at": {
+              "description": "planned_end_at：自建 continuous 任务计划结束时间；不传由 repository 默认 created_at+30d，传 null 表示用户主动清空。",
+              "goType": "optionalTime",
+              "properties": {
+                "set": {
+                  "type": "boolean"
+                },
+                "value": {
+                  "format": "date-time",
+                  "goType": "time.Time",
+                  "nullable": true,
+                  "type": "string"
+                }
+              },
+              "type": "object"
             },
             "technology": {
               "description": "制式：lte/nr/gsm，空=不限；建后不可改（T-0182）",
@@ -13581,7 +16747,6 @@
             }
           },
           "required": [
-            "granularities",
             "metric_paths",
             "mode",
             "name"
@@ -13671,6 +16836,12 @@
           "type": "string"
         },
         {
+          "name": "include_partial",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
           "name": "limit",
           "in": "query",
           "required": false,
@@ -13720,7 +16891,7 @@
     },
     "github.com/omcgo/omcgo/internal/pm/adhoc.(*Handler).Update-fm": {
       "found": true,
-      "description": "Update PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
+      "description": "Update PUT/PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
       "requestBody": {
         "contentType": "application/json",
         "required": true,
@@ -13754,6 +16925,21 @@
                 "type": "string"
               },
               "type": "array"
+            },
+            "planned_end_at": {
+              "goType": "optionalTime",
+              "properties": {
+                "set": {
+                  "type": "boolean"
+                },
+                "value": {
+                  "format": "date-time",
+                  "goType": "time.Time",
+                  "nullable": true,
+                  "type": "string"
+                }
+              },
+              "type": "object"
             },
             "visibility": {
               "enum": [
@@ -15244,7 +18430,7 @@
               "type": "string"
             },
             "platform": {
-              "description": "Platform 可选:KPI 指标库详情页(IndicatorsByTech)由 URL ?platform= 锁定,新建指标必须落到该\nplatform 才能被详情列表的 platform_name EXISTS 过滤命中(否则保存成功但查不到)。前端从父级\n透传当前 selectedPlatform;非空时 service 在同事务内向 perf_formulas_\u003cdt\u003e 写一行占位\n(Formula=Arithmetic,允许为空),与 indicator 创建原子。列表态不传(全量新建,后续在抽屉里挂公式)。\n\n与 Formulas 并存（向后兼容）：若 Formulas 非空，service 优先走 Formulas 批量分支，\n忽略本字段；若 Formulas 为空但本字段非空，走单条占位旧逻辑（保持已部署前端的行为）。",
+              "description": "Platform 可选:PM 指标库详情页(IndicatorsByTech)由 URL ?platform= 锁定,新建指标必须落到该\nplatform 才能被详情列表的 platform_name EXISTS 过滤命中(否则保存成功但查不到)。前端从父级\n透传当前 selectedPlatform;非空时 service 在同事务内向 perf_formulas_\u003cdt\u003e 写一行占位\n(Formula=Arithmetic,允许为空),与 indicator 创建原子。列表态不传(全量新建,后续在抽屉里挂公式)。\n\n与 Formulas 并存（向后兼容）：若 Formulas 非空，service 优先走 Formulas 批量分支，\n忽略本字段；若 Formulas 为空但本字段非空，走单条占位旧逻辑（保持已部署前端的行为）。",
               "type": "string"
             },
             "product_types": {
@@ -15363,6 +18549,12 @@
           "type": "string"
         },
         {
+          "name": "operator_code",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
           "name": "page",
           "in": "query",
           "required": false,
@@ -15396,7 +18588,7 @@
     },
     "github.com/omcgo/omcgo/internal/pm/indicator.(*RESTHandler).ListPlatforms-fm": {
       "found": true,
-      "description": "ListPlatforms 返回某 deviceType 下公式表中出现过的全部平台名。\n用于 KPI 指标库列表页的平台筛选下拉。"
+      "description": "ListPlatforms 返回某 deviceType 下公式表中出现过的全部平台名。\n用于 PM 指标库列表页的平台筛选下拉。"
     },
     "github.com/omcgo/omcgo/internal/pm/indicator.(*RESTHandler).SetEnabled-fm": {
       "found": true,
@@ -15656,6 +18848,9 @@
         }
       }
     },
+    "github.com/omcgo/omcgo/internal/pm/querytemplate.(*Handler).validateDeviceScope-fm": {
+      "found": true
+    },
     "github.com/omcgo/omcgo/internal/product.(*Handler).BindOrphan-fm": {
       "found": true,
       "requestBody": {
@@ -15707,6 +18902,7 @@
               "type": "boolean"
             },
             "indicator_device_type": {
+              "description": "IndicatorDeviceType 非必填：核心网等非无线产品不区分制式、无 KPI 指标库，传空串。\n入库前小写归一；CHECK 仅允许 ''/enb/gsm/gnb。空串时 KPI 路由器软返回空路由。",
               "type": "string"
             },
             "indicator_platform": {
@@ -15744,7 +18940,6 @@
           },
           "required": [
             "alarm_ne_type",
-            "indicator_device_type",
             "name"
           ],
           "type": "object"
@@ -15807,7 +19002,7 @@
     },
     "github.com/omcgo/omcgo/internal/product.(*Handler).ListAlarmNeTypes-fm": {
       "found": true,
-      "description": "ListAlarmNeTypes GET /api/v1/products/alarm-ne-types\n返回 alarm_definitions.ne_type 字典（如 ENB / GNB / OMC / EPC / EGW / CPE / UPS）。"
+      "description": "ListAlarmNeTypes GET /api/v1/products/alarm-ne-types\n返回 alarm_definitions.ne_type 字典（如 ENB / GSM / GNB / OMC / EPC / EGW / CPE / UPS）。"
     },
     "github.com/omcgo/omcgo/internal/product.(*Handler).ListIndicatorPlatforms-fm": {
       "found": true,
@@ -16017,9 +19212,100 @@
         }
       }
     },
+    "github.com/omcgo/omcgo/internal/provision.(*Handler).CreatePolicy-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/provision.(*Handler).DeletePolicy-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/provision.(*Handler).DetectDevices-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "page",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "1"
+        },
+        {
+          "name": "page_size",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "100"
+        },
+        {
+          "name": "search",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/provision.(*Handler).DownloadXML-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "token",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/provision.(*Handler).DownloadXMLPublic-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "token",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/provision.(*Handler).ExecutePolicy-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "properties": {
+            "device_ids": {
+              "items": {
+                "format": "uuid",
+                "goType": "uuid.UUID",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "device_ids"
+          ],
+          "type": "object"
+        }
+      }
+    },
     "github.com/omcgo/omcgo/internal/provision.(*Handler).Get-fm": {
       "found": true,
       "description": "Get handles GET /api/v1/provisioning/tasks/:id."
+    },
+    "github.com/omcgo/omcgo/internal/provision.(*Handler).GetPolicy-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/provision.(*Handler).GetXML-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "token",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
     },
     "github.com/omcgo/omcgo/internal/provision.(*Handler).List-fm": {
       "found": true,
@@ -16032,7 +19318,98 @@
           "type": "string"
         },
         {
+          "name": "module",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "page",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "page_size",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "policy_id",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "policy_only",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "product_name",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "search",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "started_after",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "started_before",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
           "name": "status",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/provision.(*Handler).ListPolicies-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "page",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "1"
+        },
+        {
+          "name": "page_size",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "default": "20"
+        },
+        {
+          "name": "product_class",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "product_name",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "search",
           "in": "query",
           "required": false,
           "type": "string"
@@ -16043,12 +19420,53 @@
       "found": true,
       "description": "Retry handles POST /api/v1/provisioning/tasks/:id/retry."
     },
+    "github.com/omcgo/omcgo/internal/provision.(*Handler).SetPolicyEnabled-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "github.com/omcgo/omcgo/internal/provision.(*Handler).UpdatePolicy-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/provision.(*Handler).policyID-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/provision.(*Handler).requirePolicyRepo-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/provision.(*Handler).serveXML-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "token",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
     "github.com/omcgo/omcgo/internal/quicksettings.(*Handler).GetGroups-fm": {
       "found": true,
       "description": "GetGroups handles GET /api/v1/quicksettings/groups?device_id={uuid}.\n\n响应:{\"param_model\": \"\u003cname\u003e\", \"groups\": [Group, ...]}\n错误状态:\n\n\t400 — 缺/非法 device_id\n\t404 — 设备不存在 / productClass 未匹配任何 product\n\t422 — 设备 product 未配置 paramModel\n\t500 — 内部反查失败",
       "queryParams": [
         {
           "name": "device_id",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "param_model",
           "in": "query",
           "required": false,
           "type": "string"
@@ -17183,6 +20601,127 @@
         }
       ]
     },
+    "github.com/omcgo/omcgo/internal/storageprotection.(*Handler).listEvents-fm": {
+      "found": true,
+      "queryParams": [
+        {
+          "name": "limit",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "target_id",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "target_type",
+          "in": "query",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    "github.com/omcgo/omcgo/internal/storageprotection.(*Handler).listPolicies-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/storageprotection.(*Handler).listTargets-fm": {
+      "found": true
+    },
+    "github.com/omcgo/omcgo/internal/storageprotection.(*Handler).savePolicy-fm": {
+      "found": true,
+      "requestBody": {
+        "contentType": "application/json",
+        "required": true,
+        "schema": {
+          "goType": "Policy",
+          "properties": {
+            "block_used_percent": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "check_interval_seconds": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "created_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            },
+            "current_state": {
+              "goType": "State",
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "id": {
+              "type": "string"
+            },
+            "last_observed_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "nullable": true,
+              "type": "string"
+            },
+            "last_observed_ratio": {
+              "goType": "float64",
+              "nullable": true,
+              "type": "number"
+            },
+            "last_state_changed_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "nullable": true,
+              "type": "string"
+            },
+            "recover_used_percent": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "state_observations": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "target_id": {
+              "type": "string"
+            },
+            "target_type": {
+              "goType": "TargetType",
+              "type": "string"
+            },
+            "unknown_behavior": {
+              "goType": "UnknownBehavior",
+              "type": "string"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "type": "string"
+            },
+            "updated_by": {
+              "type": "string"
+            },
+            "version": {
+              "goType": "int64",
+              "type": "integer"
+            },
+            "warn_used_percent": {
+              "goType": "int",
+              "type": "integer"
+            },
+            "write_scope": {
+              "goType": "WriteScope",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
     "github.com/omcgo/omcgo/internal/syslog.(*Handler).ListNEMessageLogs-fm": {
       "found": true,
       "description": "ListNEMessageLogs handles GET /logs/ne-messages.",
@@ -17402,6 +20941,10 @@
             "goType": "CreateTaskRequest",
             "nullable": true,
             "properties": {
+              "admission_class": {
+                "goType": "AdmissionClass",
+                "type": "string"
+              },
               "command_index": {
                 "goType": "int",
                 "type": "integer"
@@ -17508,6 +21051,10 @@
         "schema": {
           "goType": "CreateTaskRequest",
           "properties": {
+            "admission_class": {
+              "goType": "AdmissionClass",
+              "type": "string"
+            },
             "command_index": {
               "goType": "int",
               "type": "integer"
