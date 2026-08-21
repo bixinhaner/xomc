@@ -45,6 +45,46 @@ func TestXMLParamEntry_SupportedAttribute(t *testing.T) {
 	assert.Equal(t, "true", byName["A.SupportedTrue"].Supported)
 }
 
+func TestNormalizeBuiltinMMLMappingsRepairsInstanceObjectsAndNegativeStringTypes(t *testing.T) {
+	objects := []xmlParamEntry{{
+		Name:          "InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.",
+		StandardPath:  gsmInterRATCollectionPath,
+		Access:        "READ_ONLY",
+		ChangeApplies: "Immediate",
+	}}
+	params := []xmlParamEntry{{
+		Name:         "InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.BCCHARFCN",
+		StandardPath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.BCCHARFCN",
+		Access:       "READ_WRITE",
+		DataType:     "U_INT",
+	}, {
+		Name:         "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QRxLevMinSIB5",
+		StandardPath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QRxLevMinSIB5",
+		Access:       "READ_WRITE",
+		DataType:     "STRING",
+		Min:          "-70",
+		Max:          "-22",
+	}, {
+		Name:         "Device.DeviceInfo.SignedNumericString",
+		StandardPath: "Device.DeviceInfo.SignedNumericString",
+		Access:       "READ_WRITE",
+		DataType:     "STRING",
+		Min:          "-127",
+		Max:          "-96",
+	}}
+
+	objects, params = normalizeBuiltinMMLMappings(objects, params)
+
+	require.Len(t, objects, 3)
+	assert.Equal(t, "READ_WRITE", objects[0].Access)
+	assert.Equal(t, gsmInterRATInstancePath, objects[1].StandardPath)
+	assert.Equal(t, "InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.", objects[1].Name)
+	assert.Equal(t, "READ_WRITE", objects[1].Access)
+	assert.Equal(t, "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.", objects[2].StandardPath)
+	assert.Equal(t, "INT", params[1].DataType)
+	assert.Equal(t, "INT", params[2].DataType)
+}
+
 func TestBuiltinLTEBandwidthKeepsProductWireValuesAndMirrorConstraint(t *testing.T) {
 	const dlPath = "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"
 	const ulPath = "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth"

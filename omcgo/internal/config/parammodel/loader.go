@@ -202,6 +202,7 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, stri
 	dedupSet := make(map[string]struct{}, len(doc.Objects)+len(doc.Params))
 	dedupObjects := dedupByPrivatePath(doc.Objects, dedupSet, path, "object", l.logger)
 	dedupParams := dedupByPrivatePath(doc.Params, dedupSet, path, "parameter", l.logger)
+	dedupObjects, dedupParams = normalizeBuiltinMMLMappings(dedupObjects, dedupParams)
 
 	rows := 0
 	if len(dedupObjects) > 0 {
@@ -647,6 +648,164 @@ func dedupByPrivatePath(entries []xmlParamEntry, seen map[string]struct{}, path,
 		out = append(out, e)
 	}
 	return out
+}
+
+const (
+	gsmInterRATCollectionPath = "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM."
+	gsmInterRATInstancePath   = "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}."
+)
+
+func normalizeBuiltinMMLMappings(objects, params []xmlParamEntry) ([]xmlParamEntry, []xmlParamEntry) {
+	for i := range params {
+		if isStringWithNegativeNumericBound(params[i]) {
+			params[i].DataType = "INT"
+		}
+	}
+	objects = ensureGSMInterRATInstanceObject(objects, params)
+	objects = ensureImmediateInstanceObjects(objects, params)
+	return objects, params
+}
+
+func isStringWithNegativeNumericBound(param xmlParamEntry) bool {
+	if !strings.EqualFold(strings.TrimSpace(param.DataType), "STRING") {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(param.Min), "-") ||
+		strings.HasPrefix(strings.TrimSpace(param.Max), "-")
+}
+
+func ensureImmediateInstanceObjects(objects, params []xmlParamEntry) []xmlParamEntry {
+	byStandard := make(map[string]int, len(objects))
+	privatePaths := make(map[string]struct{}, len(objects))
+	for i, object := range objects {
+		if object.StandardPath != "" {
+			byStandard[object.StandardPath] = i
+		}
+		if object.Name != "" {
+			privatePaths[object.Name] = struct{}{}
+		}
+	}
+
+	for _, param := range params {
+		standardObject, ok := immediateInstanceObjectPath(param.StandardPath)
+		if !ok {
+			continue
+		}
+		privateObject, ok := immediateInstanceObjectPath(param.Name)
+		if !ok {
+			privateObject = standardObject
+		}
+		access := objectAccessFromLeaf(param.Access)
+		changeApplies := param.ChangeApplies
+		if changeApplies == "" {
+			changeApplies = "Immediate"
+		}
+
+		if idx, exists := byStandard[standardObject]; exists {
+			if access == "READ_WRITE" && objects[idx].Access != "READ_WRITE" {
+				objects[idx].Access = "READ_WRITE"
+			}
+			if objects[idx].ChangeApplies == "" {
+				objects[idx].ChangeApplies = changeApplies
+			}
+			continue
+		}
+		if _, exists := privatePaths[privateObject]; exists {
+			continue
+		}
+		objects = append(objects, xmlParamEntry{
+			Name:          privateObject,
+			StandardPath:  standardObject,
+			Access:        access,
+			ChangeApplies: changeApplies,
+		})
+		byStandard[standardObject] = len(objects) - 1
+		privatePaths[privateObject] = struct{}{}
+	}
+	return objects
+}
+
+func immediateInstanceObjectPath(path string) (string, bool) {
+	idx := strings.LastIndex(path, ".{i}.")
+	if idx < 0 {
+		return "", false
+	}
+	return path[:idx+len(".{i}.")], true
+}
+
+func objectAccessFromLeaf(access string) string {
+	if strings.EqualFold(strings.TrimSpace(access), "READ_WRITE") {
+		return "READ_WRITE"
+	}
+	return "READ_ONLY"
+}
+
+func ensureGSMInterRATInstanceObject(objects, params []xmlParamEntry) []xmlParamEntry {
+	hasGSMLeaf := false
+	privateInstancePath := ""
+	for _, param := range params {
+		if !strings.HasPrefix(param.StandardPath, gsmInterRATInstancePath) ||
+			param.StandardPath == gsmInterRATInstancePath {
+			continue
+		}
+		hasGSMLeaf = true
+		if privateInstancePath == "" {
+			if derived, ok := deriveGSMInterRATPrivateInstancePath(param.Name); ok {
+				privateInstancePath = derived
+			}
+		}
+	}
+	if !hasGSMLeaf {
+		return objects
+	}
+
+	hasInstance := false
+	privatePaths := make(map[string]struct{}, len(objects)+1)
+	for i := range objects {
+		privatePath := objects[i].Name
+		privatePaths[privatePath] = struct{}{}
+		switch objects[i].StandardPath {
+		case gsmInterRATCollectionPath:
+			objects[i].Access = "READ_WRITE"
+			if objects[i].ChangeApplies == "" {
+				objects[i].ChangeApplies = "Immediate"
+			}
+			if privateInstancePath == "" && privatePath != "" {
+				privateInstancePath = privatePath + "{i}."
+			}
+		case gsmInterRATInstancePath:
+			hasInstance = true
+			objects[i].Access = "READ_WRITE"
+			if objects[i].ChangeApplies == "" {
+				objects[i].ChangeApplies = "Immediate"
+			}
+		}
+	}
+
+	if hasInstance {
+		return objects
+	}
+	if privateInstancePath == "" {
+		privateInstancePath = gsmInterRATInstancePath
+	}
+	if _, exists := privatePaths[privateInstancePath]; exists {
+		return objects
+	}
+	return append(objects, xmlParamEntry{
+		Name:          privateInstancePath,
+		StandardPath:  gsmInterRATInstancePath,
+		Access:        "READ_WRITE",
+		ChangeApplies: "Immediate",
+	})
+}
+
+func deriveGSMInterRATPrivateInstancePath(privateLeafPath string) (string, bool) {
+	const marker = ".GSM.{i}."
+	idx := strings.Index(privateLeafPath, marker)
+	if idx < 0 {
+		return "", false
+	}
+	return privateLeafPath[:idx+len(marker)], true
 }
 
 // batchInsertMappings 把 entries 批量插入 param_mappings；entryType 固定。

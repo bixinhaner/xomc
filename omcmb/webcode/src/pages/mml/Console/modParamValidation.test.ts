@@ -87,6 +87,15 @@ describe('validateModParamValue', () => {
     ).toBeNull();
   });
 
+  it('treats negative STRING ranges as numeric model ranges', () => {
+    const path = param({ valueType: 'STRING', minValue: -70, maxValue: -22 });
+
+    expect(validateModParamValue(path, '-70')).toBeNull();
+    expect(validateModParamValue(path, '-22')).toBeNull();
+    expect(validateModParamValue(path, '-71')).toEqual({ code: 'minValue', bound: -70 });
+    expect(validateModParamValue(path, '-21')).toEqual({ code: 'maxValue', bound: -22 });
+  });
+
   it('accepts inclusive integer boundaries', () => {
     const path = param({ valueType: 'unsignedInt', minValue: 1, maxValue: 13 });
     expect(validateModParamValue(path, '1')).toBeNull();

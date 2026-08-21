@@ -27518,6 +27518,8 @@ WITH object_defs(command_code, target_object) AS (
         ('RMV VLAN_INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.'),
         ('ADD PLMN_LIST', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.'),
         ('RMV PLMN_LIST', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.'),
+        ('ADD LTE_S1U', 'Device.Services.FAPService.{i}.CellConfig.LTE.S1U.'),
+        ('RMV LTE_S1U', 'Device.Services.FAPService.{i}.CellConfig.LTE.S1U.'),
         ('ADD PDCP_INIT_PARAM', 'Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.'),
         ('RMV PDCP_INIT_PARAM', 'Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.')
 )
@@ -27528,6 +27530,35 @@ SET target_object = d.target_object,
 FROM object_defs d
 WHERE c.command_code = d.command_code
   AND c.deprecated_at IS NULL;
+
+-- LTE_S1U was cataloged under the old FAPControl path, while active device
+-- models expose it under FAPService.{i}.CellConfig.LTE.S1U.{i}.
+UPDATE public.mml_commands c
+SET target_paths = jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.LTE.S1U.{i}.FarIpSubnetworkList',
+                                     'Device.Services.FAPService.{i}.CellConfig.LTE.S1U.{i}.LocIpAddrList'),
+    tree_node_refs = jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.LTE.S1U.{i}.FarIpSubnetworkList',
+                                       'Device.Services.FAPService.{i}.CellConfig.LTE.S1U.{i}.LocIpAddrList'),
+    updated_at = now()
+WHERE c.command_code = 'LST LTE_S1U'
+  AND c.deprecated_at IS NULL;
+
+WITH s1u_paths(old_path, new_path) AS (
+    VALUES
+        ('Device.Services.FAPControl.LTE.S1U.{i}.FarIpSubnetworkList', 'Device.Services.FAPService.{i}.CellConfig.LTE.S1U.{i}.FarIpSubnetworkList'),
+        ('Device.Services.FAPControl.LTE.S1U.{i}.LocIpAddrList', 'Device.Services.FAPService.{i}.CellConfig.LTE.S1U.{i}.LocIpAddrList')
+)
+UPDATE public.mml_command_sub_fields sf
+SET standard_path_id = new_sp.id,
+    updated_at = now()
+FROM public.mml_commands c
+JOIN s1u_paths p ON true
+JOIN public.standard_params old_sp ON old_sp.standard_path = p.old_path
+JOIN public.standard_params new_sp ON new_sp.standard_path = p.new_path
+WHERE sf.command_id = c.id
+  AND sf.standard_path_id = old_sp.id
+  AND c.command_code = 'LST LTE_S1U'
+  AND c.deprecated_at IS NULL
+  AND sf.deprecated_at IS NULL;
 
 -- SI_SUB_01 is a compatibility command family: some LTE products expose NR
 -- neighbors as NeighborList.5GCell while others use InterRATCell.NR. Keep the
@@ -28077,6 +28108,189 @@ WHERE pm.standard_path =
       'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.{i}.' || n.leaf_name
   AND pm.is_active = true;
 
+-- GSM Inter-RAT neighbors are AddObject/DeleteObject collections just like LTE
+-- and 5G neighbors. Some loaded models only had the collection object plus
+-- leaves, so product filtering could not see the writable "{i}." instance.
+WITH gsm_paths(standard_path, entry_type, access, description) AS (
+    VALUES
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.', 'object', 'READ_WRITE', 'GSM Inter-RAT neighbor collection'),
+        ('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.', 'object', 'READ_WRITE', 'GSM Inter-RAT neighbor instance')
+)
+INSERT INTO public.standard_params (
+    standard_path, entry_type, access, data_type, change_applies, description
+)
+SELECT standard_path, entry_type, access, NULL, 'Immediate', description
+FROM gsm_paths
+ON CONFLICT (standard_path) DO UPDATE
+SET entry_type = EXCLUDED.entry_type,
+    access = EXCLUDED.access,
+    change_applies = EXCLUDED.change_applies,
+    description = COALESCE(NULLIF(public.standard_params.description, ''), EXCLUDED.description),
+    updated_at = now();
+
+WITH gsm_collection AS (
+    SELECT
+        param_model_id,
+        private_path
+    FROM public.param_mappings
+    WHERE standard_path = 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.'
+      AND entry_type = 'object'
+      AND is_active = true
+), gsm_leaf_models AS (
+    SELECT DISTINCT param_model_id
+    FROM public.param_mappings
+    WHERE standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.%'
+      AND entry_type = 'parameter'
+      AND is_active = true
+      AND is_supported = true
+), gsm_instance_source AS (
+    SELECT
+        lm.param_model_id,
+        COALESCE(gc.private_path, 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.') || '{i}.' AS private_path
+    FROM gsm_leaf_models lm
+    LEFT JOIN gsm_collection gc ON gc.param_model_id = lm.param_model_id
+)
+INSERT INTO public.param_mappings (
+    param_model_id, standard_path, private_path, entry_type, access,
+    change_applies, is_storable, is_active, is_supported, source
+)
+SELECT
+    param_model_id,
+    'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.',
+    private_path,
+    'object', 'READ_WRITE', 'Immediate', true, true, true, 'builtin'
+FROM gsm_instance_source
+ON CONFLICT (param_model_id, private_path) DO UPDATE
+SET standard_path = EXCLUDED.standard_path,
+    entry_type = 'object',
+    access = 'READ_WRITE',
+    data_type = NULL,
+    change_applies = 'Immediate',
+    min_value = NULL,
+    max_value = NULL,
+    is_active = true,
+    is_supported = true,
+    source = 'builtin',
+    updated_at = now();
+
+UPDATE public.param_mappings
+SET access = 'READ_WRITE',
+    change_applies = 'Immediate',
+    updated_at = now()
+WHERE standard_path = 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.'
+  AND entry_type = 'object'
+  AND is_active = true;
+
+-- Numeric ranges imported as STRING with negative bounds are numeric fields,
+-- not string lengths. Normalize both standard tree and product mappings so
+-- validators never interpret negative bounds as max length.
+UPDATE public.standard_params
+SET data_type = 'INT',
+    updated_at = now()
+WHERE upper(COALESCE(data_type, '')) = 'STRING'
+  AND entry_type = 'parameter'
+  AND (min_value < 0 OR max_value < 0);
+
+UPDATE public.param_mappings
+SET data_type = 'INT',
+    updated_at = now()
+WHERE upper(COALESCE(data_type, '')) = 'STRING'
+  AND entry_type = 'parameter'
+  AND is_active = true
+  AND (min_value < 0 OR max_value < 0);
+
+-- ADD/RMV visibility depends on explicit instance object mappings. Derive the
+-- immediate "{i}." object from supported leaf parameters for active object
+-- command targets, so leaves alone do not hide otherwise valid commands.
+WITH add_targets AS (
+    SELECT DISTINCT regexp_replace(target_object, '\.$', '.{i}.') AS object_path
+    FROM public.mml_commands
+    WHERE operation_type IN ('ADD', 'RMV')
+      AND deprecated_at IS NULL
+      AND COALESCE(target_object, '') <> ''
+), leaf_objects AS (
+    SELECT
+        regexp_replace(m.standard_path, '^(.*\{i\})\.[^.]+$', '\1.') AS standard_path,
+        CASE WHEN bool_or(m.access = 'READ_WRITE') THEN 'READ_WRITE' ELSE 'READ_ONLY' END AS access
+    FROM public.param_mappings m
+    JOIN add_targets t
+      ON t.object_path = regexp_replace(m.standard_path, '^(.*\{i\})\.[^.]+$', '\1.')
+    WHERE m.entry_type = 'parameter'
+      AND m.is_active = true
+      AND m.is_supported = true
+      AND m.standard_path ~ '\{i\}\.[^.]+$'
+    GROUP BY regexp_replace(m.standard_path, '^(.*\{i\})\.[^.]+$', '\1.')
+)
+INSERT INTO public.standard_params (
+    standard_path, entry_type, access, data_type, change_applies, description
+)
+SELECT standard_path, 'object', access, NULL, 'Immediate', 'Derived MML AddObject instance'
+FROM leaf_objects
+ON CONFLICT (standard_path) DO UPDATE
+SET entry_type = 'object',
+    access = CASE WHEN public.standard_params.access = 'READ_WRITE' OR EXCLUDED.access = 'READ_WRITE' THEN 'READ_WRITE' ELSE EXCLUDED.access END,
+    data_type = NULL,
+    change_applies = COALESCE(public.standard_params.change_applies, EXCLUDED.change_applies),
+    updated_at = now();
+
+WITH add_targets AS (
+    SELECT DISTINCT regexp_replace(target_object, '\.$', '.{i}.') AS object_path
+    FROM public.mml_commands
+    WHERE operation_type IN ('ADD', 'RMV')
+      AND deprecated_at IS NULL
+      AND COALESCE(target_object, '') <> ''
+), leaf_objects AS (
+    SELECT
+        m.param_model_id,
+        min(regexp_replace(m.standard_path, '^(.*\{i\})\.[^.]+$', '\1.')) AS standard_path,
+        regexp_replace(m.private_path, '^(.*\{i\})\.[^.]+$', '\1.') AS private_path,
+        CASE WHEN bool_or(m.access = 'READ_WRITE') THEN 'READ_WRITE' ELSE 'READ_ONLY' END AS access
+    FROM public.param_mappings m
+    JOIN add_targets t
+      ON t.object_path = regexp_replace(m.standard_path, '^(.*\{i\})\.[^.]+$', '\1.')
+    WHERE m.entry_type = 'parameter'
+      AND m.is_active = true
+      AND m.is_supported = true
+      AND m.standard_path ~ '\{i\}\.[^.]+$'
+      AND m.private_path ~ '\{i\}\.[^.]+$'
+    GROUP BY m.param_model_id,
+        regexp_replace(m.private_path, '^(.*\{i\})\.[^.]+$', '\1.')
+)
+INSERT INTO public.param_mappings (
+    param_model_id, standard_path, private_path, entry_type, access,
+    change_applies, is_storable, is_active, is_supported, source
+)
+SELECT param_model_id, standard_path, private_path, 'object', access,
+       'Immediate', true, true, true, 'builtin'
+FROM leaf_objects
+ON CONFLICT (param_model_id, private_path) DO UPDATE
+SET standard_path = EXCLUDED.standard_path,
+    entry_type = 'object',
+    access = CASE WHEN public.param_mappings.access = 'READ_WRITE' OR EXCLUDED.access = 'READ_WRITE' THEN 'READ_WRITE' ELSE EXCLUDED.access END,
+    data_type = NULL,
+    change_applies = COALESCE(public.param_mappings.change_applies, EXCLUDED.change_applies),
+    min_value = NULL,
+    max_value = NULL,
+    is_active = true,
+    is_supported = true,
+    source = 'builtin',
+    updated_at = now();
+
+UPDATE public.param_models pm
+SET total_entries = stats.total_entries,
+    total_objects = stats.total_objects,
+    total_params = stats.total_params,
+    updated_at = now()
+FROM (
+    SELECT param_model_id,
+        COUNT(*) FILTER (WHERE is_active) AS total_entries,
+        COUNT(*) FILTER (WHERE is_active AND entry_type = 'object') AS total_objects,
+        COUNT(*) FILTER (WHERE is_active AND entry_type = 'parameter') AS total_params
+    FROM public.param_mappings
+    GROUP BY param_model_id
+) stats
+WHERE pm.id = stats.param_model_id;
+
 -- MR configuration is a singleton on every base station. Keep only LST/MOD;
 -- suppress legacy object operations regardless of the selected device model.
 UPDATE public.mml_commands
@@ -28507,9 +28721,31 @@ SET target_paths = r.paths,
 FROM refreshed r
 WHERE c.id = r.id;
 
--- Object deletion commands should not expose parameter sub-fields. DeleteObject
--- only consumes target_object plus the selected instance index; keep the object
--- path in target_paths/tree_node_refs for filtering and display.
+-- ADD commands must only expose fields under the object instance they create.
+-- Keep nested child tables and sibling product variants out of the AddObject
+-- form; otherwise product filtering can resurrect unsupported paths.
+UPDATE public.mml_command_sub_fields sf
+SET deprecated_at = COALESCE(sf.deprecated_at, NOW()),
+	updated_at = NOW()
+FROM public.mml_commands c,
+     public.standard_params sp
+WHERE c.id = sf.command_id
+  AND sp.id = sf.standard_path_id
+  AND c.operation_type = 'ADD'
+  AND c.deprecated_at IS NULL
+  AND sf.deprecated_at IS NULL
+  AND COALESCE(c.target_object, '') <> ''
+  AND (
+	  sp.standard_path !~ '\{i\}\.[^.]+$'
+	  OR regexp_count(sp.standard_path, '\{i\}') <> regexp_count(c.target_object, '\{i\}') + 1
+	  OR regexp_replace(sp.standard_path, '\{i\}\.', '', 'g')
+		  NOT LIKE regexp_replace(c.target_object, '\{i\}\.', '', 'g') || '%'
+  );
+
+-- Object commands should expose the object itself in target_paths/tree_node_refs.
+-- DeleteObject consumes only target_object plus the selected instance index, and
+-- AddObject uses the object path as the product-filtering anchor while optional
+-- writable sub-fields remain available for the post-add SPV flow.
 UPDATE public.mml_command_sub_fields sf
 SET deprecated_at = COALESCE(sf.deprecated_at, NOW()),
 	updated_at = NOW()
@@ -28524,7 +28760,7 @@ UPDATE public.mml_commands c
 SET target_paths = jsonb_build_array(c.target_object),
 	tree_node_refs = jsonb_build_array(c.target_object),
 	updated_at = NOW()
-WHERE c.operation_type = 'RMV'
+WHERE c.operation_type IN ('ADD', 'RMV')
   AND c.deprecated_at IS NULL
   AND COALESCE(c.target_object, '') <> '';
 

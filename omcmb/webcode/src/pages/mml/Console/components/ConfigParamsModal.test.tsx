@@ -194,6 +194,41 @@ describe('ConfigParamsModal', () => {
     expect(screen.getByRole('textbox')).toHaveValue('');
   });
 
+  it('uses numeric semantics for a negative STRING range from stale model data', () => {
+    const onConfirmAndExecute = vi.fn();
+    const qrxPath = 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QRxLevMinSIB5';
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'ADD',
+        commandCode: 'ADD CARRIER',
+        commandName: '新增 LTE邻区参数管理',
+        targetObject: 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.',
+        paramPaths: [{
+          path: qrxPath,
+          label: 'QRxLevMinSIB5',
+          writable: true,
+          isObject: false,
+          valueType: 'STRING',
+          minValue: -70,
+          maxValue: -22,
+        }],
+      },
+      selectedPathKeys: [qrxPath],
+      onConfirmAndExecute,
+    });
+
+    const input = screen.getByRole('textbox');
+    expect(input).toHaveValue('-70');
+    fireEvent.change(input, { target: { value: '-22' } });
+    fireEvent.click(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ }));
+
+    expect(screen.queryByText('mml.consoleV2.config.validation.maxLength')).not.toBeInTheDocument();
+    expect(onConfirmAndExecute).toHaveBeenCalledWith(expect.objectContaining({
+      values: { [qrxPath]: '-22' },
+    }));
+  });
+
   it('blocks execution and shows a per-field error outside the configured range', () => {
     renderModal({
       command: {

@@ -43,6 +43,14 @@ function enumContainsValue(path: CommandParamPath, value: string): boolean {
     && options.some((option) => normalizeBooleanEquivalent(option.value) === normalizedValue);
 }
 
+export function modParamRangeKind(path: CommandParamPath) {
+  const rangeKind = dataTypeRangeKind(path.valueType);
+  if (rangeKind === 'length' && ((path.minValue ?? 0) < 0 || (path.maxValue ?? 0) < 0)) {
+    return 'value';
+  }
+  return rangeKind;
+}
+
 export function validateModParamValue(
   path: CommandParamPath,
   value: string,
@@ -57,7 +65,7 @@ export function validateModParamValue(
     return { code: 'enumValue' };
   }
 
-  const rangeKind = dataTypeRangeKind(path.valueType);
+  const rangeKind = modParamRangeKind(path);
   if (rangeKind === 'length') {
     const length = Array.from(value).length;
     if (path.minValue != null && length < path.minValue) {

@@ -313,21 +313,22 @@ func buildADDCompoundSpvEntry(stmt Statement, cmd *MMLCommand, subFields []MMLCo
 	}, nil
 }
 
-// substituteInstanceSelectorsForADDCompound 把路径中 N 个外层 .{i}. 替换为 selectors 值，
-// 同时把最后 1 个 .{i}. 替换为字面占位符 .{NEW}.（新实例号占位）。
+// substituteInstanceSelectorsForADDCompound 把路径中 N 个外层 .{i} 占位替换为 selectors 值，
+// 同时把最后 1 个 .{i} 占位替换为字面占位符 .{NEW}（新实例号占位）。
 //
-// 约束：path 必须比 selectors 多正好 1 个 .{i}.（额外那 1 个 = 新实例）。
+// 约束：path 必须比 selectors 多正好 1 个 .{i} 占位（额外那 1 个 = 新实例）。
+// 占位既可能是中间段 .{i}.，也可能是末尾对象段 .{i}。
 //
 // 示例：
 //
 //	path = "Device.Services.FAPService.{i}.PLMNList.{i}.PLMNID"
-//	selectors = {iα: "1"}     →    path 有 2 个 .{i}.，selectors 1 个 → expected
+//	selectors = {iα: "1"}     →    path 有 2 个 .{i} 占位，selectors 1 个 → expected
 //	result = "Device.Services.FAPService.1.PLMNList.{NEW}.PLMNID"
 func substituteInstanceSelectorsForADDCompound(path string, selectors map[string]string) (string, error) {
-	placeholderCount := strings.Count(path, ".{i}.")
+	placeholderCount := strings.Count(path, ".{i}")
 	expected := len(selectors) + 1
 	if placeholderCount != expected {
-		return "", fmt.Errorf("%w: ADD compound path .{i}. count=%d, expected selectors+1=%d (path=%s)",
+		return "", fmt.Errorf("%w: ADD compound path .{i} placeholder count=%d, expected selectors+1=%d (path=%s)",
 			ErrInvalidRequest, placeholderCount, expected, path)
 	}
 
@@ -340,19 +341,32 @@ func substituteInstanceSelectorsForADDCompound(path string, selectors map[string
 	result := path
 	for _, key := range keys {
 		val := selectors[key]
-		idx := strings.Index(result, ".{i}.")
+		idx := strings.Index(result, ".{i}")
 		if idx < 0 {
 			break
 		}
-		result = result[:idx] + "." + val + "." + result[idx+5:]
+		markerLength := len(".{i}")
+		trailingDot := ""
+		if idx+markerLength < len(result) && result[idx+markerLength] == '.' {
+			markerLength++
+			trailingDot = "."
+		}
+		result = result[:idx] + "." + val + trailingDot + result[idx+markerLength:]
 	}
 
-	// 此时应该正好剩 1 个 .{i}.（防御性校验）
-	if strings.Count(result, ".{i}.") != 1 {
-		return "", fmt.Errorf("ADD compound: post-substitution .{i}. count=%d (result=%s)",
-			strings.Count(result, ".{i}."), result)
+	// 此时应该正好剩 1 个 .{i}（防御性校验）
+	if strings.Count(result, ".{i}") != 1 {
+		return "", fmt.Errorf("ADD compound: post-substitution .{i} placeholder count=%d (result=%s)",
+			strings.Count(result, ".{i}"), result)
 	}
-	return strings.Replace(result, ".{i}.", ".{NEW}.", 1), nil
+	idx := strings.Index(result, ".{i}")
+	markerLength := len(".{i}")
+	trailingDot := ""
+	if idx+markerLength < len(result) && result[idx+markerLength] == '.' {
+		markerLength++
+		trailingDot = "."
+	}
+	return result[:idx] + ".{NEW}" + trailingDot + result[idx+markerLength:], nil
 }
 
 // resolveStatement 加载 statement 对应的 MMLCommand + sub_fields。

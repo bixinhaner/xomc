@@ -38,10 +38,9 @@ import {
   commandUsesPathSelection,
   getOrderedSelectedCommandPaths,
 } from '../pathSelection';
-import { getModParamValidationErrors } from '../modParamValidation';
+import { getModParamValidationErrors, modParamRangeKind } from '../modParamValidation';
 import { useT } from '@/hooks/useT';
 import { usePermission } from '@core/hooks/usePermission';
-import { dataTypeRangeKind } from '@core/types/paramModel';
 
 const { Text } = Typography;
 
@@ -201,7 +200,7 @@ export default function ConfigParamsModal({
               ?? 'false';
           } else if (p.defaultValue != null && p.defaultValue !== '') {
             initVals[p.path] = p.defaultValue;
-          } else if (p.minValue != null && dataTypeRangeKind(p.valueType) !== 'length') {
+          } else if (p.minValue != null && modParamRangeKind(p) !== 'length') {
             initVals[p.path] = String(p.minValue);
           }
         });
