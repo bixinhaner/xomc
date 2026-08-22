@@ -2,6 +2,8 @@ package parammodel
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -70,15 +72,16 @@ func (l *Loader) Directory() string { return l.cfg.Directory }
 // LoadOnce implements dictloader.Loader.
 // 启动期入口：依次加载 paramModel + standardModel。
 func (l *Loader) LoadOnce(ctx context.Context) (dictloader.Report, error) {
-	return l.run(ctx)
+	return l.run(ctx, true)
 }
 
-// Reload implements dictloader.Loader. 当前与 LoadOnce 等价（UPSERT 语义天然幂等）。
+// Reload implements dictloader.Loader.
+// 用户上传 XML / 管理端主动重载必须保留完整重写语义，不能用启动期 hash skip。
 func (l *Loader) Reload(ctx context.Context) (dictloader.Report, error) {
-	return l.run(ctx)
+	return l.run(ctx, false)
 }
 
-func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
+func (l *Loader) run(ctx context.Context, skipUnchanged bool) (dictloader.Report, error) {
 	rep := dictloader.NewReport(LoaderName)
 	defer rep.Finish()
 
@@ -100,7 +103,7 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	loadedModels := make(map[string]struct{}, len(files))
 	for _, absPath := range files {
 		rep.FilesScanned++
-		rows, modelName, err := l.loadParamModelFile(ctx, absPath)
+		rows, modelName, err := l.loadParamModelFile(ctx, absPath, skipUnchanged)
 		if err != nil {
 			rep.AddError(filepath.Base(absPath), "parse-or-persist", err)
 			rep.FilesSkipped++
@@ -140,7 +143,7 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 }
 
 // loadParamModelFile 单文件加载：upsert param_models + 重写 param_mappings。
-func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, string, error) {
+func (l *Loader) loadParamModelFile(ctx context.Context, path string, skipUnchanged bool) (int, string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return 0, "", fmt.Errorf("read %s: %w", path, err)
@@ -152,6 +155,7 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, stri
 	if doc.ParamModel == "" {
 		return 0, "", fmt.Errorf("paramModel attribute empty in %s", path)
 	}
+	currentHash := sha256Hex(raw)
 
 	// loaded_from 写 "param-mappings/<file>" 相对 base 的 slash 路径。
 	// 来源(builtin/custom)由同目录 sidecar(X.xml.custom)判定,见 source.go。
@@ -162,34 +166,6 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, stri
 	// XML totalEntries 可能陈旧，且去重及保留 custom 覆盖都会改变实际落库数量。
 	// 事务末尾会从 param_mappings 重算；此处只给新行一个不依赖 XML 元数据的初值。
 	totalEntries := totalObjects + totalParams
-
-	tx, err := l.pool.Begin(ctx)
-	if err != nil {
-		return 0, "", fmt.Errorf("begin tx: %w", err)
-	}
-	defer reliability.RollbackTx(ctx, tx, l.logger, "loadParamModelFile")
-
-	// UPSERT param_models（按 name 唯一）
-	const upsertModel = `INSERT INTO param_models (name, total_entries, total_objects, total_params, is_active, loaded_from)
-	VALUES ($1, $2, $3, $4, TRUE, $5)
-	ON CONFLICT (name) DO UPDATE
-	SET total_entries = EXCLUDED.total_entries,
-	    total_objects = EXCLUDED.total_objects,
-	    total_params  = EXCLUDED.total_params,
-	    loaded_from   = EXCLUDED.loaded_from
-	RETURNING id`
-	var modelID string
-	if err := tx.QueryRow(ctx, upsertModel, doc.ParamModel, totalEntries, totalObjects, totalParams, loadedFrom).Scan(&modelID); err != nil {
-		return 0, "", fmt.Errorf("upsert param_models %q: %w", doc.ParamModel, err)
-	}
-
-	// 重写 param_mappings：先按 model 删旧 builtin 行，再批量插入。
-	// T-PMSRC：只删 source='builtin'，保留管理员经 UI 维护的 source='custom' 覆盖项,
-	// 实现"重新加载 XML 时不覆盖自定义数据"。custom 与 builtin 同 private_path 时,
-	// batchInsertMappings 的 ON CONFLICT DO NOTHING 让 builtin 跳过 → custom 胜出。
-	if _, err := tx.Exec(ctx, "DELETE FROM param_mappings WHERE param_model_id = $1 AND source = 'builtin'", modelID); err != nil {
-		return 0, "", fmt.Errorf("clear param_mappings for %q: %w", doc.ParamModel, err)
-	}
 
 	// 2026-05-29 防御:同 XML 文件内 private_path 重复(撞新约束
 	// uniq_param_mappings_model_private,见 migration 000219)。批量 INSERT 任意
@@ -203,6 +179,45 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, stri
 	dedupObjects := dedupByPrivatePath(doc.Objects, dedupSet, path, "object", l.logger)
 	dedupParams := dedupByPrivatePath(doc.Params, dedupSet, path, "parameter", l.logger)
 	dedupObjects, dedupParams = normalizeBuiltinMMLMappings(dedupObjects, dedupParams)
+	if skipUnchanged {
+		if skipped, err := l.skipUnchangedParamModel(ctx, doc.ParamModel, loadedFrom, currentHash); err != nil {
+			return 0, "", err
+		} else if skipped {
+			l.logger.Info("param-model unchanged; skipped DB rewrite",
+				zap.String("model", doc.ParamModel),
+				zap.String("file", loadedFrom))
+			return 0, doc.ParamModel, nil
+		}
+	}
+
+	tx, err := l.pool.Begin(ctx)
+	if err != nil {
+		return 0, "", fmt.Errorf("begin tx: %w", err)
+	}
+	defer reliability.RollbackTx(ctx, tx, l.logger, "loadParamModelFile")
+
+	// UPSERT param_models（按 name 唯一）
+	const upsertModel = `INSERT INTO param_models (name, total_entries, total_objects, total_params, is_active, loaded_from, content_hash)
+	VALUES ($1, $2, $3, $4, TRUE, $5, $6)
+	ON CONFLICT (name) DO UPDATE
+	SET total_entries = EXCLUDED.total_entries,
+	    total_objects = EXCLUDED.total_objects,
+	    total_params  = EXCLUDED.total_params,
+	    loaded_from   = EXCLUDED.loaded_from,
+	    content_hash  = EXCLUDED.content_hash
+	RETURNING id`
+	var modelID string
+	if err := tx.QueryRow(ctx, upsertModel, doc.ParamModel, totalEntries, totalObjects, totalParams, loadedFrom, currentHash).Scan(&modelID); err != nil {
+		return 0, "", fmt.Errorf("upsert param_models %q: %w", doc.ParamModel, err)
+	}
+
+	// 重写 param_mappings：先按 model 删旧 builtin 行，再批量插入。
+	// T-PMSRC：只删 source='builtin'，保留管理员经 UI 维护的 source='custom' 覆盖项,
+	// 实现"重新加载 XML 时不覆盖自定义数据"。custom 与 builtin 同 private_path 时,
+	// batchInsertMappings 的 ON CONFLICT DO NOTHING 让 builtin 跳过 → custom 胜出。
+	if _, err := tx.Exec(ctx, "DELETE FROM param_mappings WHERE param_model_id = $1 AND source = 'builtin'", modelID); err != nil {
+		return 0, "", fmt.Errorf("clear param_mappings for %q: %w", doc.ParamModel, err)
+	}
 
 	rows := 0
 	if len(dedupObjects) > 0 {
@@ -266,6 +281,41 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, stri
 		zap.Int("params", totalParams),
 		zap.String("file", loadedFrom))
 	return rows, doc.ParamModel, nil
+}
+
+func sha256Hex(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func (l *Loader) skipUnchangedParamModel(ctx context.Context, modelName, loadedFrom, contentHash string) (bool, error) {
+	var storedLoadedFrom string
+	var storedHash string
+	var builtinRows int
+	err := l.pool.QueryRow(ctx, `
+SELECT COALESCE(pm.loaded_from, ''),
+       COALESCE(pm.content_hash, ''),
+       (
+           SELECT COUNT(*)::int
+           FROM param_mappings m
+           WHERE m.param_model_id = pm.id
+             AND m.source = 'builtin'
+             AND m.is_active = TRUE
+       )
+FROM param_models pm
+WHERE pm.name = $1
+  AND pm.is_active = TRUE`, modelName).Scan(&storedLoadedFrom, &storedHash, &builtinRows)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check unchanged param_model %q: %w", modelName, err)
+	}
+	return shouldSkipUnchangedParamModel(storedLoadedFrom, storedHash, loadedFrom, contentHash, builtinRows), nil
+}
+
+func shouldSkipUnchangedParamModel(storedLoadedFrom, storedHash, loadedFrom, contentHash string, builtinRows int) bool {
+	return storedLoadedFrom == loadedFrom && storedHash == contentHash && builtinRows > 0
 }
 
 func (l *Loader) pruneRetiredBuiltinParamModels(ctx context.Context, loadedModels map[string]struct{}) (int64, error) {

@@ -5978,6 +5978,7 @@ CREATE TABLE public.param_models (
     description text,
     is_active boolean DEFAULT true NOT NULL,
     loaded_from character varying(256),
+    content_hash character varying(64),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -6002,6 +6003,8 @@ COMMENT ON COLUMN public.param_models.name IS '模型名（唯一），如 "BLQ"
 --
 
 COMMENT ON COLUMN public.param_models.loaded_from IS 'XML 源文件名（如 BLQ.xml），溯源用';
+
+COMMENT ON COLUMN public.param_models.content_hash IS '内置参数模型 XML 内容 sha256；启动期 dictload 用于跳过未变化文件，避免重复重写 param_mappings';
 
 
 --
