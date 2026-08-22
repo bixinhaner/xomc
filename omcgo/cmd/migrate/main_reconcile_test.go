@@ -28,6 +28,21 @@ SELECT 2;
 	require.Equal(t, "SELECT 1;\n\nSELECT 2;", actual)
 }
 
+func TestExtractMainReconcileSectionsPreservesBoundaries(t *testing.T) {
+	contents := `ignored
+-- +omcgo MainReconcileBegin
+SELECT 1;
+-- +omcgo MainReconcileEnd
+ignored
+-- +omcgo MainReconcileBegin
+SELECT 2;
+-- +omcgo MainReconcileEnd`
+
+	actual, err := extractMainReconcileSections(contents)
+	require.NoError(t, err)
+	require.Equal(t, []string{"SELECT 1;", "SELECT 2;"}, actual)
+}
+
 func TestExtractMainReconcileSQLRejectsMalformedMarkers(t *testing.T) {
 	for name, contents := range map[string]string{
 		"missing sections": "SELECT 1;",
