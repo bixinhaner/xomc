@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -54,7 +55,7 @@ func TestAsyncSyncDeviceInfoLimitsConcurrency(t *testing.T) {
 	syncer := &concurrencyTrackingInfoSyncer{releaseJob: release}
 	processor := &BatchInformProcessor{
 		infoSyncer: syncer, logger: zap.NewNop(),
-		infoProjectionSlots: make(chan struct{}, 8),
+		infoProjectionSlots: make(chan struct{}, maxBatchInformProjectionWorkers),
 	}
 	updates := make([]*informUpdate, 20)
 	for i := range updates {
@@ -80,8 +81,31 @@ func TestAsyncSyncDeviceInfoLimitsConcurrency(t *testing.T) {
 	syncer.mu.Lock()
 	defer syncer.mu.Unlock()
 	assert.Equal(t, 20, syncer.completed)
-	assert.LessOrEqual(t, syncer.maxActive, 8)
+	assert.LessOrEqual(t, syncer.maxActive, maxBatchInformProjectionWorkers)
 	assert.Greater(t, syncer.maxActive, 1)
+}
+
+func TestNewBatchInformProcessorClampsHighLoadConfig(t *testing.T) {
+	processor := NewBatchInformProcessor(appconfig.BatchProcessorConfig{
+		Workers:      8,
+		MaxBatchSize: 500,
+		InputBuffer:  5000,
+	}, nil, nil, nil, nil, nil, nil, zap.NewNop())
+
+	assert.Equal(t, maxBatchInformWorkers, processor.workers)
+	assert.Equal(t, maxBatchInformMaxBatchSize, processor.maxBatchSize)
+	require.Len(t, processor.workerChans, maxBatchInformWorkers)
+	assert.Equal(t, maxBatchInformInputBuffer, cap(processor.workerChans[0]))
+	assert.Equal(t, maxBatchInformProjectionWorkers, cap(processor.infoProjectionSlots))
+}
+
+func TestNewBatchInformProcessorUsesBackpressureDefaults(t *testing.T) {
+	processor := NewBatchInformProcessor(appconfig.BatchProcessorConfig{}, nil, nil, nil, nil, nil, nil, zap.NewNop())
+
+	assert.Equal(t, defaultBatchInformWorkers, processor.workers)
+	assert.Equal(t, defaultBatchInformMaxBatchSize, processor.maxBatchSize)
+	require.Len(t, processor.workerChans, defaultBatchInformWorkers)
+	assert.Equal(t, defaultBatchInformInputBuffer, cap(processor.workerChans[0]))
 }
 
 type failingInfoSyncer struct{}
@@ -100,7 +124,7 @@ func TestAsyncSyncDeviceInfoRecordsRetryAfterFailure(t *testing.T) {
 	deviceID := uuid.New()
 	processor := &BatchInformProcessor{
 		infoSyncer: failingInfoSyncer{}, logger: zap.NewNop(),
-		infoProjectionSlots: make(chan struct{}, 8),
+		infoProjectionSlots: make(chan struct{}, maxBatchInformProjectionWorkers),
 	}
 
 	processor.asyncSyncDeviceInfo([]*informUpdate{{device: &model.Device{ID: deviceID}}})
@@ -139,7 +163,7 @@ func TestHandleParameterUpsertOutcomeQueuesCommittedSubsetBeforeReturningError(t
 	}
 	processor := &BatchInformProcessor{
 		infoSyncer: syncer, logger: zap.NewNop(),
-		infoProjectionSlots: make(chan struct{}, 8),
+		infoProjectionSlots: make(chan struct{}, maxBatchInformProjectionWorkers),
 	}
 	updates := []*informUpdate{
 		{device: &model.Device{ID: committedID, SerialNumber: "committed"}},

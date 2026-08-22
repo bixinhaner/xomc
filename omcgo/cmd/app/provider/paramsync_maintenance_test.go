@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 )
 
 func TestRunPeriodicMaintenanceLoopsDoNotStarveEachOther(t *testing.T) {
@@ -58,7 +60,42 @@ func TestRunPeriodicMaintenanceSchedulesNextRunAfterCompletion(t *testing.T) {
 }
 
 func TestParamSyncMaintenanceWorkerBudgetRemainsBounded(t *testing.T) {
-	assert.LessOrEqual(t, paramSyncOutboxWorkers+paramSyncQueuedWorkers, 16)
+	assert.LessOrEqual(t, paramSyncOutboxWorkers+paramSyncQueuedWorkers, 4)
+	assert.LessOrEqual(t, paramSyncOutboxBatchLimit, 10)
+	assert.LessOrEqual(t, paramSyncQueuedBatchLimit, 25)
+	assert.LessOrEqual(t, paramSyncAdmissionReconcileLimit, 100)
+	assert.LessOrEqual(t, paramSyncResultConsumerShards, 4)
+	assert.LessOrEqual(t, paramSyncResultConsumerQueue, 32)
+	assert.LessOrEqual(t, paramSyncResultConsumerQueueMax, 64)
+}
+
+func TestParamSyncPullTuningFromAppClampsOversizedConfig(t *testing.T) {
+	tuning := paramSyncPullTuningFromApp(appconfig.ParamSyncConfig{
+		ResultConsumerPullBatchSize:   64,
+		ResultConsumerPullConcurrency: 64,
+		ResultConsumerMaxAckPending:   512,
+		ResultConsumerAckWait:         2 * time.Minute,
+	})
+
+	assert.Equal(t, paramSyncResultPullBatchSize, tuning.BatchSize)
+	assert.Equal(t, paramSyncResultPullConcurrency, tuning.Concurrency)
+	assert.Equal(t, paramSyncResultMaxAckPending, tuning.MaxAckPending)
+	assert.Equal(t, 2*time.Minute, tuning.AckWait)
+}
+
+func TestParamSyncPullTuningFromAppUsesBackpressureDefaults(t *testing.T) {
+	tuning := paramSyncPullTuningFromApp(appconfig.ParamSyncConfig{})
+
+	assert.Equal(t, paramSyncResultPullBatchSize, tuning.BatchSize)
+	assert.Equal(t, paramSyncResultPullConcurrency, tuning.Concurrency)
+	assert.Equal(t, paramSyncResultMaxAckPending, tuning.MaxAckPending)
+	assert.Equal(t, paramSyncResultAckWait, tuning.AckWait)
+}
+
+func TestBoundedPositiveIntUsesDefaultAndMax(t *testing.T) {
+	assert.Equal(t, 8, boundedPositiveInt(0, 8, 16))
+	assert.Equal(t, 16, boundedPositiveInt(64, 8, 16))
+	assert.Equal(t, 12, boundedPositiveInt(12, 8, 16))
 }
 
 func TestParamSyncMaintenanceRecoveryCoversOneTaskPerRunBursts(t *testing.T) {

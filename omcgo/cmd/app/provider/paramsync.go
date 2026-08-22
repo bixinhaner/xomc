@@ -24,8 +24,18 @@ import (
 )
 
 const (
-	paramSyncOutboxWorkers = 8
-	paramSyncQueuedWorkers = 8
+	paramSyncOutboxWorkers           = 2
+	paramSyncOutboxBatchLimit        = 10
+	paramSyncQueuedWorkers           = 2
+	paramSyncQueuedBatchLimit        = 25
+	paramSyncAdmissionReconcileLimit = 100
+	paramSyncResultPullBatchSize     = 16
+	paramSyncResultPullConcurrency   = 4
+	paramSyncResultMaxAckPending     = 64
+	paramSyncResultAckWait           = 2 * time.Minute
+	paramSyncResultConsumerShards    = 4
+	paramSyncResultConsumerQueue     = 32
+	paramSyncResultConsumerQueueMax  = 64
 )
 
 // paramSyncCompletionHandled is registered with CompletionRouter because the
@@ -115,11 +125,28 @@ func paramSyncMaintenanceConfigFromApp(cfg appconfig.ParamSyncConfig) paramSyncM
 
 func paramSyncPullTuningFromApp(cfg appconfig.ParamSyncConfig) event.PullTuning {
 	return event.PullTuning{
-		BatchSize:     cfg.ResultConsumerPullBatchSize,
-		Concurrency:   cfg.ResultConsumerPullConcurrency,
-		AckWait:       cfg.ResultConsumerAckWait,
-		MaxAckPending: cfg.ResultConsumerMaxAckPending,
+		BatchSize:     boundedPositiveInt(cfg.ResultConsumerPullBatchSize, paramSyncResultPullBatchSize, paramSyncResultPullBatchSize),
+		Concurrency:   boundedPositiveInt(cfg.ResultConsumerPullConcurrency, paramSyncResultPullConcurrency, paramSyncResultPullConcurrency),
+		AckWait:       paramSyncResultAckWaitFromApp(cfg.ResultConsumerAckWait),
+		MaxAckPending: boundedPositiveInt(cfg.ResultConsumerMaxAckPending, paramSyncResultMaxAckPending, paramSyncResultMaxAckPending),
 	}
+}
+
+func paramSyncResultAckWaitFromApp(value time.Duration) time.Duration {
+	if value <= 0 {
+		return paramSyncResultAckWait
+	}
+	return value
+}
+
+func boundedPositiveInt(value, defaultValue, maxValue int) int {
+	if value <= 0 {
+		value = defaultValue
+	}
+	if maxValue > 0 && value > maxValue {
+		value = maxValue
+	}
+	return value
 }
 
 func runParamSyncMaintenance(ctx context.Context, maintainer paramSyncMaintainer, now time.Time, cfg paramSyncMaintenanceConfig) error {
@@ -699,7 +726,10 @@ func initParamSyncModule(c *Container) error {
 	}
 	resultConsumer = paramsync.NewResultConsumer(c.EventBus, resultProcessor).
 		WithMetrics(metrics).
-		WithWorkerConfig(c.Cfg.ParamSync.ResultConsumerShardCount, c.Cfg.ParamSync.ResultConsumerQueueDepth)
+		WithWorkerConfig(
+			boundedPositiveInt(c.Cfg.ParamSync.ResultConsumerShardCount, paramSyncResultConsumerShards, paramSyncResultConsumerShards),
+			boundedPositiveInt(c.Cfg.ParamSync.ResultConsumerQueueDepth, paramSyncResultConsumerQueue, paramSyncResultConsumerQueueMax),
+		)
 	if err := resultConsumer.Start(); err != nil {
 		return err
 	}
@@ -734,7 +764,7 @@ func initParamSyncModule(c *Container) error {
 			}
 
 			ctx, cancel = context.WithTimeout(maintenanceCtx, 15*time.Second)
-			_, err = outbox.DispatchPendingConcurrent(ctx, paramSyncOutboxWorkers, 25)
+			_, err = outbox.DispatchPendingConcurrent(ctx, paramSyncOutboxWorkers, paramSyncOutboxBatchLimit)
 			cancel()
 			if err != nil && !errors.Is(err, context.Canceled) {
 				logger.Warn("parameter sync outbox delivery failed", zap.Error(err))
@@ -742,7 +772,7 @@ func initParamSyncModule(c *Container) error {
 		})
 		go runPeriodicMaintenance(maintenanceCtx, time.Second, func(context.Context) {
 			ctx, cancel := context.WithTimeout(maintenanceCtx, 10*time.Second)
-			_, err := repo.ReconcileAutomaticAdmission(ctx, time.Now().UTC(), 500)
+			_, err := repo.ReconcileAutomaticAdmission(ctx, time.Now().UTC(), paramSyncAdmissionReconcileLimit)
 			cancel()
 			if err != nil && !errors.Is(err, context.Canceled) {
 				logger.Warn("automatic parameter sync admission reconciliation failed", zap.Error(err))
@@ -750,7 +780,7 @@ func initParamSyncModule(c *Container) error {
 			}
 
 			ctx, cancel = context.WithTimeout(maintenanceCtx, 30*time.Second)
-			_, err = service.DispatchQueuedConcurrent(ctx, 100, paramSyncQueuedWorkers)
+			_, err = service.DispatchQueuedConcurrent(ctx, paramSyncQueuedBatchLimit, paramSyncQueuedWorkers)
 			cancel()
 			if err != nil && !errors.Is(err, context.Canceled) {
 				logger.Warn("queued parameter sync request dispatch failed", zap.Error(err))
@@ -786,7 +816,11 @@ func initParamSyncModule(c *Container) error {
 		})
 	}
 	logger.Info("reliable parameter sync module initialized",
-		zap.Int("result_consumer_shards", c.Cfg.ParamSync.ResultConsumerShardCount))
+		zap.Int("result_consumer_shards", paramSyncResultConsumerShards),
+		zap.Int("result_consumer_queue_depth", paramSyncResultConsumerQueue),
+		zap.Int("result_consumer_pull_batch_size", paramSyncResultPullBatchSize),
+		zap.Int("result_consumer_pull_concurrency", paramSyncResultPullConcurrency),
+		zap.Int("result_consumer_max_ack_pending", paramSyncResultMaxAckPending))
 	initialized = true
 	return nil
 }

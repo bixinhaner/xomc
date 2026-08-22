@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	defaultResultConsumerShardCount = 8
-	defaultResultConsumerQueueDepth = 64
+	defaultResultConsumerShardCount = 4
+	defaultResultConsumerQueueDepth = 32
+	maxResultConsumerShardCount     = 4
+	maxResultConsumerQueueDepth     = 64
 )
 
 type ResultConsumer struct {
@@ -59,12 +61,7 @@ func (c *ResultConsumer) WithSubscription(subject, queue string) *ResultConsumer
 }
 
 func (c *ResultConsumer) WithWorkerConfig(shardCount, queueDepth int) *ResultConsumer {
-	if shardCount > 0 {
-		c.shardCount = shardCount
-	}
-	if queueDepth > 0 {
-		c.queueDepth = queueDepth
-	}
+	c.shardCount, c.queueDepth = normalizeResultConsumerWorkerConfig(shardCount, queueDepth)
 	return c
 }
 
@@ -164,12 +161,7 @@ func (c *ResultConsumer) Stop() error {
 }
 
 func (c *ResultConsumer) startWorkers(shardCount, queueDepth int) {
-	if shardCount <= 0 {
-		shardCount = defaultResultConsumerShardCount
-	}
-	if queueDepth <= 0 {
-		queueDepth = defaultResultConsumerQueueDepth
-	}
+	shardCount, queueDepth = normalizeResultConsumerWorkerConfig(shardCount, queueDepth)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.shards) > 0 {
@@ -182,6 +174,22 @@ func (c *ResultConsumer) startWorkers(shardCount, queueDepth int) {
 		c.wg.Add(1)
 		go c.runShard(i, queue)
 	}
+}
+
+func normalizeResultConsumerWorkerConfig(shardCount, queueDepth int) (int, int) {
+	if shardCount <= 0 {
+		shardCount = defaultResultConsumerShardCount
+	}
+	if shardCount > maxResultConsumerShardCount {
+		shardCount = maxResultConsumerShardCount
+	}
+	if queueDepth <= 0 {
+		queueDepth = defaultResultConsumerQueueDepth
+	}
+	if queueDepth > maxResultConsumerQueueDepth {
+		queueDepth = maxResultConsumerQueueDepth
+	}
+	return shardCount, queueDepth
 }
 
 func (c *ResultConsumer) runShard(index int, queue <-chan resultWork) {

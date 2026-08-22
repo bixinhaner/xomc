@@ -53,6 +53,22 @@ func TestResultConsumer_UsesStableShardForSameDevice(t *testing.T) {
 	assert.Equal(t, resultShardIndex(first, 8), resultShardIndex(second, 8))
 }
 
+func TestResultConsumer_WithWorkerConfigClampsOversizedConfig(t *testing.T) {
+	consumer := NewResultConsumer(nil, &recordingResultProcessor{}).
+		WithWorkerConfig(16, 512)
+
+	assert.Equal(t, maxResultConsumerShardCount, consumer.shardCount)
+	assert.Equal(t, maxResultConsumerQueueDepth, consumer.queueDepth)
+}
+
+func TestResultConsumer_WithWorkerConfigUsesBackpressureDefaults(t *testing.T) {
+	consumer := NewResultConsumer(nil, &recordingResultProcessor{}).
+		WithWorkerConfig(0, 0)
+
+	assert.Equal(t, defaultResultConsumerShardCount, consumer.shardCount)
+	assert.Equal(t, defaultResultConsumerQueueDepth, consumer.queueDepth)
+}
+
 func TestResultConsumer_WaitsForShardWorkerBeforeAck(t *testing.T) {
 	processor := &blockingResultProcessor{release: make(chan struct{})}
 	consumer := NewResultConsumer(nil, processor)

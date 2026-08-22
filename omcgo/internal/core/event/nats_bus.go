@@ -43,10 +43,10 @@ const (
 	queueSubscribeAckWait = 2 * time.Minute
 
 	pullNoCapacityWait            = 10 * time.Millisecond
-	paramSyncResultPullBatchSize  = 64
-	paramSyncResultPullConcurrent = 64
+	paramSyncResultPullBatchSize  = 16
+	paramSyncResultPullConcurrent = 4
 	paramSyncResultPullAckWait    = 2 * time.Minute
-	paramSyncResultMaxAckPending  = 512
+	paramSyncResultMaxAckPending  = 64
 	defaultPullConcurrent         = 1
 	defaultPullMaxAckPending      = 2048 // 背压上限：未 Ack 消息超过此值时 Fetch 阻塞
 	// 非 PM push consumer 保持 NATS 既有默认容量；PM subject 由 worker 按实际并发单独收紧。
