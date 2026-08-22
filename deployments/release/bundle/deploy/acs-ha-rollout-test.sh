@@ -45,6 +45,8 @@ not_contains_line() {
 
 echo "── ACS 双实例发布契约 ──"
 contains "候选 ACS 服务存在" "acs-candidate:" "$APP_COMPOSE"
+contains "候选 ACS 显式注入可信网关网段" 'DOCKER_COMPOSE_SUBNET: "${DOCKER_COMPOSE_SUBNET:?DOCKER_BIP plan is required}"' "$APP_COMPOSE"
+contains "候选 ACS 保留正式实例环境变量" '<<: *acs-environment' "$APP_COMPOSE"
 contains_line "正式 ACS 有稳定 DNS 别名" "          - acs-primary" "$APP_COMPOSE"
 contains_line "候选 ACS 使用独立 DNS 别名" "          - acs-candidate" "$APP_COMPOSE"
 not_contains_line "候选 ACS 不共享正式 DNS 别名" "          - acs" "$APP_COMPOSE"

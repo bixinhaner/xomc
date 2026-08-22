@@ -292,7 +292,7 @@ services:
         reservations:
           cpus: "0.5"
           memory: 1g
-    environment:
+    environment: &acs-environment
       TZ: "Asia/Shanghai"
       OMCGO_ENV: ${OMCGO_ENV}
       OMCGO_SERVICE: acs
@@ -363,6 +363,9 @@ services:
   acs-candidate:
     <<: *acs-service
     ports: []
+    environment:
+      <<: *acs-environment
+      DOCKER_COMPOSE_SUBNET: "${DOCKER_COMPOSE_SUBNET:?DOCKER_BIP plan is required}"
     volumes:
       - /opt/omc/etc/acs.prod.yaml:/etc/omcgo/acs.prod.yaml:ro
       - /opt/omc/run/logs/acs-candidate:/run/logs/acs
