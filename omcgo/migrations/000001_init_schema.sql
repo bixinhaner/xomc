@@ -14353,7 +14353,7 @@ CREATE INDEX idx_dg_serial_number_list ON public.device_groups USING gin (serial
 -- Name: idx_dgm_device; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_dgm_device ON public.device_group_members USING btree (device_id);
+CREATE INDEX idx_dgm_device ON public.device_group_members USING btree (device_id) INCLUDE (group_id, source_type);
 
 
 --
