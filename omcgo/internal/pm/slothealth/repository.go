@@ -2,12 +2,20 @@ package slothealth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/storage"
+)
+
+const (
+	observeLockKey             int64 = 0x5a2c_5107_0001
+	expectedGroupsQueryTimeout       = 20 * time.Second
+	receivedGroupsQueryTimeout       = 20 * time.Second
+	observeUnlockTimeout             = 5 * time.Second
 )
 
 type Repository struct {
@@ -86,7 +94,9 @@ func (r *Repository) ExpectedGroups(ctx context.Context, slotStart time.Time) ([
 	if err != nil {
 		return nil, fmt.Errorf("build PM slot expected groups query: %w", err)
 	}
-	rows, err := r.metaDB.Query(ctx, query, args...)
+	queryCtx, cancel := context.WithTimeout(ctx, expectedGroupsQueryTimeout)
+	defer cancel()
+	rows, err := r.metaDB.Query(queryCtx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query PM slot expected groups: %w", err)
 	}
@@ -110,7 +120,9 @@ func (r *Repository) ReceivedGroups(ctx context.Context, slotEnd time.Time) ([]R
 	if err != nil {
 		return nil, fmt.Errorf("build PM slot received groups query: %w", err)
 	}
-	rows, err := r.tsDB.Query(ctx, query, args...)
+	queryCtx, cancel := context.WithTimeout(ctx, receivedGroupsQueryTimeout)
+	defer cancel()
+	rows, err := r.tsDB.Query(queryCtx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query PM slot received groups: %w", err)
 	}
@@ -158,4 +170,37 @@ func (r *Repository) UpsertSnapshots(ctx context.Context, snapshots []Snapshot) 
 		return nil, fmt.Errorf("iterate persisted PM slot health: %w", err)
 	}
 	return persisted, nil
+}
+
+func (r *Repository) TryObserveLock(ctx context.Context) (func() error, bool, error) {
+	conn, err := r.metaDB.Acquire(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("acquire PM slot health lock connection: %w", err)
+	}
+	var locked bool
+	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", observeLockKey).Scan(&locked); err != nil {
+		conn.Release()
+		return nil, false, fmt.Errorf("try PM slot health advisory lock: %w", err)
+	}
+	if !locked {
+		conn.Release()
+		return func() error { return nil }, false, nil
+	}
+	unlock := func() error {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), observeUnlockTimeout)
+		defer cancel()
+		var released bool
+		if err := conn.QueryRow(unlockCtx, "SELECT pg_advisory_unlock($1)", observeLockKey).Scan(&released); err == nil && released {
+			conn.Release()
+			return nil
+		} else if err != nil {
+			rawConn := conn.Hijack()
+			_ = rawConn.Close(unlockCtx)
+			return fmt.Errorf("unlock PM slot health advisory lock: %w", err)
+		}
+		rawConn := conn.Hijack()
+		_ = rawConn.Close(unlockCtx)
+		return errors.New("unlock PM slot health advisory lock: lock was not held")
+	}
+	return unlock, true, nil
 }

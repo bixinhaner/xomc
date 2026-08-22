@@ -14,6 +14,10 @@ type Store interface {
 	UpsertSnapshots(context.Context, []Snapshot) ([]Snapshot, error)
 }
 
+type observeLockStore interface {
+	TryObserveLock(context.Context) (func() error, bool, error)
+}
+
 type Publisher interface {
 	PublishSlotHealth([]Snapshot)
 }
@@ -52,6 +56,20 @@ func NewObserver(
 }
 
 func (o *Observer) Observe(ctx context.Context) error {
+	unlock, locked, err := o.tryObserveLock(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire PM slot health observe lock: %w", err)
+	}
+	if !locked {
+		o.logger.Debug("skip PM slot health observe: another observer is running")
+		return nil
+	}
+	defer func() {
+		if err := unlock(); err != nil {
+			o.logger.Warn("release PM slot health observe lock", zap.Error(err))
+		}
+	}()
+
 	now := o.now().UTC()
 	slotEnd := LatestEligibleSlotEnd(now, o.grace)
 	slotStart := slotEnd.Add(-SlotDuration)
@@ -72,6 +90,14 @@ func (o *Observer) Observe(ctx context.Context) error {
 		o.publisher.PublishSlotHealth(persisted)
 	}
 	return nil
+}
+
+func (o *Observer) tryObserveLock(ctx context.Context) (func() error, bool, error) {
+	lockStore, ok := o.store.(observeLockStore)
+	if !ok {
+		return func() error { return nil }, true, nil
+	}
+	return lockStore.TryObserveLock(ctx)
 }
 
 func (o *Observer) Run(ctx context.Context) {

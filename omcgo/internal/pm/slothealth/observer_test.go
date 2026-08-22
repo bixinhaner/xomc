@@ -156,6 +156,23 @@ func TestObserver_DoesNotPublishWhenExpectedSnapshotFails(t *testing.T) {
 	assert.Empty(t, publisher.snapshots)
 }
 
+func TestObserver_SkipsWhenAnotherObserverHoldsLock(t *testing.T) {
+	store := &lockingRecordingStore{locked: false}
+	publisher := &recordingPublisher{}
+	observer := NewObserver(store, publisher, time.Time{}, 12*time.Minute, time.Minute, zap.NewNop())
+	observer.now = func() time.Time {
+		return time.Date(2026, 8, 3, 15, 12, 0, 0, time.UTC)
+	}
+
+	err := observer.Observe(context.Background())
+
+	require.NoError(t, err)
+	assert.True(t, store.lockChecked)
+	assert.Zero(t, store.expectedAt)
+	assert.Empty(t, store.persisted)
+	assert.Empty(t, publisher.snapshots)
+}
+
 type recordingStore struct {
 	expected     []ExpectedGroup
 	received     []ReceivedGroup
@@ -182,6 +199,17 @@ func (s *recordingStore) UpsertSnapshots(_ context.Context, snapshots []Snapshot
 		return append([]Snapshot(nil), s.storedResult...), nil
 	}
 	return append([]Snapshot(nil), snapshots...), nil
+}
+
+type lockingRecordingStore struct {
+	recordingStore
+	locked      bool
+	lockChecked bool
+}
+
+func (s *lockingRecordingStore) TryObserveLock(context.Context) (func() error, bool, error) {
+	s.lockChecked = true
+	return func() error { return nil }, s.locked, nil
 }
 
 type recordingPublisher struct {

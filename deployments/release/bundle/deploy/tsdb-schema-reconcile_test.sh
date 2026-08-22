@@ -20,6 +20,8 @@ grep -Fq "timescaledb.compress_segmentby = 'device_id'" "$SQL"
 grep -Fq 'PERFORM compress_chunk(compressed_chunk, true)' "$SQL"
 grep -Fq 'idx_pm_replay_sources_device_period' "$SQL"
 grep -Fq 'idx_pm_aggregation_outbox_device_period_replay' "$SQL"
+grep -Fq 'idx_pm_aggregation_windows_version_backfill_pending' "$SQL"
+grep -Fq 'WHERE version_effective_from IS NULL' "$SQL"
 grep -Fq '"--reconcile"' "$COMPOSE"
 grep -Fq '"/etc/omcgo/tsdb-schema-reconcile.sql"' "$COMPOSE"
 

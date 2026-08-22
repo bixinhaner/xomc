@@ -1581,6 +1581,15 @@ CREATE INDEX IF NOT EXISTS idx_pm_aggregation_windows_active_version_guard
     WHERE status IN ('open', 'finalizing', 'prepared', 'rebuilding', 'failed')
       AND version_effective_from IS NOT NULL;
 
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_windows_version_backfill_pending
+    ON public.pm_aggregation_windows (
+        task_version_id,
+        entity_key,
+        granularity,
+        window_start
+    )
+    WHERE version_effective_from IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_pm_aggregation_windows_dashboard_published
     ON public.pm_aggregation_windows (
         task_id,
