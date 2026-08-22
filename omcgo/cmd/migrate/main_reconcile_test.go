@@ -109,6 +109,7 @@ func TestMainBaselineReconcileSectionsAreAdditiveAndIdempotent(t *testing.T) {
 		"",
 	)
 	require.NotContains(t, schemaSQLWithoutLocationTriggerCleanup, "DELETE FROM")
+	require.NotContains(t, schemaSQL, "INSERT INTO public.device_task_locations (task_id, device_sn)\nSELECT id, device_sn\nFROM public.device_tasks")
 
 	seedContents, err := os.ReadFile(seedPath)
 	require.NoError(t, err)

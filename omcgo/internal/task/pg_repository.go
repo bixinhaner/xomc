@@ -27,6 +27,11 @@ type PgTaskRepository struct {
 // after that bound the task is genuinely stale and may be expired normally.
 const sentTaskExpiryGrace = 2 * time.Minute
 
+// locateTaskByIDFallbackTimeout bounds the historical fallback used when
+// device_task_locations lacks an entry for old tasks created before the trigger
+// existed. Upgrade-time baseline reconcile must not backfill the whole history.
+const locateTaskByIDFallbackTimeout = 2 * time.Second
+
 // NewPgTaskRepository 创建 PostgreSQL 任务仓库
 func NewPgTaskRepository(pool *pgxpool.Pool) *PgTaskRepository {
 	lockSlots := 1
@@ -401,12 +406,45 @@ func (r *PgTaskRepository) LocateDeviceSNByID(ctx context.Context, id string) (s
 		id,
 	).Scan(&deviceSN)
 	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
+		return r.locateDeviceSNByIDFromTasks(ctx, id)
 	}
 	if err != nil {
 		return "", false, fmt.Errorf("locate task device_sn: %w", err)
 	}
 	return deviceSN, true, nil
+}
+
+func (r *PgTaskRepository) locateDeviceSNByIDFromTasks(ctx context.Context, id string) (string, bool, error) {
+	fallbackCtx, cancel := context.WithTimeout(ctx, locateTaskByIDFallbackTimeout)
+	defer cancel()
+
+	var deviceSN string
+	err := r.pool.QueryRow(fallbackCtx,
+		"SELECT device_sn FROM device_tasks WHERE id=$1 LIMIT 1",
+		id,
+	).Scan(&deviceSN)
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(fallbackCtx.Err(), context.DeadlineExceeded) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("fallback locate task device_sn: %w", err)
+	}
+	r.rememberTaskLocation(ctx, id, deviceSN)
+	return deviceSN, true, nil
+}
+
+func (r *PgTaskRepository) rememberTaskLocation(ctx context.Context, id, deviceSN string) {
+	_, _ = r.pool.Exec(ctx, `
+INSERT INTO device_task_locations (task_id, device_sn)
+VALUES ($1, $2)
+ON CONFLICT (task_id) DO UPDATE
+    SET device_sn = EXCLUDED.device_sn,
+        updated_at = now()
+    WHERE device_task_locations.device_sn IS DISTINCT FROM EXCLUDED.device_sn
+`, id, deviceSN)
 }
 
 // TaskStatusRow 是 LookupStatusesByIDs 的轻量返回（只取 stale sync 反查需要的字段，

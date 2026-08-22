@@ -23344,12 +23344,11 @@ BEGIN
 END
 $$;
 
-INSERT INTO public.device_task_locations (task_id, device_sn)
-SELECT id, device_sn
-FROM public.device_tasks
-ON CONFLICT (task_id) DO UPDATE
-    SET device_sn = EXCLUDED.device_sn,
-        updated_at = now();
+-- Do not backfill historical device_tasks here. In long-lived deployments this
+-- table can contain millions of rows, and an unconditional upsert during every
+-- baseline reconcile turns upgrades into multi-minute table scans. The trigger
+-- above keeps new and updated tasks indexed; runtime lookups lazily repair the
+-- rare historical miss.
 -- +omcgo MainReconcileEnd
 
 -- +goose Down
