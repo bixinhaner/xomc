@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
@@ -80,6 +81,10 @@ type Enforcer interface {
 // responsiveness (operators see new license promptly) against PG load.
 const DefaultCacheTTL = 5 * time.Minute
 
+// DefaultUsageCacheTTL keeps capacity usage hot during reconnect storms without
+// making license decisions stale for operator-visible periods.
+const DefaultUsageCacheTTL = 2 * time.Second
+
 // nowFunc is overridden in tests. Production always uses time.Now.
 var nowFunc = time.Now
 
@@ -113,6 +118,14 @@ type EnforcerImpl struct {
 	cachedAt     time.Time
 	cacheTTL     time.Duration
 
+	usageMu                    sync.RWMutex
+	cachedUsage                map[string]int
+	cachedUsageAt              time.Time
+	cachedUsageHasReservations bool
+	usageCacheTTL              time.Duration
+	usageLoad                  singleflight.Group
+	capacityMu                 sync.Mutex
+
 	// capacityExhaustedAlert 去重（进程内时间窗）：避免每次 periodic Inform 拒绝
 	// 都 Send 告警。Clear 由 monitor 负责（所有授权类型未满时），两者无状态共享，
 	// 故用时间窗而非活跃标记——monitor Clear 后若仍满，最多 capacityExhaustedAlertDedup
@@ -129,12 +142,13 @@ type EnforcerImpl struct {
 // （Step 5 起注入 device 模块的实现）。
 func NewEnforcer(repo SystemLicenseRepository, devices DeviceCounter, logger *zap.Logger, metrics *EnforcementMetrics) *EnforcerImpl {
 	return &EnforcerImpl{
-		repo:      repo,
-		devices:   devices,
-		logger:    logger.Named("license-enforcer"),
-		metrics:   metrics,
-		alertSink: NoopAlertSink{},
-		cacheTTL:  DefaultCacheTTL,
+		repo:          repo,
+		devices:       devices,
+		logger:        logger.Named("license-enforcer"),
+		metrics:       metrics,
+		alertSink:     NoopAlertSink{},
+		cacheTTL:      DefaultCacheTTL,
+		usageCacheTTL: DefaultUsageCacheTTL,
 	}
 }
 
@@ -143,6 +157,17 @@ func (e *EnforcerImpl) SetCacheTTL(ttl time.Duration) {
 	e.cacheMu.Lock()
 	defer e.cacheMu.Unlock()
 	e.cacheTTL = ttl
+}
+
+// SetUsageCacheTTL overrides the short-lived capacity usage cache. Test-only
+// convenience; production uses DefaultUsageCacheTTL.
+func (e *EnforcerImpl) SetUsageCacheTTL(ttl time.Duration) {
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	e.usageCacheTTL = ttl
+	e.cachedUsage = nil
+	e.cachedUsageAt = time.Time{}
+	e.cachedUsageHasReservations = false
 }
 
 // SetUsageRepo 注入累计使用时长仓储，启用累计时长 + 时间回拨检测。
@@ -166,6 +191,7 @@ func (e *EnforcerImpl) Invalidate() {
 	e.cachedActive = nil
 	e.cachedAt = time.Time{}
 	e.cacheMu.Unlock()
+	e.invalidateUsage()
 }
 
 // ActiveLicense returns the cached current system license, refreshing if stale.
@@ -295,11 +321,25 @@ func (e *EnforcerImpl) EnforceCapacity(ctx context.Context, deviceType string, a
 			deviceType, quotaKey, commonerrors.ErrLicenseCapacityExceeded)
 	}
 
-	usedByType, err := e.devices.CountDevicesByType(ctx)
+	e.capacityMu.Lock()
+	defer e.capacityMu.Unlock()
+
+	usedByType, err := e.countDevicesByType(ctx, false)
 	if err != nil {
 		return fmt.Errorf("count devices by type for enforcement: %w", err)
 	}
 	used := capacityGroupUsage(usedByType, quotaKey)
+	if used+additional > maxForType && !e.hasUsageReservations() {
+		// Cache entries include short-lived local admissions. Before denying,
+		// re-read PG once so temporary over-counts do not cause sticky false
+		// rejections, while the hot path still avoids repeated full counts.
+		freshByType, refreshErr := e.countDevicesByType(ctx, true)
+		if refreshErr != nil {
+			return fmt.Errorf("refresh devices by type for enforcement: %w", refreshErr)
+		}
+		usedByType = freshByType
+		used = capacityGroupUsage(usedByType, quotaKey)
+	}
 	if used+additional > maxForType {
 		e.recordEnforcement("capacity", "denied_capacity")
 		e.logger.Warn("license capacity exceeded — device.create denied",
@@ -317,8 +357,98 @@ func (e *EnforcerImpl) EnforceCapacity(ctx context.Context, deviceType string, a
 			quotaKey, used, maxForType, additional, commonerrors.ErrLicenseCapacityExceeded)
 	}
 
+	e.reserveCapacityUsage(target, additional)
 	e.recordEnforcement("capacity", "allowed")
 	return nil
+}
+
+func (e *EnforcerImpl) countDevicesByType(ctx context.Context, force bool) (map[string]int, error) {
+	if !force {
+		if usage, ok := e.cachedCapacityUsage(); ok {
+			return usage, nil
+		}
+	}
+
+	v, err, _ := e.usageLoad.Do("devices-by-type", func() (interface{}, error) {
+		if !force {
+			if usage, ok := e.cachedCapacityUsage(); ok {
+				return usage, nil
+			}
+		}
+		usage, err := e.devices.CountDevicesByType(ctx)
+		if err != nil {
+			return nil, err
+		}
+		usage = cloneUsage(usage)
+		e.usageMu.Lock()
+		e.cachedUsage = cloneUsage(usage)
+		e.cachedUsageAt = nowFunc()
+		e.cachedUsageHasReservations = false
+		e.usageMu.Unlock()
+		return usage, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	usage, _ := v.(map[string]int)
+	return cloneUsage(usage), nil
+}
+
+func (e *EnforcerImpl) cachedCapacityUsage() (map[string]int, bool) {
+	e.usageMu.RLock()
+	defer e.usageMu.RUnlock()
+	if e.cachedUsage == nil || e.usageCacheTTL <= 0 || e.cachedUsageAt.IsZero() {
+		return nil, false
+	}
+	if nowFunc().Sub(e.cachedUsageAt) >= e.usageCacheTTL {
+		return nil, false
+	}
+	return cloneUsage(e.cachedUsage), true
+}
+
+func (e *EnforcerImpl) reserveCapacityUsage(deviceType string, additional int) {
+	if additional <= 0 {
+		return
+	}
+	key := upperKey(deviceType)
+	if key == "" {
+		return
+	}
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	if e.cachedUsage == nil || e.usageCacheTTL <= 0 || e.cachedUsageAt.IsZero() {
+		return
+	}
+	if nowFunc().Sub(e.cachedUsageAt) >= e.usageCacheTTL {
+		return
+	}
+	e.cachedUsage[key] += additional
+	e.cachedUsageHasReservations = true
+}
+
+func (e *EnforcerImpl) invalidateUsage() {
+	e.usageMu.Lock()
+	defer e.usageMu.Unlock()
+	e.cachedUsage = nil
+	e.cachedUsageAt = time.Time{}
+	e.cachedUsageHasReservations = false
+}
+
+func (e *EnforcerImpl) hasUsageReservations() bool {
+	e.usageMu.RLock()
+	defer e.usageMu.RUnlock()
+	return e.cachedUsageHasReservations
+}
+
+func cloneUsage(in map[string]int) map[string]int {
+	if len(in) == 0 {
+		return map[string]int{}
+	}
+	out := make(map[string]int, len(in))
+	for k, v := range in {
+		out[upperKey(k)] = v
+	}
+	return out
 }
 
 // raiseCapacityExhaustedAlert 在容量满拒绝时上报一条 warning 告警（issue #316）。

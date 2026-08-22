@@ -3,6 +3,7 @@ package license
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,12 +24,16 @@ func fixedClock(t time.Time) func() {
 
 // fakeDeviceCounter — DeviceCounter 简化 mock。
 type fakeDeviceCounter struct {
-	count       int
-	countByType map[string]int
-	err         error
+	mu               sync.Mutex
+	count            int
+	countByType      map[string]int
+	err              error
+	countByTypeCalls int
 }
 
 func (f *fakeDeviceCounter) CountDevices(_ context.Context) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.err != nil {
 		return 0, f.err
 	}
@@ -36,10 +41,29 @@ func (f *fakeDeviceCounter) CountDevices(_ context.Context) (int, error) {
 }
 
 func (f *fakeDeviceCounter) CountDevicesByType(_ context.Context) (map[string]int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.countByTypeCalls++
 	if f.err != nil {
 		return nil, f.err
 	}
-	return f.countByType, nil
+	out := make(map[string]int, len(f.countByType))
+	for k, v := range f.countByType {
+		out[k] = v
+	}
+	return out, nil
+}
+
+func (f *fakeDeviceCounter) CountByTypeCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.countByTypeCalls
+}
+
+func (f *fakeDeviceCounter) SetCountByType(v map[string]int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.countByType = v
 }
 
 // systemLicense 构造一个 active system_license fixture。
@@ -194,6 +218,83 @@ func TestEnforcer_EnforceCapacity_NegativeAdditional(t *testing.T) {
 	err := e.EnforceCapacity(context.Background(), "eNB", -1)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput))
+}
+
+func TestEnforcer_EnforceCapacity_UsesShortUsageCacheAndReservations(t *testing.T) {
+	now := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
+	defer fixedClock(now)()
+
+	repo := &mockSystemLicenseRepo{current: systemLicense("L", DevicesSupport{"eNB": 12}, 0)}
+	dev := &fakeDeviceCounter{countByType: map[string]int{"ENB": 10}}
+	e := NewEnforcer(repo, dev, zap.NewNop(), nil)
+	e.SetUsageCacheTTL(2 * time.Second)
+
+	require.NoError(t, e.EnforceCapacity(context.Background(), "eNB", 1))
+	require.NoError(t, e.EnforceCapacity(context.Background(), "eNB", 1))
+	assert.Equal(t, 1, dev.CountByTypeCalls(), "second admission should reuse cached usage")
+
+	err := e.EnforceCapacity(context.Background(), "eNB", 1)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrLicenseCapacityExceeded))
+	assert.Equal(t, 1, dev.CountByTypeCalls(), "local reservations should prevent boundary over-admission without another full count")
+
+	nowFunc = func() time.Time { return now.Add(3 * time.Second) }
+	dev.SetCountByType(map[string]int{"ENB": 11})
+	require.NoError(t, e.EnforceCapacity(context.Background(), "eNB", 1))
+	assert.Equal(t, 2, dev.CountByTypeCalls(), "expired usage cache should reload")
+}
+
+func TestEnforcer_EnforceCapacity_InvalidateClearsUsageCache(t *testing.T) {
+	now := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
+	defer fixedClock(now)()
+
+	repo := &mockSystemLicenseRepo{current: systemLicense("L", DevicesSupport{"eNB": 100}, 0)}
+	dev := &fakeDeviceCounter{countByType: map[string]int{"ENB": 10}}
+	e := NewEnforcer(repo, dev, zap.NewNop(), nil)
+
+	require.NoError(t, e.EnforceCapacity(context.Background(), "eNB", 1))
+	require.NoError(t, e.EnforceCapacity(context.Background(), "eNB", 1))
+	assert.Equal(t, 1, dev.CountByTypeCalls())
+
+	e.Invalidate()
+	require.NoError(t, e.EnforceCapacity(context.Background(), "eNB", 1))
+	assert.Equal(t, 2, dev.CountByTypeCalls())
+}
+
+func TestEnforcer_EnforceCapacity_SerializesConcurrentCachedAdmissions(t *testing.T) {
+	now := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
+	defer fixedClock(now)()
+
+	repo := &mockSystemLicenseRepo{current: systemLicense("L", DevicesSupport{"eNB": 11}, 0)}
+	dev := &fakeDeviceCounter{countByType: map[string]int{"ENB": 10}}
+	e := NewEnforcer(repo, dev, zap.NewNop(), nil)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- e.EnforceCapacity(context.Background(), "eNB", 1)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	allowed := 0
+	rejected := 0
+	for err := range errs {
+		if err == nil {
+			allowed++
+			continue
+		}
+		if errors.Is(err, commonerrors.ErrLicenseCapacityExceeded) {
+			rejected++
+		}
+	}
+	assert.Equal(t, 1, allowed)
+	assert.Equal(t, 1, rejected)
+	assert.Equal(t, 1, dev.CountByTypeCalls(), "concurrent decisions should share one full usage count")
 }
 
 func TestEnforcer_RaisesExhaustedAlertOnCapacityDenied(t *testing.T) {
