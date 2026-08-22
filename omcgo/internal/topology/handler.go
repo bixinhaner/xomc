@@ -154,7 +154,7 @@ func filterVisibleGroupNodes(nodes []DeviceGroup, visibleSet map[uuid.UUID]struc
 		if !selfVisible && len(node.Children) == 0 {
 			continue
 		}
-		if len(node.Children) > 0 {
+		if node.Level == 1 || len(node.Children) > 0 {
 			childCount := 0
 			for _, child := range node.Children {
 				childCount += child.DeviceCount
@@ -391,7 +391,7 @@ func (h *Handler) BatchRemoveDevices(c *gin.Context) {
 		return
 	}
 
-	affected, err := h.repo.BatchRemoveDevices(c.Request.Context(), groupID, deviceIDs)
+	affected, err := h.service.BatchRemoveDevices(c.Request.Context(), groupID, deviceIDs)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -474,7 +474,7 @@ func (h *Handler) RemoveDevice(c *gin.Context) {
 		return
 	}
 
-	if err := h.repo.RemoveDevice(c.Request.Context(), groupID, deviceID); err != nil {
+	if err := h.service.RemoveDevice(c.Request.Context(), groupID, deviceID); err != nil {
 		response.Fail(c, http.StatusNotFound, "device not in group")
 		return
 	}
@@ -882,14 +882,14 @@ func (h *Handler) GetTopoNode(c *gin.Context) {
 
 // UpdateTopoNodeRequest updates a topology node request.
 type UpdateTopoNodeRequest struct {
-	Label    *string   `json:"label"`
-	NodeType *string   `json:"node_type"`
-	X        *float64  `json:"x"`
-	Y        *float64  `json:"y"`
-	Status   *string   `json:"status"`
-	DeviceSN *string   `json:"device_sn"`
-	SiteID   *string   `json:"site_id"`
-	DomainID *string   `json:"domain_id"`
+	Label    *string  `json:"label"`
+	NodeType *string  `json:"node_type"`
+	X        *float64 `json:"x"`
+	Y        *float64 `json:"y"`
+	Status   *string  `json:"status"`
+	DeviceSN *string  `json:"device_sn"`
+	SiteID   *string  `json:"site_id"`
+	DomainID *string  `json:"domain_id"`
 }
 
 // UpdateTopoNode handles PUT /api/v1/topology/nodes/:id.

@@ -562,6 +562,38 @@ func TestHandler_GetTreeWithCounts_FiltersVisibleGroups(t *testing.T) {
 	assert.Equal(t, 0, resp.Stats.UngroupedDevices)
 }
 
+func TestHandler_GetTreeWithCounts_VisibleParentDoesNotExposeHiddenChildCounts(t *testing.T) {
+	h, groupRepo, _, _, _ := newTestHandler()
+	rootID := uuid.New()
+	hiddenChildID := uuid.New()
+	h.SetPermissionService(&mockVisibleGroupsResolver{visibleGroups: []uuid.UUID{rootID}})
+	router := setupRouterWithAuth(h, uuid.New(), false)
+
+	root := seedGroup(groupRepo, rootID, "Root", nil)
+	root.Level = 1
+	root.DeviceCount = 5
+	hiddenChild := seedGroup(groupRepo, hiddenChildID, "Hidden Child", &rootID)
+	hiddenChild.Level = 2
+	hiddenChild.DeviceCount = 5
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/device-groups/tree", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp TreeResponse
+	response.DecodeData(t, w.Body, &resp)
+	require.Len(t, resp.Items, 1)
+	assert.Equal(t, rootID, resp.Items[0].ID)
+	assert.Empty(t, resp.Items[0].Children)
+	assert.Zero(t, resp.Items[0].DeviceCount)
+	require.NotNil(t, resp.Stats)
+	assert.Equal(t, 1, resp.Stats.TotalGroups)
+	assert.Zero(t, resp.Stats.GroupedDevices)
+	assert.Zero(t, resp.Stats.UngroupedDevices)
+}
+
 func TestHandler_Create(t *testing.T) {
 	h, _, _, _, _ := newTestHandler()
 	router := setupRouter(h)

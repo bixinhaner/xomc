@@ -30,6 +30,7 @@ type mockGroupRepo struct {
 	listDeviceIDsFn func(ctx context.Context, groupID uuid.UUID) ([]uuid.UUID, error)
 
 	batchAddDevicesFn            func(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error)
+	batchRemoveDevicesFn         func(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error)
 	moveDevicesFn                func(ctx context.Context, deviceIDs []uuid.UUID, targetGroupID uuid.UUID) (int64, error)
 	removeDevicesFromAllGroupsFn func(ctx context.Context, deviceIDs []uuid.UUID) (int64, error)
 	invalidateCountsCalls        int
@@ -140,7 +141,10 @@ func (m *mockGroupRepo) BatchAddDevices(ctx context.Context, groupID uuid.UUID, 
 	return int64(len(deviceIDs)), nil
 }
 
-func (m *mockGroupRepo) BatchRemoveDevices(_ context.Context, _ uuid.UUID, _ []uuid.UUID) (int64, error) {
+func (m *mockGroupRepo) BatchRemoveDevices(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
+	if m.batchRemoveDevicesFn != nil {
+		return m.batchRemoveDevicesFn(ctx, groupID, deviceIDs)
+	}
 	return 0, nil
 }
 
@@ -217,6 +221,195 @@ func TestDeviceGroupService_DeleteGroup_InvalidatesTreeCache(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, repo.invalidateCountsCalls)
+}
+
+func TestDeviceGroupService_CreateGroup_InvalidatesTreeCacheAfterSubGroupDevicesAssigned(t *testing.T) {
+	repo := &mockGroupRepo{
+		batchAddDevicesFn: func(_ context.Context, _ uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
+			return int64(len(deviceIDs)), nil
+		},
+	}
+
+	_, err := newTestGroupService(repo).CreateGroup(context.Background(), CreateGroupRequest{
+		Name: "root",
+		SubGroups: []SubGroupInput{{
+			Name:      "child",
+			DeviceIDs: []string{uuid.New().String()},
+		}},
+	}, "tester")
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, repo.invalidateCountsCalls, "root create, child create and child membership assignment must invalidate")
+}
+
+func TestDeviceGroupService_MoveDevices_InvalidatesTreeCacheAfterChange(t *testing.T) {
+	groupID := uuid.New()
+	repo := &mockGroupRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*DeviceGroup, error) {
+			return &DeviceGroup{ID: id, Name: "target"}, nil
+		},
+		moveDevicesFn: func(_ context.Context, _ []uuid.UUID, _ uuid.UUID) (int64, error) {
+			return 2, nil
+		},
+	}
+
+	affected, err := newTestGroupService(repo).MoveDevices(context.Background(), MoveDevicesRequest{
+		TargetGroupID: groupID.String(),
+		DeviceIDs:     []string{uuid.New().String(), uuid.New().String()},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), affected)
+	assert.Equal(t, 1, repo.invalidateCountsCalls)
+}
+
+func TestDeviceGroupService_MoveDevices_DoesNotInvalidateTreeCacheOnRepoError(t *testing.T) {
+	groupID := uuid.New()
+	repoErr := errors.New("repo down")
+	repo := &mockGroupRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*DeviceGroup, error) {
+			return &DeviceGroup{ID: id, Name: "target"}, nil
+		},
+		moveDevicesFn: func(_ context.Context, _ []uuid.UUID, _ uuid.UUID) (int64, error) {
+			return 0, repoErr
+		},
+	}
+
+	_, err := newTestGroupService(repo).MoveDevices(context.Background(), MoveDevicesRequest{
+		TargetGroupID: groupID.String(),
+		DeviceIDs:     []string{uuid.New().String()},
+	})
+
+	require.ErrorIs(t, err, repoErr)
+	assert.ErrorContains(t, err, "move devices")
+	assert.Zero(t, repo.invalidateCountsCalls)
+}
+
+func TestDeviceGroupService_MoveDevices_DoesNotInvalidateTreeCacheWhenNoRowsChanged(t *testing.T) {
+	groupID := uuid.New()
+	repo := &mockGroupRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*DeviceGroup, error) {
+			return &DeviceGroup{ID: id, Name: "target"}, nil
+		},
+		moveDevicesFn: func(_ context.Context, _ []uuid.UUID, _ uuid.UUID) (int64, error) {
+			return 0, nil
+		},
+	}
+
+	affected, err := newTestGroupService(repo).MoveDevices(context.Background(), MoveDevicesRequest{
+		TargetGroupID: groupID.String(),
+		DeviceIDs:     []string{uuid.New().String()},
+	})
+
+	require.NoError(t, err)
+	assert.Zero(t, affected)
+	assert.Zero(t, repo.invalidateCountsCalls)
+}
+
+func TestDeviceGroupService_BatchAddDevices_InvalidatesTreeCacheAfterChange(t *testing.T) {
+	repo := &mockGroupRepo{
+		batchAddDevicesFn: func(_ context.Context, _ uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
+			return int64(len(deviceIDs)), nil
+		},
+	}
+
+	affected, err := newTestGroupService(repo).BatchAddDevices(context.Background(), uuid.New(), []uuid.UUID{uuid.New()})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), affected)
+	assert.Equal(t, 1, repo.invalidateCountsCalls)
+}
+
+func TestDeviceGroupService_BatchAddDevices_DoesNotInvalidateTreeCacheOnRepoError(t *testing.T) {
+	repoErr := errors.New("batch add failed")
+	repo := &mockGroupRepo{
+		batchAddDevicesFn: func(_ context.Context, _ uuid.UUID, _ []uuid.UUID) (int64, error) {
+			return 0, repoErr
+		},
+	}
+
+	_, err := newTestGroupService(repo).BatchAddDevices(context.Background(), uuid.New(), []uuid.UUID{uuid.New()})
+
+	require.ErrorIs(t, err, repoErr)
+	assert.ErrorContains(t, err, "batch add devices to group")
+	assert.Zero(t, repo.invalidateCountsCalls)
+}
+
+func TestDeviceGroupService_AddDevice_InvalidatesTreeCacheAfterChange(t *testing.T) {
+	repo := &mockGroupRepo{}
+
+	err := newTestGroupService(repo).AddDevice(context.Background(), uuid.New(), uuid.New())
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, repo.invalidateCountsCalls)
+}
+
+func TestDeviceGroupService_AddDevice_DoesNotInvalidateTreeCacheOnRepoError(t *testing.T) {
+	repoErr := errors.New("add failed")
+	repo := &mockGroupRepo{
+		addDeviceFn: func(_ context.Context, _, _ uuid.UUID) error {
+			return repoErr
+		},
+	}
+
+	err := newTestGroupService(repo).AddDevice(context.Background(), uuid.New(), uuid.New())
+
+	require.ErrorIs(t, err, repoErr)
+	assert.ErrorContains(t, err, "add device to group")
+	assert.Zero(t, repo.invalidateCountsCalls)
+}
+
+func TestDeviceGroupService_BatchRemoveDevices_InvalidatesTreeCacheAfterChange(t *testing.T) {
+	repo := &mockGroupRepo{
+		batchRemoveDevicesFn: func(_ context.Context, _ uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
+			return int64(len(deviceIDs)), nil
+		},
+	}
+
+	affected, err := newTestGroupService(repo).BatchRemoveDevices(context.Background(), uuid.New(), []uuid.UUID{uuid.New()})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), affected)
+	assert.Equal(t, 1, repo.invalidateCountsCalls)
+}
+
+func TestDeviceGroupService_BatchRemoveDevices_DoesNotInvalidateTreeCacheOnRepoError(t *testing.T) {
+	repoErr := errors.New("batch remove failed")
+	repo := &mockGroupRepo{
+		batchRemoveDevicesFn: func(_ context.Context, _ uuid.UUID, _ []uuid.UUID) (int64, error) {
+			return 0, repoErr
+		},
+	}
+
+	_, err := newTestGroupService(repo).BatchRemoveDevices(context.Background(), uuid.New(), []uuid.UUID{uuid.New()})
+
+	require.ErrorIs(t, err, repoErr)
+	assert.ErrorContains(t, err, "batch remove devices from group")
+	assert.Zero(t, repo.invalidateCountsCalls)
+}
+
+func TestDeviceGroupService_RemoveDevice_InvalidatesTreeCacheAfterChange(t *testing.T) {
+	repo := &mockGroupRepo{}
+
+	err := newTestGroupService(repo).RemoveDevice(context.Background(), uuid.New(), uuid.New())
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, repo.invalidateCountsCalls)
+}
+
+func TestDeviceGroupService_RemoveDevice_DoesNotInvalidateTreeCacheOnRepoError(t *testing.T) {
+	repoErr := errors.New("remove failed")
+	repo := &mockGroupRepo{
+		removeDeviceFn: func(_ context.Context, _, _ uuid.UUID) error {
+			return repoErr
+		},
+	}
+
+	err := newTestGroupService(repo).RemoveDevice(context.Background(), uuid.New(), uuid.New())
+
+	require.ErrorIs(t, err, repoErr)
+	assert.ErrorContains(t, err, "remove device from group")
+	assert.Zero(t, repo.invalidateCountsCalls)
 }
 
 func TestDeviceGroupService_CreateGroup_PersistsRuleSource(t *testing.T) {

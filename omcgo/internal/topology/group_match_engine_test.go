@@ -56,12 +56,27 @@ func newEngineWithMocks(t *testing.T) (*GroupMatchEngine, *MockDeviceGroupReposi
 	return engine, repo, lister, ctrl
 }
 
+type invalidatingDeviceGroupRepo struct {
+	*MockDeviceGroupRepository
+	invalidateCalls int
+}
+
+func (r *invalidatingDeviceGroupRepo) InvalidateDeviceGroupCounts() {
+	r.invalidateCalls++
+}
+
 // ── MatchGroup ──────────────────────────────────────────────────────────────
 
 // L2 + 有匹配规则 → 只读取源组，命中设备按源组条件原子移动。
 func TestGroupMatchEngine_MatchGroup_L2_AssignsMatchedDevices(t *testing.T) {
-	engine, repo, lister, ctrl := newEngineWithMocks(t)
+	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
+
+	repoMock := NewMockDeviceGroupRepository(ctrl)
+	repo := &invalidatingDeviceGroupRepo{MockDeviceGroupRepository: repoMock}
+	lister := &fakeLister{}
+	matcher := NewDeviceMatcher(repo, nil, zaptest.NewLogger(t))
+	engine := NewGroupMatchEngine(matcher, lister, repo, zaptest.NewLogger(t))
 
 	groupID := uuid.New()
 	sourceGroupID := uuid.New()
@@ -78,14 +93,15 @@ func TestGroupMatchEngine_MatchGroup_L2_AssignsMatchedDevices(t *testing.T) {
 		{ID: missedID, Name: "SH-SITE-99"},
 	}
 
-	repo.EXPECT().GetByID(gomock.Any(), groupID).Return(group, nil)
-	repo.EXPECT().GetByID(gomock.Any(), sourceGroupID).Return(&DeviceGroup{ID: sourceGroupID, Level: 2}, nil)
+	repoMock.EXPECT().GetByID(gomock.Any(), groupID).Return(group, nil)
+	repoMock.EXPECT().GetByID(gomock.Any(), sourceGroupID).Return(&DeviceGroup{ID: sourceGroupID, Level: 2}, nil)
 	// 关键契约：matched 设备走带源组条件的原子移动，missed 不调。
-	repo.EXPECT().MoveDeviceAutoMatched(gomock.Any(), sourceGroupID, groupID, matchedID).Return(int64(1), nil)
+	repoMock.EXPECT().MoveDeviceAutoMatched(gomock.Any(), sourceGroupID, groupID, matchedID).Return(int64(1), nil)
 
 	require.NoError(t, engine.MatchGroup(context.Background(), groupID))
 	require.NotNil(t, lister.requestedFrom)
 	assert.Equal(t, sourceGroupID, *lister.requestedFrom)
+	assert.Equal(t, 1, repo.invalidateCalls)
 }
 
 func TestGroupMatchEngine_MatchGroup_NoSource_NoOp(t *testing.T) {

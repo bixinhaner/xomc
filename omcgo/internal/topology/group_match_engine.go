@@ -103,6 +103,11 @@ func (e *GroupMatchEngine) MatchGroup(ctx context.Context, groupID uuid.UUID) er
 		}
 		moved++
 	}
+	if moved > 0 {
+		if invalidator, ok := e.groupRepo.(deviceGroupTreeCacheInvalidator); ok {
+			invalidator.InvalidateDeviceGroupCounts()
+		}
+	}
 	e.logger.Info("group match done",
 		zap.String("group_id", groupID.String()),
 		zap.String("group_name", group.Name),

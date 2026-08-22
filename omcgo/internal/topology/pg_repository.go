@@ -22,10 +22,9 @@ import (
 )
 
 // groupTreeCountsCacheTTL 是 GetTreeWithCounts 的短TTL读缓存有效期。
-// 该查询虽然执行本身很快（<1ms），但 devices 是按运营商分区的表，LATERAL 子查询
-// 触发的分区裁剪规划开销很高（实测 Planning Time ~62ms，是 Execution Time 的百倍），
-// 高并发轮询（如分组树前端页面）下会成为 postgres CPU 的主要来源之一。分组结构和
-// 设备计数没有强一致要求，短TTL缓存可以把同一窗口内的并发重复调用收敛成一次真实查询。
+// 该查询会读取 devices 分区表和 device_group_members 成员表，高并发轮询（如分组树
+// 前端页面）下会成为 postgres CPU 的主要来源之一。分组结构和设备计数没有强一致要求，
+// 短TTL缓存可以把同一窗口内的并发重复调用收敛成一次真实查询。
 const groupTreeCountsCacheTTL = 3 * time.Second
 
 var groupColumns = []string{
@@ -254,37 +253,33 @@ func (r *PgDeviceGroupRepository) GetTree(ctx context.Context) ([]DeviceGroup, e
 }
 
 const getTreeWithCountsRawSQL = `
+		WITH device_counts AS (
+			SELECT COALESCE(dgm.group_id, $1::uuid) AS group_id,
+			       COUNT(*) AS count
+			FROM devices d
+			LEFT JOIN device_group_members dgm ON dgm.device_id = d.id
+			WHERE d.deleted_at IS NULL
+			GROUP BY COALESCE(dgm.group_id, $1::uuid)
+		)
 		SELECT dg.id, dg.name, dg.parent_id, dg.carrier, dg.description, dg.sort_order,
 		       dg.level, dg.status, dg.is_default, dg.remark, dg.created_by, dg.updated_by,
 		       dg.created_at, dg.updated_at,
 		       dg.matching_mode, dg.name_rule_list, dg.lac_list, dg.tac_list,
 		       dg.serial_number_list, dg.source_group_id,
-		       CASE
-		           WHEN dg.id = $1::uuid THEN COALESCE(device_counts.count, 0) + (
-		               SELECT COUNT(*) FROM devices d
-		               WHERE d.deleted_at IS NULL
-		                 AND NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id)
-		           )
-		           ELSE COALESCE(device_counts.count, 0)
-		       END AS device_count,
+		       COALESCE(device_counts.count, 0) AS device_count,
 		       dg.name_i18n, dg.description_i18n, dg.remark_i18n
 		FROM device_groups dg
-		LEFT JOIN LATERAL (
-			SELECT COUNT(*) AS count
-			FROM device_group_members dgm
-			JOIN devices d ON d.id = dgm.device_id AND d.deleted_at IS NULL
-			WHERE dgm.group_id = dg.id
-		) device_counts ON true
+		LEFT JOIN device_counts ON device_counts.group_id = dg.id
 		ORDER BY dg.sort_order ASC, dg.name ASC`
 
 // GetTreeWithCounts returns all groups with device_count populated.
-// Optimized: Uses LATERAL join for efficient counting instead of GROUP BY on entire table.
+// Optimized: aggregates device membership counts once and joins the result
+// back to the group tree.
 //
-// 短TTL读缓存（groupTreeCountsCacheTTL）：devices 是按运营商分区的表，LATERAL 子查询
-// 每次调用都要重新做分区裁剪规划，实测 Planning Time（~62ms）远高于 Execution Time
-// （<1ms）。分组树接口在高并发轮询/多用户打开分组页时会被大量并发重复调用，缓存把
-// TTL 窗口内的重复调用收敛成一次真实查询，避免规划开销被并发放大成 CPU 热点。分组
-// 结构和设备计数没有强一致性要求，短暂（几秒）过期可接受。
+// 短TTL读缓存（groupTreeCountsCacheTTL）：分组树接口在高并发轮询/多用户打开分组页
+// 时会被大量并发重复调用，缓存把 TTL 窗口内的重复调用收敛成一次真实查询，避免 devices
+// 分区表和成员表的计数开销被并发放大成 CPU 热点。分组结构和设备计数没有强一致性要求，
+// 短暂（几秒）过期可接受。
 func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]DeviceGroup, error) {
 	return r.getTreeWithCountsCached(ctx, r.loadTreeWithCounts)
 }

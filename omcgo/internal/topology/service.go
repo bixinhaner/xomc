@@ -147,7 +147,8 @@ func (s *DeviceGroupService) CreateGroup(ctx context.Context, req CreateGroupReq
 		}
 		parent, err := s.repo.GetByID(ctx, pid)
 		if err != nil {
-			return nil, commonerrors.NewBusinessError(global.ErrCodeGroupParentInvalid, "parent group not found", err)
+			return nil, commonerrors.NewBusinessError(global.ErrCodeGroupParentInvalid, "parent group not found",
+				fmt.Errorf("get parent group: %w", err))
 		}
 		if parent.Level != 1 {
 			return nil, commonerrors.NewBusinessError(global.ErrCodeGroupLevelInvalid, "parent must be a level-1 group", nil)
@@ -227,6 +228,7 @@ func (s *DeviceGroupService) CreateGroup(ctx context.Context, req CreateGroupReq
 				if _, err := s.repo.BatchAddDevices(ctx, childGroup.ID, deviceIDs); err != nil {
 					return nil, fmt.Errorf("assign devices to sub-group: %w", err)
 				}
+				s.invalidateTreeCache()
 			}
 
 			group.Children = append(group.Children, *childGroup)
@@ -568,20 +570,59 @@ func (s *DeviceGroupService) MoveDevices(ctx context.Context, req MoveDevicesReq
 	// 验证目标分组存在
 	_, err = s.repo.GetByID(ctx, targetID)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("get target group: %w", err)
 	}
 
-	return s.repo.MoveDevices(ctx, deviceIDs, targetID)
+	affected, err := s.repo.MoveDevices(ctx, deviceIDs, targetID)
+	if err != nil {
+		return 0, fmt.Errorf("move devices: %w", err)
+	}
+	if affected > 0 {
+		s.invalidateTreeCache()
+	}
+	return affected, nil
 }
 
 // BatchAddDevices 把多台设备加入目标分组（服务层统一入口）。
 func (s *DeviceGroupService) BatchAddDevices(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
-	return s.repo.BatchAddDevices(ctx, groupID, deviceIDs)
+	affected, err := s.repo.BatchAddDevices(ctx, groupID, deviceIDs)
+	if err != nil {
+		return 0, fmt.Errorf("batch add devices to group: %w", err)
+	}
+	if affected > 0 {
+		s.invalidateTreeCache()
+	}
+	return affected, nil
 }
 
 // AddDevice 把单台设备加入目标分组（服务层统一入口，legacy）。
 func (s *DeviceGroupService) AddDevice(ctx context.Context, groupID, deviceID uuid.UUID) error {
-	return s.repo.AddDevice(ctx, groupID, deviceID)
+	if err := s.repo.AddDevice(ctx, groupID, deviceID); err != nil {
+		return fmt.Errorf("add device to group: %w", err)
+	}
+	s.invalidateTreeCache()
+	return nil
+}
+
+// BatchRemoveDevices removes multiple devices from a group.
+func (s *DeviceGroupService) BatchRemoveDevices(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
+	affected, err := s.repo.BatchRemoveDevices(ctx, groupID, deviceIDs)
+	if err != nil {
+		return 0, fmt.Errorf("batch remove devices from group: %w", err)
+	}
+	if affected > 0 {
+		s.invalidateTreeCache()
+	}
+	return affected, nil
+}
+
+// RemoveDevice removes one device from a group.
+func (s *DeviceGroupService) RemoveDevice(ctx context.Context, groupID, deviceID uuid.UUID) error {
+	if err := s.repo.RemoveDevice(ctx, groupID, deviceID); err != nil {
+		return fmt.Errorf("remove device from group: %w", err)
+	}
+	s.invalidateTreeCache()
+	return nil
 }
 
 // BatchSort updates sort orders for multiple groups using a single CASE WHEN SQL.
