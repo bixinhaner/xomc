@@ -21,6 +21,17 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	defaultBatchInformWorkers       = 4
+	defaultBatchInformMaxBatchSize  = 200
+	defaultBatchInformInputBuffer   = 2500
+	maxBatchInformWorkers           = 4
+	maxBatchInformMaxBatchSize      = 200
+	maxBatchInformInputBuffer       = 2500
+	maxBatchInformProjectionWorkers = 4
+	batchInformFlushAttemptTimeout  = 10 * time.Second
+)
+
 // informUpdate 封装单次 Inform 更新的所有数据。
 type informUpdate struct {
 	device     *model.Device           // 已查到的设备（含 ID，prepareDeviceUpdate 已写入新字段）
@@ -121,7 +132,10 @@ func NewBatchInformProcessor(
 ) *BatchInformProcessor {
 	workers := cfg.Workers
 	if workers <= 0 {
-		workers = 4
+		workers = defaultBatchInformWorkers
+	}
+	if workers > maxBatchInformWorkers {
+		workers = maxBatchInformWorkers
 	}
 	flushInterval := cfg.FlushInterval
 	if flushInterval <= 0 {
@@ -129,11 +143,17 @@ func NewBatchInformProcessor(
 	}
 	maxBatchSize := cfg.MaxBatchSize
 	if maxBatchSize <= 0 {
-		maxBatchSize = 200
+		maxBatchSize = defaultBatchInformMaxBatchSize
+	}
+	if maxBatchSize > maxBatchInformMaxBatchSize {
+		maxBatchSize = maxBatchInformMaxBatchSize
 	}
 	inputBuffer := cfg.InputBuffer
 	if inputBuffer <= 0 {
-		inputBuffer = 2500
+		inputBuffer = defaultBatchInformInputBuffer
+	}
+	if inputBuffer > maxBatchInformInputBuffer {
+		inputBuffer = maxBatchInformInputBuffer
 	}
 	shutdownTimeout := cfg.ShutdownTimeout
 	if shutdownTimeout <= 0 {
@@ -159,7 +179,7 @@ func NewBatchInformProcessor(
 		logger:              logger,
 		workerChans:         workerChans,
 		stopCh:              make(chan struct{}),
-		infoProjectionSlots: make(chan struct{}, 8),
+		infoProjectionSlots: make(chan struct{}, maxBatchInformProjectionWorkers),
 	}
 }
 
@@ -277,9 +297,6 @@ func (p *BatchInformProcessor) runWorker(id int) {
 }
 
 func (p *BatchInformProcessor) flush(workerID int, buffer map[string]*informUpdate) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	start := time.Now()
 	count := len(buffer)
 
@@ -293,7 +310,9 @@ func (p *BatchInformProcessor) flush(workerID int, buffer map[string]*informUpda
 				zap.Int("attempt", attempt))
 		}
 
+		ctx, cancel := context.WithTimeout(context.Background(), batchInformFlushAttemptTimeout)
 		err = p.doFlush(ctx, buffer)
+		cancel()
 		if err == nil {
 			break
 		}
@@ -837,11 +856,10 @@ func applyProductMetadataInline(ctx context.Context, matcher ProductClassMatcher
 // 固定大小 worker pool + processor 级 semaphore 限制短时并发，避免多个 flush
 // 同时执行时把设备数直接放大为相同数量的 goroutine 和主库连接。
 func (p *BatchInformProcessor) asyncSyncDeviceInfo(hit []*informUpdate) {
-	const maxProjectionWorkers = 8
-	workerCount := min(maxProjectionWorkers, len(hit))
+	workerCount := min(maxBatchInformProjectionWorkers, len(hit))
 	slots := p.infoProjectionSlots
 	if slots == nil {
-		slots = make(chan struct{}, maxProjectionWorkers)
+		slots = make(chan struct{}, maxBatchInformProjectionWorkers)
 	}
 	jobs := make(chan *model.Device)
 	var workers sync.WaitGroup

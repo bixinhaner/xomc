@@ -68,12 +68,12 @@ pm_redis:
 # Durable parameter-sync data plane runtime tuning. The data plane is always active.
 param_sync:
   manual_offline_mode: reject
-  result_consumer_shard_count: 16
-  result_consumer_queue_depth: 64
-  result_consumer_pull_batch_size: 64
-  result_consumer_pull_concurrency: 64
+  result_consumer_shard_count: 4
+  result_consumer_queue_depth: 32
+  result_consumer_pull_batch_size: 16
+  result_consumer_pull_concurrency: 4
   result_consumer_ack_wait: 2m
-  result_consumer_max_ack_pending: 512
+  result_consumer_max_ack_pending: 64
   recovery_run_limit: 200
   recovery_task_limit_per_run: 200
   recovery_task_budget: 200
@@ -235,10 +235,10 @@ dict_loader:
 
 batch_processor:
   enabled: true           # 启用 Periodic Inform 批量处理
-  workers: 8              # 生产环境建议 CPU 核数 / 2
+  workers: 4              # 高负载场景保守限制主库写入并发
   flush_interval: 10s     # 批量刷新间隔
-  max_batch_size: 500     # 生产环境单次批量上限
-  input_buffer: 5000      # 每个 worker 输入通道缓冲
+  max_batch_size: 200     # 单次批量上限
+  input_buffer: 2500      # 每个 worker 输入通道缓冲
   shutdown_timeout: 30s   # 优雅关闭超时
 
 # 通知中心（T-0152）：SMTP 邮件发送器 + Alertmanager 告警 webhook 入口
