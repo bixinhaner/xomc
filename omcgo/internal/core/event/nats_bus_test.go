@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -317,6 +319,165 @@ func TestNATSEventBusQueueStatsDoesNotObservePMMetricsDirectly(t *testing.T) {
 		"QueueStats itself must not turn an initialized timestamp into a successful observation")
 }
 
+func TestNATSEventBusPublishRefreshesProducerOnceOnClosedConnection(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewEventBusMetrics(reg)
+	first := &stubJetStreamPublisher{err: nats.ErrConnectionClosed}
+	second := &stubJetStreamPublisher{}
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.publisher = first
+	bus.SetMetrics(metrics)
+	refreshCalls := 0
+	bus.SetJetStreamRefreshFunc(func(context.Context) (*nats.Conn, JetStreamPublisher, error) {
+		refreshCalls++
+		return nil, second, nil
+	})
+	evt, err := NewEvent("device.inform.periodic", map[string]string{"sn": "SN-1"})
+	require.NoError(t, err)
+
+	err = bus.Publish(context.Background(), "device.inform.periodic", evt)
+	require.NoError(t, err)
+	require.Equal(t, 1, refreshCalls)
+	require.Equal(t, 1, first.calls)
+	require.Equal(t, 1, second.calls)
+	require.Equal(t, "device.inform.periodic", first.subject)
+	require.Equal(t, "device.inform.periodic", second.subject)
+	require.Equal(t, 2, first.optsLen, "publish should pass context and MsgID for JetStream deduplication")
+	require.Equal(t, 2, second.optsLen, "retry should keep the same idempotent publish options")
+	require.JSONEq(t, string(first.payload), string(second.payload), "producer refresh must retry the same event body")
+	assert.Equal(t, float64(1),
+		testutil.ToFloat64(metrics.PublishTotal.WithLabelValues("device.inform.periodic", publishOutcomeFailed, "connection_closed")))
+	assert.Equal(t, float64(1),
+		testutil.ToFloat64(metrics.PublishTotal.WithLabelValues("device.inform.periodic", publishOutcomeRecovered, "connection_closed")))
+}
+
+func TestNATSEventBusPublishConcurrentFailuresShareProducerRefresh(t *testing.T) {
+	first := &stubJetStreamPublisher{err: nats.ErrConnectionClosed}
+	second := &stubJetStreamPublisher{}
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.publisher = first
+	var refreshCalls atomic.Int64
+	bus.SetJetStreamRefreshFunc(func(context.Context) (*nats.Conn, JetStreamPublisher, error) {
+		refreshCalls.Add(1)
+		time.Sleep(25 * time.Millisecond)
+		return nil, second, nil
+	})
+	evt, err := NewEvent("device.inform.periodic", map[string]string{"sn": "SN-1"})
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- bus.Publish(context.Background(), "device.inform.periodic", evt)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	require.Equal(t, int64(1), refreshCalls.Load())
+	require.GreaterOrEqual(t, second.calls, 1)
+}
+
+func TestNATSEventBusPublishDoesNotRefreshOnDeadline(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewEventBusMetrics(reg)
+	publisher := &stubJetStreamPublisher{err: context.DeadlineExceeded}
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.publisher = publisher
+	bus.SetMetrics(metrics)
+	bus.SetJetStreamRefreshFunc(func(context.Context) (*nats.Conn, JetStreamPublisher, error) {
+		t.Fatal("deadline publish failures must not refresh and retry because the message may already be stored")
+		return nil, nil, nil
+	})
+	evt, err := NewEvent("device.inform.periodic", map[string]string{"sn": "SN-1"})
+	require.NoError(t, err)
+
+	err = bus.Publish(context.Background(), "device.inform.periodic", evt)
+	require.Error(t, err)
+	require.Equal(t, 1, publisher.calls)
+	assert.Equal(t, float64(1),
+		testutil.ToFloat64(metrics.PublishTotal.WithLabelValues("device.inform.periodic", publishOutcomeFailed, "deadline")))
+}
+
+func TestNATSEventBusPublishRecordsRecoveryFailure(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewEventBusMetrics(reg)
+	publisher := &stubJetStreamPublisher{err: nats.ErrConnectionClosed}
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.publisher = publisher
+	bus.SetMetrics(metrics)
+	refreshCalls := 0
+	bus.SetJetStreamRefreshFunc(func(context.Context) (*nats.Conn, JetStreamPublisher, error) {
+		refreshCalls++
+		return nil, nil, nats.ErrNoServers
+	})
+	evt, err := NewEvent("device.inform.periodic", map[string]string{"sn": "SN-1"})
+	require.NoError(t, err)
+
+	err = bus.Publish(context.Background(), "device.inform.periodic", evt)
+	require.Error(t, err)
+	err = bus.Publish(context.Background(), "device.inform.periodic", evt)
+	require.Error(t, err)
+	require.Equal(t, 2, publisher.calls)
+	require.Equal(t, 1, refreshCalls, "failed refresh should be cooled down before the next dial attempt")
+	assert.Equal(t, float64(2),
+		testutil.ToFloat64(metrics.PublishTotal.WithLabelValues("device.inform.periodic", publishOutcomeFailed, "connection_closed")))
+	assert.Equal(t, float64(1),
+		testutil.ToFloat64(metrics.PublishTotal.WithLabelValues("device.inform.periodic", publishOutcomeRecoveryFailed, "other")))
+	assert.Equal(t, float64(1),
+		testutil.ToFloat64(metrics.PublishTotal.WithLabelValues("device.inform.periodic", publishOutcomeRecoveryFailed, "reconnecting")))
+}
+
+func TestNATSEventBusPublishDoesNotRefreshCanceledContext(t *testing.T) {
+	publisher := &stubJetStreamPublisher{err: nats.ErrConnectionReconnecting}
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.publisher = publisher
+	bus.SetJetStreamRefreshFunc(func(context.Context) (*nats.Conn, JetStreamPublisher, error) {
+		t.Fatal("canceled publish context must not start producer refresh")
+		return nil, nil, nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	evt, err := NewEvent("device.inform.periodic", map[string]string{"sn": "SN-1"})
+	require.NoError(t, err)
+
+	err = bus.Publish(ctx, "device.inform.periodic", evt)
+	require.Error(t, err)
+	require.Equal(t, 1, publisher.calls)
+}
+
+func TestNATSEventBusPublishPassesContextToJetStream(t *testing.T) {
+	ctx := context.WithValue(context.Background(), "publish-test", "ctx")
+	publisher := &stubJetStreamPublisher{}
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.publisher = publisher
+	evt, err := NewEvent("device.inform.periodic", map[string]string{"sn": "SN-1"})
+	require.NoError(t, err)
+
+	err = bus.Publish(ctx, "device.inform.periodic", evt)
+	require.NoError(t, err)
+	require.Same(t, ctx, publisher.ctx)
+}
+
+func TestNATSEventBusPublishSkipsMsgIDWhenEventIDEmpty(t *testing.T) {
+	publisher := &stubJetStreamPublisher{}
+	bus := NewNATSEventBus(nil, nil, zap.NewNop())
+	bus.publisher = publisher
+
+	err := bus.Publish(context.Background(), "device.inform.periodic", Event{
+		Payload:   json.RawMessage(`{"sn":"SN-1"}`),
+		Timestamp: time.Now(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, publisher.optsLen, "empty event ID can only pass context; no synthetic dedupe key")
+}
+
 // --- Event serialization round-trip ---
 
 func TestEvent_JSONRoundTrip(t *testing.T) {
@@ -439,6 +600,34 @@ func TestNATSEventBus_QueueSubscribe_NilJS_Panics(t *testing.T) {
 			return nil
 		})
 	})
+}
+
+type stubJetStreamPublisher struct {
+	mu      sync.Mutex
+	err     error
+	calls   int
+	subject string
+	payload []byte
+	ctx     context.Context
+	optsLen int
+}
+
+func (s *stubJetStreamPublisher) Publish(subject string, data []byte, opts ...nats.PubOpt) (*nats.PubAck, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls++
+	s.subject = subject
+	s.payload = append([]byte(nil), data...)
+	s.optsLen = len(opts)
+	for _, opt := range opts {
+		if ctxOpt, ok := opt.(nats.ContextOpt); ok {
+			s.ctx = ctxOpt.Context
+		}
+	}
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &nats.PubAck{}, nil
 }
 
 // --- ackAction enum sanity ---

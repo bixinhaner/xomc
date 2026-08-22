@@ -13,9 +13,12 @@ import (
 
 // NATSClient wraps a NATS connection and JetStream context.
 type NATSClient struct {
-	Conn   *nats.Conn
-	JS     nats.JetStreamContext
-	logger *zap.Logger
+	mu           sync.RWMutex
+	Conn         *nats.Conn
+	JS           nats.JetStreamContext
+	producerConn *nats.Conn
+	cfg          appconfig.NATSConfig
+	logger       *zap.Logger
 
 	metricsMu sync.Mutex
 	metrics   *ConnMetrics
@@ -122,39 +125,170 @@ func DefaultStreams() []StreamDef {
 
 // NewNATSClient connects to a NATS server and obtains a JetStream context.
 func NewNATSClient(cfg appconfig.NATSConfig, logger *zap.Logger) (*NATSClient, error) {
+	conn, js, err := connectNATS(cfg, logger)
+	if err != nil {
+		return nil, err
+	}
+	return &NATSClient{
+		Conn:   conn,
+		JS:     js,
+		cfg:    cfg,
+		logger: logger,
+	}, nil
+}
+
+func connectNATS(cfg appconfig.NATSConfig, logger *zap.Logger) (*nats.Conn, nats.JetStreamContext, error) {
 	opts := []nats.Option{
 		nats.Name("omcgo"),
+		nats.MaxReconnects(effectiveMaxReconnect(cfg.MaxReconnect)),
 		nats.ReconnectWait(cfg.ReconnectWait),
 		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
-			if err != nil {
-				logger.Warn("NATS disconnected", zap.Error(err))
-			}
+			logNATSDisconnected(logger, err)
 		}),
 		nats.ReconnectHandler(func(nc *nats.Conn) {
-			logger.Info("NATS reconnected", zap.String("url", nc.ConnectedUrl()))
+			logNATSReconnected(logger, nc)
 		}),
-	}
-
-	if cfg.MaxReconnect != 0 {
-		opts = append(opts, nats.MaxReconnects(cfg.MaxReconnect))
+		nats.ClosedHandler(func(nc *nats.Conn) {
+			logNATSClosed(logger, nc)
+		}),
 	}
 
 	conn, err := nats.Connect(cfg.URL, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("connect to NATS: %w", err)
+		return nil, nil, fmt.Errorf("connect to NATS: %w", err)
 	}
 
 	js, err := conn.JetStream()
 	if err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("get JetStream context: %w", err)
+		return nil, nil, fmt.Errorf("get JetStream context: %w", err)
 	}
 
-	return &NATSClient{
-		Conn:   conn,
-		JS:     js,
-		logger: logger,
-	}, nil
+	return conn, js, nil
+}
+
+func effectiveMaxReconnect(configured int) int {
+	if configured == 0 {
+		return -1
+	}
+	return configured
+}
+
+// RefreshJetStream refreshes the local producer context after a connection-class
+// publish failure. It never closes or replaces the shared service connection,
+// because existing subscriptions are bound to that connection and nats.go can
+// recover them during normal reconnect. If the shared connection is already
+// CLOSED, a separate producer connection is created for publish self-heal.
+func (c *NATSClient) RefreshJetStream(ctx context.Context) (*nats.Conn, nats.JetStreamContext, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	c.mu.RLock()
+	conn := c.Conn
+	c.mu.RUnlock()
+
+	if conn != nil && !conn.IsClosed() {
+		if err := waitNATSConnected(ctx, conn, c.cfg.ReconnectWait); err != nil {
+			return nil, nil, err
+		}
+		js, err := conn.JetStream()
+		if err == nil {
+			c.mu.Lock()
+			c.JS = js
+			c.mu.Unlock()
+			c.installMetricsHandlers(conn)
+			return conn, js, nil
+		}
+		if c.logger != nil {
+			c.logger.Warn("refresh NATS JetStream context failed; rebuilding connection", zap.Error(err))
+		}
+		return nil, nil, fmt.Errorf("refresh NATS JetStream context: %w", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, nil, fmt.Errorf("refresh NATS JetStream context: %w", ctx.Err())
+	default:
+	}
+
+	newConn, newJS, err := connectNATS(c.cfg, c.logger)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	c.mu.Lock()
+	oldProducerConn := c.producerConn
+	c.producerConn = newConn
+	c.JS = newJS
+	c.mu.Unlock()
+
+	if oldProducerConn != nil && oldProducerConn != newConn && !oldProducerConn.IsClosed() {
+		oldProducerConn.Close()
+	}
+	c.installMetricsHandlers(newConn)
+	return newConn, newJS, nil
+}
+
+func waitNATSConnected(ctx context.Context, conn *nats.Conn, reconnectWait time.Duration) error {
+	if conn.IsConnected() {
+		return nil
+	}
+	if reconnectWait <= 0 {
+		reconnectWait = time.Second
+	}
+	timeout := reconnectWait * 2
+	if timeout < 500*time.Millisecond {
+		timeout = 500 * time.Millisecond
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining < timeout {
+			timeout = remaining
+		}
+	}
+	if timeout <= 0 {
+		return fmt.Errorf("wait NATS reconnect: %w", ctx.Err())
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if conn.IsConnected() {
+			return nil
+		}
+		if conn.IsClosed() {
+			return nats.ErrConnectionClosed
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait NATS reconnect: %w", ctx.Err())
+		case <-timer.C:
+			return nats.ErrConnectionReconnecting
+		case <-ticker.C:
+		}
+	}
+}
+
+func logNATSDisconnected(logger *zap.Logger, err error) {
+	if logger != nil && err != nil {
+		logger.Warn("NATS disconnected", zap.Error(err))
+	}
+}
+
+func logNATSReconnected(logger *zap.Logger, nc *nats.Conn) {
+	if logger != nil && nc != nil {
+		logger.Info("NATS reconnected", zap.String("url", nc.ConnectedUrl()))
+	}
+}
+
+func logNATSClosed(logger *zap.Logger, nc *nats.Conn) {
+	if logger != nil && nc != nil {
+		logger.Error("NATS connection closed",
+			zap.String("status", nc.Status().String()),
+			zap.Error(nc.LastError()))
+	}
 }
 
 // EnsureStreams creates all default JetStream streams if they don't exist and
@@ -374,7 +508,14 @@ func (c *NATSClient) Close() {
 	if metrics != nil {
 		metrics.Stop()
 	}
-	if c.Conn != nil {
-		c.Conn.Drain()
+	c.mu.RLock()
+	conn := c.Conn
+	producerConn := c.producerConn
+	c.mu.RUnlock()
+	if conn != nil {
+		conn.Drain()
+	}
+	if producerConn != nil && producerConn != conn {
+		producerConn.Drain()
 	}
 }
