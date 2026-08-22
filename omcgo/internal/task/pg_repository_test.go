@@ -90,6 +90,16 @@ func cleanupTestTasks(t *testing.T, pool *pgxpool.Pool) {
 		testDeviceSNPrefix+"%")
 }
 
+func requireDeviceTaskLocationsTable(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	var exists bool
+	if err := pool.QueryRow(context.Background(),
+		"SELECT to_regclass('public.device_task_locations') IS NOT NULL",
+	).Scan(&exists); err != nil || !exists {
+		t.Skipf("device_task_locations table not present: err=%v exists=%v", err, exists)
+	}
+}
+
 func explainText(t *testing.T, pool *pgxpool.Pool, query string, args ...any) string {
 	t.Helper()
 	rows, err := pool.Query(context.Background(), query, args...)
@@ -1031,6 +1041,34 @@ func TestPgRepo_Integration_PurgeOldTasks(t *testing.T) {
 	got, err := repo.GetByID(ctx, tk.ID)
 	require.NoError(t, err)
 	assert.Nil(t, got, "task should have been purged")
+}
+
+func TestPgRepo_Integration_LocateDeviceSNByIDRepairsMissingLocation(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	requireDeviceTaskLocationsTable(t, pool)
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+
+	tk := freshTaskForPG("missing-location", "missing-location")
+	require.NoError(t, repo.Create(ctx, tk))
+	_, err := pool.Exec(ctx, "DELETE FROM device_task_locations WHERE task_id=$1", tk.ID)
+	require.NoError(t, err)
+
+	deviceSN, ok, err := repo.LocateDeviceSNByID(ctx, tk.ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, tk.DeviceSN, deviceSN)
+
+	var repairedSN string
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT device_sn FROM device_task_locations WHERE task_id=$1",
+		tk.ID,
+	).Scan(&repairedSN))
+	require.Equal(t, tk.DeviceSN, repairedSN)
 }
 
 func TestPgRepo_Integration_ListOpenByDeviceAndMethods(t *testing.T) {
