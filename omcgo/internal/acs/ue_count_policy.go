@@ -27,7 +27,7 @@ const (
 	defaultUECountQueueSize                = 4096
 	defaultUECountWorkerCount              = 4
 	ueCountAdmissionBacklogDivisor         = 2
-	ueCountProcessBacklogDivisor           = 16
+	ueCountProcessBacklogThreshold         = 1
 	ueCountDeferredPruneInterval           = time.Minute
 	defaultUECountTaskRetryIntervalSeconds = 30
 	// 任务生命周期必须覆盖聚合关闭宽限(12m)、下一次 Periodic Inform(5m)
@@ -348,7 +348,7 @@ func (p *UECountPolicy) shouldDeferAdmission() bool {
 }
 
 func (p *UECountPolicy) shouldDeferProcess() bool {
-	return len(p.queue) >= queueThreshold(cap(p.queue), ueCountProcessBacklogDivisor)
+	return len(p.queue) >= ueCountProcessBacklogThreshold
 }
 
 func queueThreshold(capacity, divisor int) int {
