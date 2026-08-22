@@ -4,9 +4,9 @@
 > **错误**: `dial tcp: lookup mirrors.aliyun.com on 223.5.5.5:53: read udp 172.17.0.2:42280->223.5.5.5:53: i/o timeout`  
 > **创建时间**: 2025-04-10
 >
-> 以上 `172.17.0.2` 仅保留为历史故障样例。当前 Docker 网段策略统一使用 `173.x`，
-> 新建或重建 Docker 网络不得复用任何 `172.x` 网段；请以现行 Compose IPAM 和
-> `install-docker.sh` 的 173.x 校验为准。
+> 以上 `172.17.0.2` 仅保留为历史故障样例。当前 Docker 网段以客户规划的 `DOCKER_BIP`
+> 为基准派生；新建或重建 Docker 网络不得复用任何 `172.x` 网段，请以规划库和 Compose
+> IPAM 校验为准。
 
 ---
 
@@ -65,6 +65,8 @@ Docker 容器:
 
 ```bash
 cd deployments/docker
+# DOCKER_BIP 由客户按实际业务网规划；脚本会自动派生其它 Docker 网段
+export DOCKER_BIP=10.240.0.1/16
 bash fix-docker-dns.sh
 ```
 
@@ -76,33 +78,12 @@ bash fix-docker-dns.sh
 
 **方案 B: 手动配置**
 
-```bash
-# 如果 /etc/docker/daemon.json 不存在
-sudo cat > /etc/docker/daemon.json << 'EOF'
-{
-  "bip": "173.17.0.1/16",
-  "default-address-pools": [{"base": "173.19.0.0/16", "size": 24}],
-  "dns": [
-    "223.5.5.5",
-    "223.6.6.6",
-    "114.114.114.114",
-    "8.8.8.8"
-  ],
-  "dns-search": [],
-  "dns-opts": [
-    "timeout:2",
-    "attempts:3"
-  ]
-}
-EOF
+不要直接覆盖 `/etc/docker/daemon.json`，否则会丢失 Docker 网段规划。请设置客户规划的
+`DOCKER_BIP` 后运行修复脚本；脚本会合并 DNS、`bip` 和自动地址池：
 
-# 如果已存在其他配置,使用 jq 合并
-sudo jq '. + {
-    "dns": ["223.5.5.5", "223.6.6.6", "114.114.114.114", "8.8.8.8"],
-    "dns-search": [],
-    "dns-opts": ["timeout:2", "attempts:3"]
-}' /etc/docker/daemon.json > /tmp/daemon.json.new
-sudo mv /tmp/daemon.json.new /etc/docker/daemon.json
+```bash
+export DOCKER_BIP=10.240.0.1/16
+bash deployments/docker/fix-docker-dns.sh
 ```
 
 **2. 重启 Docker**
@@ -268,14 +249,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-migra
 ### **立即修复 (5 分钟)**
 
 ```bash
-# 1. 配置 Docker DNS (方案 1)
-sudo cat > /etc/docker/daemon.json << 'EOF'
-{
-  "bip": "173.17.0.1/16",
-  "default-address-pools": [{"base": "173.19.0.0/16", "size": 24}],
-  "dns": ["223.5.5.5", "223.6.6.6", "114.114.114.114", "8.8.8.8"]
-}
-EOF
+# 1. 先按客户规划设置 Docker 网段，再配置 Docker DNS (方案 1)
+export DOCKER_BIP=10.240.0.1/16
+bash deployments/docker/fix-docker-dns.sh
 
 # 2. 重启 Docker
 # macOS: Docker Desktop → Restart
@@ -393,14 +369,9 @@ sudo journalctl -u docker -f
 ### **开发环境**: 方案 1 + 方案 3A
 
 ```bash
-# 1. 配置 Docker DNS
-sudo cat > /etc/docker/daemon.json << 'EOF'
-{
-  "bip": "173.17.0.1/16",
-  "default-address-pools": [{"base": "173.19.0.0/16", "size": 24}],
-  "dns": ["223.5.5.5", "223.6.6.6", "114.114.114.114"]
-}
-EOF
+# 1. 按客户规划配置 Docker DNS 和网段
+export DOCKER_BIP=10.240.0.1/16
+bash deployments/docker/fix-docker-dns.sh
 
 # 2. 修改 Dockerfile 添加重试
 # (参考方案 3A)

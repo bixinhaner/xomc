@@ -61,24 +61,9 @@ failed to do request: Head "https://registry-1.docker.io/...": dial tcp ... i/o 
 
 ```bash
 # === 1) 配 dockerd mirror + DNS ===
-sudo mkdir -p /etc/docker
-sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'
-{
-  "bip": "173.17.0.1/16",
-  "default-address-pools": [{"base": "173.19.0.0/16", "size": 24}],
-  "registry-mirrors": [
-    "https://docker.m.daocloud.io",
-    "https://docker.1panel.live",
-    "https://hub.rat.dev",
-    "https://docker.nju.edu.cn"
-  ],
-  "dns": ["223.5.5.5", "223.6.6.6", "114.114.114.114"],
-  "dns-opts": ["timeout:2", "attempts:3"]
-}
-EOF
-sudo systemctl daemon-reload
-sudo systemctl restart docker
-sleep 3
+export DOCKER_BIP=10.240.0.1/16
+bash deployments/docker/fix-docker-dns.sh
+bash deployments/release/bundle/setup-mirrors.sh --docker daocloud
 
 # === 2) 配 BuildKit mirror ===
 sudo mkdir -p /etc/buildkit
@@ -124,20 +109,8 @@ docker compose -f deployments/docker/docker-compose.yml up -d --build
 
 ```bash
 sudo mkdir -p /etc/docker
-sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'
-{
-  "bip": "173.17.0.1/16",
-  "default-address-pools": [{"base": "173.19.0.0/16", "size": 24}],
-  "registry-mirrors": [
-    "https://docker.m.daocloud.io",
-    "https://docker.1panel.live",
-    "https://hub.rat.dev",
-    "https://docker.nju.edu.cn"
-  ],
-  "dns": ["223.5.5.5", "223.6.6.6", "114.114.114.114"],
-  "dns-opts": ["timeout:2", "attempts:3"]
-}
-EOF
+export DOCKER_BIP=10.240.0.1/16
+bash deployments/release/bundle/setup-mirrors.sh --docker daocloud
 
 sudo systemctl daemon-reload
 sudo systemctl restart docker

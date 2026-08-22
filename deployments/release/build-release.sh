@@ -342,6 +342,7 @@ for ARCH in $ARCHES; do
   # 1.4 部署模板 + compose 文件 + nginx 配置 + 监控栈配置
   log "[$ARCH] 拷入部署模板 + 监控栈配置 ..."
   cp -r "$SCRIPT_DIR/bundle/deploy"       "$STAGE/deploy"
+  cp "$REPO_ROOT/deployments/docker/docker-network-lib.sh" "$STAGE/deploy/docker-network-lib.sh"
   cp -r "$REPO_ROOT/deployments/monitoring" "$STAGE/deploy/monitoring"
   cp "$REPO_ROOT/deployments/docker/nginx.conf"   "$STAGE/deploy/nginx.conf"
   cp "$REPO_ROOT/deployments/docker/default.conf" "$STAGE/deploy/default.conf"
@@ -412,6 +413,18 @@ OMCGO_DOCKER_ROOT_DIR=/var/lib/docker
 OMCGO_DOCKER_VOLUME_PREFIX=omcgo
 OMCGO_HOST_LOGS_PATH=/opt/omc/run/logs
 OMCGO_HOST_DATA_PATH=/opt/omc/data
+# Docker 网络规划唯一输入。部署前请按客户实际业务网规划 DOCKER_BIP；以下派生值由 install.sh 自动生成。
+DOCKER_BIP=
+DOCKER_NETWORK_SUBNET=
+DOCKER_NETWORK_GATEWAY=
+DOCKER_COMPOSE_SUBNET=
+DOCKER_COMPOSE_GATEWAY=
+DOCKER_ADDR_POOL_BASE=
+DOCKER_ADDR_POOL_SIZE=
+DOCKER_TEST_SUBNET=
+DOCKER_TEST_GATEWAY=
+DOCKER_MIGRATION_SUBNET=
+DOCKER_MIGRATION_GATEWAY=
 # OMC 运行环境（容器内 entrypoint.sh 读）
 OMCGO_ENV=prod
 # JWT 密钥（app 容器读）—— 由 install.sh ensure_secrets 自动生成（#175）

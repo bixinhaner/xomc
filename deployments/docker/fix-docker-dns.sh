@@ -4,6 +4,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/docker-network-lib.sh"
+
 echo "=== Docker DNS 问题修复 ==="
 echo ""
 
@@ -12,6 +15,15 @@ if ! docker info > /dev/null 2>&1; then
     echo "❌ Docker 未运行,请先启动 Docker"
     exit 1
 fi
+
+if ! docker_network_resolve_bip; then
+    echo "❌ 未找到 DOCKER_BIP；请先设置客户规划的 DOCKER_BIP，或确认 daemon.json 已配置 bip"
+    exit 1
+fi
+docker_network_plan || {
+    echo "❌ DOCKER_BIP 无效或无法派生 Docker 网段: $DOCKER_BIP"
+    exit 1
+}
 
 echo "1️⃣  备份当前 Docker 配置..."
 if [ -f /etc/docker/daemon.json ]; then
@@ -105,16 +117,17 @@ EOF
 fi
 
 echo ""
-echo "2️⃣  锁定 Docker 173.x 网段..."
+echo "2️⃣  按 DOCKER_BIP 锁定 Docker 网段..."
 if ! command -v python3 > /dev/null 2>&1; then
     echo "❌ 缺少 python3,无法安全写入 Docker 网段策略"
     exit 1
 fi
-sudo python3 - /etc/docker/daemon.json <<'PYEOF'
+sudo python3 - /etc/docker/daemon.json "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" <<'PYEOF'
 import json
 import os
+import sys
 
-path = "/etc/docker/daemon.json"
+path, bip, pool_base, pool_size = sys.argv[1:]
 data = {}
 if os.path.exists(path) and os.path.getsize(path):
     try:
@@ -122,13 +135,13 @@ if os.path.exists(path) and os.path.getsize(path):
             data = json.load(handle)
     except json.JSONDecodeError:
         data = {}
-data["bip"] = "173.17.0.1/16"
-data["default-address-pools"] = [{"base": "173.19.0.0/16", "size": 24}]
+data["bip"] = bip
+data["default-address-pools"] = [{"base": pool_base, "size": int(pool_size)}]
 with open(path, "w", encoding="utf-8") as handle:
     json.dump(data, handle, indent=2, ensure_ascii=False)
     handle.write("\n")
 PYEOF
-echo "✅ Docker 网段已锁定为 bip=173.17.0.1/16, 地址池=173.19.0.0/16"
+echo "✅ Docker 网段已按 DOCKER_BIP=$DOCKER_BIP 规划，地址池=$DOCKER_ADDR_POOL_BASE/$DOCKER_ADDR_POOL_SIZE"
 
 echo ""
 echo "3️⃣  重启 Docker 服务..."
@@ -143,8 +156,8 @@ else
 fi
 
 BRIDGE_SUBNETS="$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true)"
-if ! printf '%s' "$BRIDGE_SUBNETS" | grep -Eq '(^|[[:space:]])173\.'; then
-    echo "❌ Docker bridge 未切换到 173.x: ${BRIDGE_SUBNETS:-未知}"
+if [ "$BRIDGE_SUBNETS" != "${DOCKER_NETWORK_SUBNET} " ]; then
+    echo "❌ Docker bridge 不符合 DOCKER_BIP=$DOCKER_BIP 规划: ${BRIDGE_SUBNETS:-未知} (期望 ${DOCKER_NETWORK_SUBNET})"
     exit 1
 fi
 

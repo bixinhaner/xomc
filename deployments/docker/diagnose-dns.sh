@@ -4,6 +4,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/docker-network-lib.sh"
+
 echo "========================================="
 echo "  Docker DNS 问题诊断工具"
 echo "========================================="
@@ -97,12 +100,16 @@ else
     check_result 1 "bridge 网络异常"
 fi
 
-BRIDGE_SUBNETS="$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true)"
-if printf '%s' "$BRIDGE_SUBNETS" | grep -Eq '(^|[[:space:]])173\.'; then
-    check_result 0 "bridge 网络使用 173.x 网段 ($BRIDGE_SUBNETS)"
+if docker_network_resolve_bip && docker_network_plan; then
+    BRIDGE_SUBNETS="$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true)"
 else
-    check_result 1 "bridge 网络未使用 173.x 网段 (${BRIDGE_SUBNETS:-未知})"
-    echo "  ${RED}请先运行 install-docker.sh 迁移 Docker 网段，避免创建 172.x 测试网络${NC}"
+    BRIDGE_SUBNETS=""
+fi
+if [ "$BRIDGE_SUBNETS" = "${DOCKER_NETWORK_SUBNET} " ]; then
+    check_result 0 "bridge 网络符合 DOCKER_BIP 规划 ($BRIDGE_SUBNETS)"
+else
+    check_result 1 "bridge 网络不符合 DOCKER_BIP 规划 (${BRIDGE_SUBNETS:-未知}，期望 ${DOCKER_NETWORK_SUBNET:-未知})"
+    echo "  ${RED}请先按 DOCKER_BIP 规划运行 install-docker.sh，避免创建未规划网络${NC}"
     exit 1
 fi
 

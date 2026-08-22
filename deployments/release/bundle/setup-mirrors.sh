@@ -48,10 +48,20 @@
 #
 # 安全性：
 #   · 修改前自动备份目标文件 → <path>.bak.<时间戳>
-#   · daemon.json 的其它键不动；Docker 网段始终保持 173.x；/etc/npmrc 仅替换 registry= / disturl= 行
+#   · daemon.json 的其它键不动；Docker 网段始终遵循 DOCKER_BIP；/etc/npmrc 仅替换 registry= / disturl= 行
 #   · 仅在内容确变时 systemctl restart docker；npm / Golang 配置不需重启服务
 # =============================================================================
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/docker/docker-network-lib.sh" ]; then
+  . "$SCRIPT_DIR/docker/docker-network-lib.sh"
+elif [ -f "$SCRIPT_DIR/../../docker/docker-network-lib.sh" ]; then
+  . "$SCRIPT_DIR/../../docker/docker-network-lib.sh"
+else
+  echo "ERROR: 缺少 docker-network-lib.sh，无法按 DOCKER_BIP 规划 Docker 网段" >&2
+  exit 1
+fi
 
 # 路径常量；允许通过环境变量覆盖以便测试（生产环境直接用默认值）
 DAEMON_JSON="${DAEMON_JSON:-/etc/docker/daemon.json}"
@@ -211,6 +221,15 @@ configure_docker() {
   [ -z "$choice" ] && { log "Docker：未指定 --docker，跳过"; return; }
   command -v docker >/dev/null 2>&1 || { warn "Docker：未检测到 docker，跳过本项"; return; }
 
+  if [ -z "${DOCKER_BIP:-}" ]; then
+    DOCKER_BIP="$(docker_network_read_daemon_bip "$DAEMON_JSON")"
+    export DOCKER_BIP
+  fi
+  if [ -z "${DOCKER_BIP:-}" ]; then
+    die "Docker：未找到 DOCKER_BIP；请先设置客户规划的 Docker 网桥网段，或确认 daemon.json 已配置 bip"
+  fi
+  docker_network_plan || die "Docker：DOCKER_BIP 无效或无法派生网络：$DOCKER_BIP"
+
   local urls=""
   case "$choice" in
     official) urls="" ;;
@@ -226,9 +245,9 @@ configure_docker() {
   [ -f "$DAEMON_JSON" ] && OLD_HASH="$(sha256sum "$DAEMON_JSON" | cut -d' ' -f1)"
 
   if command -v python3 >/dev/null 2>&1; then
-    python3 - "$DAEMON_JSON" "$urls" <<'PYEOF'
+    python3 - "$DAEMON_JSON" "$urls" "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" <<'PYEOF'
 import json, os, sys
-p, urls = sys.argv[1], sys.argv[2]
+p, urls, bip, pool_base, pool_size = sys.argv[1:]
 data = {}
 if os.path.exists(p) and os.path.getsize(p) > 0:
     try:
@@ -239,8 +258,8 @@ if urls.strip():
     data['registry-mirrors'] = [u.strip() for u in urls.split(',') if u.strip()]
 else:
     data.pop('registry-mirrors', None)
-data["bip"] = "173.17.0.1/16"
-data["default-address-pools"] = [{"base": "173.19.0.0/16", "size": 24}]
+data["bip"] = bip
+data["default-address-pools"] = [{"base": pool_base, "size": int(pool_size)}]
 with open(p, 'w') as f:
     json.dump(data, f, indent=2, ensure_ascii=False)
     f.write('\n')
@@ -248,13 +267,13 @@ PYEOF
   else
     # 降级：无 python3 时只在 daemon.json 不存在/空文件场景生成最小配置
     if [ -s "$DAEMON_JSON" ]; then
-      die "Docker：未装 python3 且 daemon.json 已有内容；无法安全合并 173.x 网段和 registry-mirrors。请先运行 install-docker.sh 修复网段，或安装 python3" \
-        "Docker: python3 is unavailable and daemon.json already has content; cannot safely merge the 173.x network policy and registry mirrors. Run install-docker.sh first or install python3"
+      die "Docker：未装 python3 且 daemon.json 已有内容；无法安全合并 DOCKER_BIP 网段和 registry-mirrors。请先运行 install-docker.sh 修复网段，或安装 python3" \
+        "Docker: python3 is unavailable and daemon.json already has content; cannot safely merge the DOCKER_BIP network plan and registry mirrors. Run install-docker.sh first or install python3"
     fi
     if [ -z "$urls" ]; then
-      printf '{\n  "bip": "173.17.0.1/16",\n  "default-address-pools": [{"base": "173.19.0.0/16", "size": 24}]\n}\n' > "$DAEMON_JSON"
+      printf '{\n  "bip": "%s",\n  "default-address-pools": [{"base": "%s", "size": %s}]\n}\n' "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" > "$DAEMON_JSON"
     else
-      printf '{\n  "bip": "173.17.0.1/16",\n  "default-address-pools": [{"base": "173.19.0.0/16", "size": 24}],\n  "registry-mirrors": ["%s"]\n}\n' "$urls" > "$DAEMON_JSON"
+      printf '{\n  "bip": "%s",\n  "default-address-pools": [{"base": "%s", "size": %s}],\n  "registry-mirrors": ["%s"]\n}\n' "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" "$urls" > "$DAEMON_JSON"
     fi
   fi
 

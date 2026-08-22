@@ -107,5 +107,5 @@ networks:
     ipam:
       driver: default
       config:
-        - subnet: 173.20.0.0/16
-          gateway: 173.20.0.1
+        - subnet: "${DOCKER_TEST_SUBNET:?DOCKER_BIP plan is required}"
+          gateway: "${DOCKER_TEST_GATEWAY:?DOCKER_BIP plan is required}"

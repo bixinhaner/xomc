@@ -4,6 +4,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/docker-network-lib.sh"
+
 echo "========================================="
 echo "  Docker 网络故障诊断工具"
 echo "========================================="
@@ -22,14 +25,23 @@ echo "-----------------------------------------"
 echo "Docker 网络列表:"
 docker network ls | grep bridge
 
-echo "Docker 173.x 网段检查:"
+if ! docker_network_resolve_bip; then
+    echo -e "${RED}❌ 未找到 DOCKER_BIP；请先按客户规划配置 DOCKER_BIP 或 daemon.json 的 bip${NC}"
+    exit 1
+fi
+if ! docker_network_plan; then
+    echo -e "${RED}❌ DOCKER_BIP 无效或无法派生 Docker 网段: ${DOCKER_BIP:-未知}${NC}"
+    exit 1
+fi
+
+echo "Docker 网段规划检查 (DOCKER_BIP=$DOCKER_BIP):"
 BRIDGE_SUBNETS="$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true)"
-if ! printf '%s' "$BRIDGE_SUBNETS" | grep -Eq '(^|[[:space:]])173\.'; then
-    echo -e "${RED}❌ Docker bridge 仍使用 172.x：${BRIDGE_SUBNETS:-未知}${NC}"
-    echo "  请先运行: sudo bash /opt/omc/infra/docker/install-docker.sh --skip-if-installed --no-mirror"
+if [ "$BRIDGE_SUBNETS" != "${DOCKER_NETWORK_SUBNET} " ]; then
+    echo -e "${RED}❌ Docker bridge 不匹配 DOCKER_BIP 规划：实际=${BRIDGE_SUBNETS:-未知} 期望=${DOCKER_NETWORK_SUBNET}${NC}"
+    echo "  请先运行: DOCKER_BIP=$DOCKER_BIP sudo -E bash /opt/omc/infra/docker/install-docker.sh --skip-if-installed --no-mirror"
     exit 1
 else
-    echo -e "${GREEN}✅ Docker bridge 使用 173.x：$BRIDGE_SUBNETS${NC}"
+    echo -e "${GREEN}✅ Docker bridge 符合规划：$BRIDGE_SUBNETS${NC}"
 fi
 
 echo ""

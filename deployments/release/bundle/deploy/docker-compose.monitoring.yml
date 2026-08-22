@@ -19,8 +19,8 @@ networks:
     ipam:
       driver: default
       config:
-        - subnet: 173.18.0.0/16
-          gateway: 173.18.0.1
+        - subnet: "${DOCKER_COMPOSE_SUBNET:?DOCKER_BIP plan is required}"
+          gateway: "${DOCKER_COMPOSE_GATEWAY:?DOCKER_BIP plan is required}"
 
 x-omc-json-log: &omc-json-log
   driver: json-file

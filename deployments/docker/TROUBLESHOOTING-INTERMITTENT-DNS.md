@@ -43,6 +43,9 @@ bash diagnose-dns.sh
 ### **方法 2: 手动快速检查**
 
 ```bash
+# Docker 网段以客户规划的 DOCKER_BIP 为准
+cat /etc/docker/daemon.json | grep -E '"bip"|default-address-pools'
+
 # 1. 宿主机 DNS 正常吗?
 nslookup mirrors.aliyun.com
 

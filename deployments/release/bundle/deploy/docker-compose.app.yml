@@ -18,8 +18,8 @@ networks:
     ipam:
       driver: default
       config:
-        - subnet: 173.18.0.0/16
-          gateway: 173.18.0.1
+        - subnet: "${DOCKER_COMPOSE_SUBNET:?DOCKER_BIP plan is required}"
+          gateway: "${DOCKER_COMPOSE_GATEWAY:?DOCKER_BIP plan is required}"
 
 x-omc-json-log: &omc-json-log
   driver: json-file
@@ -316,6 +316,7 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       OMC_SHARED_SECRET: ${OMC_SHARED_SECRET}   # TR-069 ConnReq/STUN 共享密钥，见 deploy/.env
       OMC_PUBLIC_HOST: ${OMC_PUBLIC_HOST}   # 本机对外 IP（基站可达），见 deploy/.env
+      DOCKER_COMPOSE_SUBNET: "${DOCKER_COMPOSE_SUBNET:?DOCKER_BIP plan is required}"
       POSTGRES_DATA_PATH: "${POSTGRES_DATA_PATH:-}"
       TSDB_DATA_PATH: "${TSDB_DATA_PATH:-}"
       REDIS_DATA_PATH: "${REDIS_DATA_PATH:-}"

@@ -49,6 +49,7 @@ set -euo pipefail
 HOST_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=release.conf
 source "$SCRIPT_DIR/release.conf"
 
@@ -247,6 +248,7 @@ for ARCH in $ARCHES; do
   # install-docker.sh 末尾会调用 ../setup-mirrors.sh 引导用户配置
   cp "$SCRIPT_DIR/bundle/setup-mirrors.sh"          "$STAGE/"
   cp "$SCRIPT_DIR/bundle/docker/install-docker.sh"  "$STAGE/docker/"
+  cp "$REPO_ROOT/deployments/docker/docker-network-lib.sh" "$STAGE/docker/docker-network-lib.sh"
   if ls "$DOCKER_CACHE/$ARCH"/docker-*.tgz >/dev/null 2>&1; then
     cp "$DOCKER_CACHE/$ARCH"/docker-*.tgz "$STAGE/docker/"
     DOCKER_IN_PKG="${DOCKER_VERSION:-未知}"

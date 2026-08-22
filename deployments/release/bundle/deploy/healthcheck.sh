@@ -68,6 +68,22 @@ health_text() {
 DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-omcgo}"
 SKIP_MONITORING=0
+if [ -f "$DEPLOY_DIR/docker-network-lib.sh" ]; then
+  . "$DEPLOY_DIR/docker-network-lib.sh"
+elif [ -f "$DEPLOY_DIR/../../../docker/docker-network-lib.sh" ]; then
+  . "$DEPLOY_DIR/../../../docker/docker-network-lib.sh"
+else
+  echo "  [FAIL] 缺 docker-network-lib.sh，无法按 DOCKER_BIP 规划 Docker 网段" >&2
+  exit 1
+fi
+if ! docker_network_resolve_bip "$DEPLOY_DIR/.env"; then
+  echo "  [FAIL] 未找到 DOCKER_BIP；请在 $DEPLOY_DIR/.env 中配置客户规划网段，或通过环境变量传入" >&2
+  exit 1
+fi
+docker_network_plan || {
+  echo "  [FAIL] DOCKER_BIP 无效或无法派生 Docker 网段：${DOCKER_BIP:-<空>}" >&2
+  exit 1
+}
 if [ -f "$DEPLOY_DIR/monitoring-profile-lib.sh" ]; then
   . "$DEPLOY_DIR/monitoring-profile-lib.sh"
 else

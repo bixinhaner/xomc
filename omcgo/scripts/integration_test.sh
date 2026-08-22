@@ -24,7 +24,7 @@ set -euo pipefail
 
 # --- Configuration -----------------------------------------------------------
 
-COMPOSE_FILE="../deployments/docker/docker-compose.test.yml"
+NETWORK_LIB="../deployments/docker/docker-network-lib.sh"
 COMPOSE_PROJECT="omcgo-test"
 
 DB_DSN="postgres://omcgo_test:omcgo_test@localhost:5433/omcgo_test?sslmode=disable"
@@ -77,6 +77,22 @@ cd_to_project_root() {
 cd_to_project_root
 log "Working directory: $(pwd)"
 
+[ -f "$NETWORK_LIB" ] || {
+    err "Missing Docker network planning library: $NETWORK_LIB"
+    exit 1
+}
+. "$NETWORK_LIB"
+if ! docker_network_resolve_bip "${DOCKER_NETWORK_ENV_FILE:-../.env}"; then
+    err "DOCKER_BIP is required; configure the customer-planned network in ../.env or pass it in the environment"
+    exit 1
+fi
+docker_network_plan || {
+    err "Invalid DOCKER_BIP or unable to derive Docker network plan: ${DOCKER_BIP:-<empty>}"
+    exit 1
+}
+NETWORK_WRAPPER="../deployments/docker/dc-test.sh"
+export OMC_TEST_PROJECT="$COMPOSE_PROJECT"
+
 # Track test exit code for cleanup
 TEST_EXIT_CODE=0
 
@@ -84,18 +100,18 @@ TEST_EXIT_CODE=0
 cleanup() {
     if [[ -n "$KEEP_RUNNING" ]]; then
         log "Keeping containers running (-k flag). Stop with:"
-        log "  docker compose -p $COMPOSE_PROJECT -f $COMPOSE_FILE down -v"
+        log "  $NETWORK_WRAPPER down -v"
     else
         log "Tearing down test containers..."
-        docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down -v 2>/dev/null || true
+        "$NETWORK_WRAPPER" down -v 2>/dev/null || true
     fi
 }
 trap cleanup EXIT
 
 # Step 1: Start containers
 log "Starting test infrastructure..."
-docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down -v 2>/dev/null || true
-docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d --wait --wait-timeout "$MAX_WAIT_SECONDS"
+"$NETWORK_WRAPPER" down -v 2>/dev/null || true
+"$NETWORK_WRAPPER" up -d --wait --wait-timeout "$MAX_WAIT_SECONDS"
 log "All containers healthy."
 
 # Step 2: Enable TimescaleDB extension
@@ -103,7 +119,7 @@ log "Enabling TimescaleDB extension..."
 PGPASSWORD=omcgo_test psql -h localhost -p 5433 -U omcgo_test -d omcgo_test \
     -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;" 2>/dev/null || {
     # If psql is not available locally, use docker exec
-    docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" exec -T postgres-test \
+    "$NETWORK_WRAPPER" exec -T postgres-test \
         psql -U omcgo_test -d omcgo_test \
         -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
 }

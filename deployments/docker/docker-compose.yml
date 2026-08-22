@@ -384,6 +384,7 @@ services:
       # 缺省空串：GOMEMLIMIT 关闭、GOMAXPROCS 由 Go 从 cgroup 推断 —— 与改造前行为一致。
       GOMEMLIMIT: "${ACS_GOMEMLIMIT:-}"
       GOMAXPROCS: "${ACS_GOMAXPROCS:-}"
+      DOCKER_COMPOSE_SUBNET: "${DOCKER_COMPOSE_SUBNET:?DOCKER_BIP plan is required}"
       POSTGRES_DATA_PATH: "${POSTGRES_DATA_PATH:-}"
       TSDB_DATA_PATH: "${TSDB_DATA_PATH:-}"
       REDIS_DATA_PATH: "${REDIS_DATA_PATH:-}"
@@ -1059,11 +1060,7 @@ networks:
     ipam:
       driver: default
       config:
-        # 网段规划(2026-06-02 调整,与生产 release 包对齐):
-        # 公司内网约定 Docker 网络一律落在 173.x,避开公司 172.x 内网(172.17/
-        # 172.24… 仍在扩张;此前自动分配的 172.19/172.28 都属于会撞内网的高危段)。
-        # 本(dev)网络锁 173.18.0.0/16,与生产 omcgo-net 同段。
-        # 注意:docker0 默认网桥仍由宿主 daemon.json 的 bip 控制(应为 173.17.0.1/16),
-        # compose 改这里管不到 docker0 —— 宿主需另跑 install-docker.sh 或手改 daemon.json。
-        - subnet: 173.18.0.0/16
-          gateway: 173.18.0.1
+        # 子网由 DOCKER_BIP 规划库派生；请使用 deployments/docker/dc.sh 启动，
+        # 或先导出 DOCKER_COMPOSE_SUBNET / DOCKER_COMPOSE_GATEWAY。
+        - subnet: "${DOCKER_COMPOSE_SUBNET:?DOCKER_BIP plan is required}"
+          gateway: "${DOCKER_COMPOSE_GATEWAY:?DOCKER_BIP plan is required}"

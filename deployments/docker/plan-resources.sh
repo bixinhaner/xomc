@@ -32,7 +32,7 @@
 #   bash deployments/docker/dc.sh up -d           # wrapper 自动带 --env-file，首次自动规划
 #   # 或手工：docker compose -f deployments/docker/docker-compose.yml \
 #   #           --env-file deployments/docker/resources.env up -d
-#   不传 env-file 时 compose 取 ${VAR:-默认}，行为与改造前完全一致。
+#   网络变量没有默认回退：必须先由 dc.sh 按 DOCKER_BIP 规划，再启动 Compose。
 #
 # 用法：
 #   ./plan-resources.sh                  # 探测 + 计算 + 写 resources.env

@@ -71,9 +71,10 @@ prepare_package() {
   local pkg="$1"
   mkdir -p "$pkg/deploy" "$pkg/etc" "$pkg/images" "$pkg/license/keystore"
   cp -a "$SCRIPT_DIR/." "$pkg/deploy/"
+  cp "$SCRIPT_DIR/../../../docker/docker-network-lib.sh" "$pkg/deploy/docker-network-lib.sh"
   cp "$SCRIPT_DIR/../../../../license-run-time/keystore/omcPublicKey.store" \
     "$pkg/license/keystore/omcPublicKey.store"
-  printf 'OMC_PUBLIC_HOST=10.0.0.1\n' >"$pkg/deploy/.env"
+  printf 'OMC_PUBLIC_HOST=10.0.0.1\nDOCKER_BIP=10.240.0.1/16\n' >"$pkg/deploy/.env"
   : >"$pkg/deploy/docker-compose.infra.yml"
   : >"$pkg/deploy/docker-compose.app.yml"
   cat >"$pkg/etc/worker.prod.yaml" <<'EOF'
@@ -119,9 +120,9 @@ EOF
 write_docker_daemon_json() {
   cat >"$1" <<'EOF'
 {
-  "bip": "173.17.0.1/16",
+  "bip": "10.240.0.1/16",
   "default-address-pools": [
-    {"base": "173.19.0.0/16", "size": 24}
+    {"base": "10.242.0.0/16", "size": 24}
   ]
 }
 EOF
@@ -298,6 +299,7 @@ mkdir -p "$SVC_DIR"
 for file in svc.sh storage-paths-lib.sh resource-env-lib.sh resource-plan-metrics.sh monitoring-profile-lib.sh gpv-handoff-lib.sh; do
   cp "$SCRIPT_DIR/$file" "$SVC_DIR/$file"
 done
+cp "$SCRIPT_DIR/../../../docker/docker-network-lib.sh" "$SVC_DIR/docker-network-lib.sh"
 : >"$SVC_DIR/docker-compose.app.yml"
 cat >"$SVC_DIR/.env" <<EOF
 OMCGO_SKIP_MONITORING=1

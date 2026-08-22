@@ -82,44 +82,48 @@ docker compose version
 ```bash
 # 在项目根目录 goomc/ 下执行
 
-# 1. 构建所有镜像并后台启动
-docker compose -f deployments/docker/docker-compose.yml up -d --build
+# 1. 规划网段、构建所有镜像并后台启动
+DOCKER_BIP=10.240.0.1/16 bash deployments/docker/dc.sh up -d --build
+
+# 如需后续命令不再重复传参，请把同一个客户规划值写入项目根 .env：
+# DOCKER_BIP=10.240.0.1/16
 
 # 2. 查看启动状态
-docker compose -f deployments/docker/docker-compose.yml ps
+bash deployments/docker/dc.sh ps
 
 # 3. 查看实时日志（所有服务）
-docker compose -f deployments/docker/docker-compose.yml logs -f
+bash deployments/docker/dc.sh logs -f
 ```
 
 ### 4.2 日常启动（跳过构建）
 
 ```bash
-docker compose -f deployments/docker/docker-compose.yml up -d
+# 项目根 .env 已配置 DOCKER_BIP 后执行
+bash deployments/docker/dc.sh up -d
 ```
 
 ### 4.3 停止服务
 
 ```bash
 # 停止但保留数据卷
-docker compose -f deployments/docker/docker-compose.yml down
+bash deployments/docker/dc.sh down
 
 # 停止并删除所有数据卷（彻底清除数据）
-docker compose -f deployments/docker/docker-compose.yml down -v
+bash deployments/docker/dc.sh down -v
 ```
 
 ### 4.4 重启单个服务
 
 ```bash
 # 仅重启容器（不重新编译，适用于配置文件变更）
-docker compose -f deployments/docker/docker-compose.yml restart app
+bash deployments/docker/dc.sh restart app
 ```
 
 ### 4.5 重新编译并重启
 
 ```bash
 # 重新构建镜像（触发 Go 编译）并用新镜像替换旧容器
-docker compose -f deployments/docker/docker-compose.yml up -d --build app
+bash deployments/docker/dc.sh up -d --build app
 ```
 
 > **注意**：`restart` 只是停止并重启已有容器，不会重新编译代码。修改了 Go 源码或前端代码后，必须使用 `up -d --build` 才能生效。
@@ -131,6 +135,9 @@ docker compose -f deployments/docker/docker-compose.yml up -d --build app
 如果部署环境明确需要 `web` 直接绑定宿主网络，可叠加本地覆盖文件：
 
 ```bash
+source deployments/docker/docker-network-lib.sh
+DOCKER_BIP=10.240.0.1/16
+docker_network_plan
 docker compose -f deployments/docker/docker-compose.yml -f deployments/docker/docker-compose.local.yml up -d --build web
 ```
 

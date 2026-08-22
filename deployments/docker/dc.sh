@@ -27,6 +27,21 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 RES_ENV="$SCRIPT_DIR/resources.env"
 PROJECT="${OMC_PROJECT:-omc}"
 
+if [ -f "$SCRIPT_DIR/docker-network-lib.sh" ]; then
+  . "$SCRIPT_DIR/docker-network-lib.sh"
+else
+  echo "[dc] 缺少 Docker 网段规划库：$SCRIPT_DIR/docker-network-lib.sh" >&2
+  exit 1
+fi
+if ! docker_network_resolve_bip "${DOCKER_NETWORK_ENV_FILE:-$REPO_ROOT/.env}"; then
+  echo "[dc] 未找到 DOCKER_BIP；请在 $REPO_ROOT/.env 中配置客户规划网段，或通过环境变量传入" >&2
+  exit 1
+fi
+docker_network_plan || {
+  echo "[dc] DOCKER_BIP 无效或无法派生 Docker 网段：${DOCKER_BIP:-<空>}" >&2
+  exit 1
+}
+
 REPLAN=0
 if [ "${1:-}" = "--replan" ]; then REPLAN=1; shift; fi
 

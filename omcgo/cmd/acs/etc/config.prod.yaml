@@ -13,7 +13,7 @@ server:
   max_request_body_size: 52428800   # 50MB
   # HTTP 头部上限（bytes）。0=默认 1MB。
   max_header_bytes: 1048576         # 1MB
-  trusted_proxy_cidrs: ["173.18.0.0/16"] # bundled Web ACS gateway network
+  trusted_proxy_cidrs: ["${DOCKER_COMPOSE_SUBNET}"] # bundled Web ACS gateway network, derived from DOCKER_BIP
 
 session:
   timeout: 5m

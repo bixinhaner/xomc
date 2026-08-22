@@ -227,6 +227,7 @@ func TestBackpressureConfigDefaults(t *testing.T) {
 }
 
 func TestACSDeploymentBackpressureFallbacksMatchDefaults(t *testing.T) {
+	t.Setenv("DOCKER_COMPOSE_SUBNET", "192.0.2.0/24")
 	defaults := (BackpressureConfig{}).Defaults()
 	for _, path := range []string{
 		"../../../cmd/acs/etc/config.dev.yaml",

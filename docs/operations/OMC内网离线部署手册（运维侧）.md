@@ -355,49 +355,56 @@ docker compose version        # 确认 compose v2 插件就位
 并改 `data-root` / containerd `--root`）；输入 `n` 继续走默认 `/var/lib`；非交互模式
 （被 deploy.sh 调起）自动按 Y 切换。装完用 `docker info | grep -E 'Docker Root Dir|Containerd'` 复核。
 
-#### 2.3 Docker 网段规划（**必看**：避开公司 172.x 内网）
+#### 2.3 Docker 网段规划（**必看**：唯一输入为客户规划的 DOCKER_BIP）
 
-公司内网大量使用 `172.x`（如 `172.17`、`172.24`，且在持续扩张）。Docker **默认**把
-`docker0` 放 `172.17.0.0/16`、自动网络放 `172.18+`，会与公司内网**撞段** —— 宿主把
-`172.17.0.0/16` 路由进 `docker0`，**公司 172.17 网段的电脑访问不了本机服务**（回程被
-docker0 劫持，请求能到但回包回不去）。
+Docker 网桥地址不能使用固定的公司示例网段。客户应根据实际业务地址、路由和安全策略
+规划唯一输入 `DOCKER_BIP`；生产安装不会在未配置时自动选择网段，必须先完成客户侧规划。
+客户可以规划其它不冲突的 IPv4 网段。为避免再次与公司内网冲突，当前实现拒绝整个
+`172.0.0.0/8`。
 
-`install-docker.sh` 已把 Docker 全部网络迁到公司约定的 **`173.x`** 段（互不重叠、整体避开 172）：
+规划库按 `DOCKER_BIP` 所在网络块连续派生其它 Docker 网络：
 
-| 用途 | 网段 | 配置位置 |
-|------|------|---------|
-| `docker0`（`bip`） | `173.17.0.0/16` | `install-docker.sh` 写 `/etc/docker/daemon.json` |
-| `omcgo-net`（业务网，固定） | `173.18.0.0/16` | `deploy/docker-compose.infra.yml` |
-| 自动/未来网络（池） | `173.19.0.0/16` | `daemon.json` `default-address-pools` |
+| 用途 | 派生规则 | 配置位置 |
+|------|---------|---------|
+| `docker0`（`bip`） | `DOCKER_BIP` 所在网络块 | `/etc/docker/daemon.json` 的 `bip` |
+| `omcgo-net`（业务网） | 下一个同等大小的网络块 | `DOCKER_COMPOSE_SUBNET` |
+| 自动/未来网络（池） | 再下一个同等大小的网络块，每个网络至少 `/24` | `default-address-pools` |
+| 测试网络 | 再下一个同等大小的网络块 | `DOCKER_TEST_SUBNET` |
+| 迁移基线网络 | 再下一个同等大小的网络块 | `DOCKER_MIGRATION_SUBNET` |
 
-- **全新装机**：跑 `install-docker.sh` 即自动写好,无需额外操作。
-- **换段**：改 `install-docker.sh` 顶部 `DOCKER_BIP`/`DOCKER_ADDR_POOL_BASE`（或同名环境变量
-  覆盖）+ `infra.yml` 的 `omcgo-net.ipam`；三段保持不重叠且避开公司在用段。
-- **目标机已装 Docker（不会自动套用）**：手动改 `daemon.json` 后重启,见下方排障。
+例如规划 `10.240.0.1/16`：`docker0=10.240.0.0/16`、业务网为 `10.241.0.0/16`、
+自动地址池为 `10.242.0.0/16`、测试网为 `10.243.0.0/16`、迁移基线网为
+`10.244.0.0/16`。
 
-校验：`ip route` 里 `172.17` **不应**再指向 `docker0`，且 `docker0` 应为 `173.17.x`。
+交付包部署前只需在 `deploy/.env` 填写：
 
-> 🔧 **排障 —— 公司 172.17 网段电脑打不开本系统**
-> 现象:其它网段(如 172.24)能访问,唯独 172.17 段电脑超时。
-> 根因:`docker0` 占了 `172.17.0.0/16`，回程路由被劫持。
-> 处理(已装 Docker 的机器)：
-> ```bash
-> sudo cp /etc/docker/daemon.json /etc/docker/daemon.json.bak 2>/dev/null
-> sudo python3 - <<'PY'
-> import json,os
-> p="/etc/docker/daemon.json"; d={}
-> if os.path.exists(p) and os.path.getsize(p):
->     try: d=json.load(open(p))
->     except: d={}
-> d["bip"]="173.17.0.1/16"
-> d["default-address-pools"]=[{"base":"173.19.0.0/16","size":24}]
-> json.dump(d,open(p,"w"),indent=2,ensure_ascii=False); open(p,"a").write("\n")
-> PY
-> cd /opt/omc/releases/current/deploy && docker compose -p omcgo down   # 释放旧 172.x 网络
-> sudo systemctl restart docker            # docker0 重建到 173.17
-> docker network prune -f                  # 清残留 172.x 旧网桥
-> # 重新起栈见步骤 5；回滚:还原 daemon.json.bak 后重启 docker
-> ```
+```bash
+DOCKER_BIP=10.240.0.1/16
+```
+
+安装脚本会计算并持久化所有派生变量，后续 Compose、`svc.sh`、`healthcheck.sh` 和
+密码轮换操作均复用这份规划。不要手工填写派生变量，也不要直接覆盖
+`/etc/docker/daemon.json` 丢失 `bip` 或 `default-address-pools`。
+
+已装 Docker 修改规划时：
+
+```bash
+export DOCKER_BIP=10.240.0.1/16
+cd /opt/omc/infra/docker
+sudo -E bash install-docker.sh --skip-if-installed --no-mirror
+```
+
+修改前应停止使用旧网段的容器。`--fresh-install` 会删除无容器的规划外网络；仍有容器
+挂载的规划外网络必须先人工处理。校验：
+
+```bash
+cat /etc/docker/daemon.json
+ip -4 route
+docker network ls -q | xargs -r docker network inspect --format '{{.Name}} {{range .IPAM.Config}}{{.Subnet}} {{end}}'
+```
+
+所有 Docker bridge 都必须属于当前 `DOCKER_BIP` 派生计划；只修改 Compose 文件不会改变
+已经存在的 Docker 网络。
 
 ### 步骤 3 — 导入 Docker 镜像
 

@@ -162,6 +162,13 @@ if [ -f "$DEPLOY_DIR/redis-cutover-lib.sh" ]; then
 else
   die "缺 $DEPLOY_DIR/redis-cutover-lib.sh（旧单 Redis 安全切换库）" "Missing $DEPLOY_DIR/redis-cutover-lib.sh (legacy single-Redis cutover library)." 1
 fi
+if [ -f "$DEPLOY_DIR/docker-network-lib.sh" ]; then
+  . "$DEPLOY_DIR/docker-network-lib.sh"
+elif [ -f "$DEPLOY_DIR/../../../docker/docker-network-lib.sh" ]; then
+  . "$DEPLOY_DIR/../../../docker/docker-network-lib.sh"
+else
+  die "缺 docker-network-lib.sh；无法按 DOCKER_BIP 规划 Docker 网段" "Missing docker-network-lib.sh; cannot plan Docker networks from DOCKER_BIP" 1
+fi
 
 # 升级时 deploy/.env 里【运维自定义】的键 —— 跨版本继承,不被新包默认值覆盖。
 # 注：6 个密钥键虽仍在此列（升级时把上一版有效凭证带进新 .env，供 ensure_secrets 首迁导入），
@@ -170,7 +177,7 @@ fi
 # 【版本相关】键(PROJECT_VERSION / IMAGE_*)不在此列,始终用新包值。
 # 注：POSTGRES_TSDB_USER/PASSWORD/DB（时序库凭据，#347）跨版本继承；TSDB_HOST 是 compose 服务名
 # （随包固定值），故【不】列入继承白名单，始终用新包值。
-ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_TSDB_USER POSTGRES_TSDB_PASSWORD POSTGRES_TSDB_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH OMCGO_DOCKER_ROOT_DIR OMCGO_DOCKER_VOLUME_PREFIX OMCGO_HOST_LOGS_PATH OMCGO_HOST_DATA_PATH DOCKER_LOG_MAX_SIZE DOCKER_LOG_MAX_FILE PM_AGGREGATION_FINALIZE_CONCURRENCY GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH GPV_RPC_DURABLE GPV_RPC_SOURCE_CONSUMER GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH GPV_ACK_WAIT GPV_MAX_DELIVER GPV_MAX_ACK_PENDING"
+ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_TSDB_USER POSTGRES_TSDB_PASSWORD POSTGRES_TSDB_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST DOCKER_BIP POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH OMCGO_DOCKER_ROOT_DIR OMCGO_DOCKER_VOLUME_PREFIX OMCGO_HOST_LOGS_PATH OMCGO_HOST_DATA_PATH DOCKER_LOG_MAX_SIZE DOCKER_LOG_MAX_FILE PM_AGGREGATION_FINALIZE_CONCURRENCY GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH GPV_RPC_DURABLE GPV_RPC_SOURCE_CONSUMER GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH GPV_ACK_WAIT GPV_MAX_DELIVER GPV_MAX_ACK_PENDING"
 
 # merge_env_preserve <prev_env> <new_env>
 # 升级继承:以新包 .env 为基底(拿到新镜像 tag),把上一版 .env 中白名单键的值
@@ -231,9 +238,7 @@ PUBLIC_HOST_OVERRIDE="${OMC_PUBLIC_HOST:-}"
 INFRA_DIR="/opt/omc/infra"
 OMC_ROOT="/opt/omc"
 COMPOSE_PROJECT="omcgo"
-DOCKER_BIP="${DOCKER_BIP:-173.17.0.1/16}"
-DOCKER_ADDR_POOL_BASE="${DOCKER_ADDR_POOL_BASE:-173.19.0.0/16}"
-DOCKER_ADDR_POOL_SIZE="${DOCKER_ADDR_POOL_SIZE:-24}"
+DOCKER_BIP="${DOCKER_BIP:-}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -271,6 +276,16 @@ esac
 
 [ "$(id -u)" = 0 ] || die "请以 root 执行（sudo bash $0 ...）" "Run as root (sudo bash $0 ...)." 1
 
+if ! docker_network_resolve_bip "$PKG_ROOT/deploy/.env" "$OMC_ROOT/current/deploy/.env"; then
+  die "未找到 DOCKER_BIP；请在 deploy/.env 中填写客户规划的 Docker 网桥网段" "DOCKER_BIP is required; set the customer-planned Docker bridge network in deploy/.env" 1
+fi
+docker_network_plan ||
+  die "DOCKER_BIP 无效或无法派生 Docker 网段：${DOCKER_BIP:-<空>}" "DOCKER_BIP is invalid or its Docker network plan cannot be derived: ${DOCKER_BIP:-<empty>}" 1
+if [ "$CHECK_ONLY" = 0 ] && [ -f "$PKG_ROOT/deploy/.env" ]; then
+  docker_network_write_env_file "$PKG_ROOT/deploy/.env" ||
+    die "无法把 DOCKER_BIP 派生的 Docker 网段写入 $PKG_ROOT/deploy/.env" "Unable to write the Docker network plan derived from DOCKER_BIP into $PKG_ROOT/deploy/.env" 1
+fi
+
 confirm() {
   [ "$ASSUME_YES" = 1 ] && return 0
   local yn prompt
@@ -280,60 +295,18 @@ confirm() {
 }
 
 validate_docker_network_policy() {
-  command -v python3 >/dev/null 2>&1 ||
-    die "Docker 网段策略需要 python3 校验；禁止在无法校验时继续" "Docker network policy validation requires python3; refusing to continue without it" 1
-  python3 - "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" <<'PYEOF'
-import ipaddress
-import sys
-
-bip_value, pool_value, pool_size_value = sys.argv[1:]
-try:
-    bip_network = ipaddress.ip_interface(bip_value).network
-    pool_network = ipaddress.ip_network(pool_value, strict=False)
-    pool_size = int(pool_size_value)
-except (ValueError, TypeError) as exc:
-    raise SystemExit(f"invalid Docker network policy: {exc}")
-
-docker_range = ipaddress.ip_network("173.0.0.0/8")
-compose_network = ipaddress.ip_network("173.18.0.0/16")
-if not bip_network.subnet_of(docker_range):
-    raise SystemExit(f"Docker bip must be inside 173.0.0.0/8: {bip_value}")
-if not pool_network.subnet_of(docker_range):
-    raise SystemExit(f"Docker address pool must be inside 173.0.0.0/8: {pool_value}")
-if not 1 <= pool_size <= 32 or pool_size < pool_network.prefixlen:
-    raise SystemExit(f"invalid Docker address pool size: {pool_size_value}")
-if bip_network.overlaps(compose_network) or pool_network.overlaps(compose_network):
-    raise SystemExit("Docker bip/address pool overlaps the fixed 173.18.0.0/16 Compose network")
-if bip_network.overlaps(pool_network):
-    raise SystemExit("Docker bip overlaps the Docker automatic address pool")
-PYEOF
+  docker_network_plan
 }
 
 docker_network_policy_precheck() {
   local daemon_json="${DOCKER_DAEMON_JSON:-/etc/docker/daemon.json}"
   local network_state="" current_bip="" current_pool_base="" current_pool_size=""
-  local network_id network_name subnet
-  local -a forbidden_networks=()
 
   validate_docker_network_policy ||
-    die "Docker 网段策略非法：bip=${DOCKER_BIP}，地址池=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}；必须使用互不重叠的 173.x 网段" "Invalid Docker network policy: bip=${DOCKER_BIP}, pool=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}; non-overlapping 173.x networks are required" 1
+    die "Docker 网段策略非法：请检查用户规划的 DOCKER_BIP=${DOCKER_BIP:-<空>}" "Invalid Docker network policy; check the operator-planned DOCKER_BIP=${DOCKER_BIP:-<empty>}" 1
 
   if [ -s "$daemon_json" ]; then
-    network_state="$(python3 - "$daemon_json" <<'PYEOF'
-import json
-import sys
-
-try:
-    with open(sys.argv[1], encoding="utf-8") as handle:
-        data = json.load(handle)
-except (OSError, json.JSONDecodeError):
-    data = {}
-
-pools = data.get("default-address-pools")
-pool = pools[0] if isinstance(pools, list) and pools and isinstance(pools[0], dict) else {}
-print(f"{data.get('bip', '')}\t{pool.get('base', '')}\t{pool.get('size', '')}")
-PYEOF
-    )" || network_state=""
+    network_state="$(docker_network_read_daemon_state "$daemon_json" 2>/dev/null || true)"
     IFS=$'\t' read -r current_bip current_pool_base current_pool_size <<< "$network_state"
   fi
 
@@ -341,11 +314,11 @@ PYEOF
      [ "$current_pool_base" != "$DOCKER_ADDR_POOL_BASE" ] ||
      [ "$current_pool_size" != "$DOCKER_ADDR_POOL_SIZE" ]; then
     if [ "$CHECK_ONLY" = 1 ]; then
-      die "Docker 网段未锁定为 173.x：当前 bip=${current_bip:-<空>}，地址池=${current_pool_base:-<空>}/${current_pool_size:-<空>}；期望 bip=${DOCKER_BIP}，地址池=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}" "Docker networks are not locked to 173.x: current bip=${current_bip:-<empty>}, pool=${current_pool_base:-<empty>}/${current_pool_size:-<empty>}; expected bip=${DOCKER_BIP}, pool=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}" 1
+      die "Docker 网段未按 DOCKER_BIP 规划：当前 bip=${current_bip:-<空>}，地址池=${current_pool_base:-<空>}/${current_pool_size:-<空>}；期望 bip=${DOCKER_BIP}，地址池=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}" "Docker networks do not match the DOCKER_BIP plan: current bip=${current_bip:-<empty>}, pool=${current_pool_base:-<empty>}/${current_pool_size:-<empty>}; expected bip=${DOCKER_BIP}, pool=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}" 1
     fi
     [ -f "$INFRA_DIR/docker/install-docker.sh" ] ||
       die "Docker 网段未锁定且缺少修复脚本：$INFRA_DIR/docker/install-docker.sh；禁止继续启动容器" "Docker networks are not locked and the repair script is missing: $INFRA_DIR/docker/install-docker.sh; refusing to start containers" 1
-    log "Docker 网段未锁定，调用基础设施包修复为 173.x：bip=${DOCKER_BIP}，地址池=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}" "Docker networks are not locked; repairing them through the infrastructure bundle: bip=${DOCKER_BIP}, pool=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}"
+    log "Docker 网段未按 DOCKER_BIP 锁定，调用基础设施包修复：bip=${DOCKER_BIP}，Compose=${DOCKER_COMPOSE_SUBNET}，地址池=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}" "Docker networks do not match DOCKER_BIP; repairing through the infrastructure bundle: bip=${DOCKER_BIP}, Compose=${DOCKER_COMPOSE_SUBNET}, pool=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}"
     DOCKER_BIP="$DOCKER_BIP" \
     DOCKER_ADDR_POOL_BASE="$DOCKER_ADDR_POOL_BASE" \
     DOCKER_ADDR_POOL_SIZE="$DOCKER_ADDR_POOL_SIZE" \
@@ -353,29 +326,14 @@ PYEOF
       die "Docker 网段修复失败；禁止继续启动容器" "Docker network repair failed; refusing to start containers" 1
   fi
 
-  while IFS= read -r network_id; do
-    [ -n "$network_id" ] || continue
-    network_name="$(docker network inspect "$network_id" --format '{{.Name}}' 2>/dev/null || echo "$network_id")"
-    while IFS= read -r subnet; do
-      [ -n "$subnet" ] || continue
-      if ! python3 - "$subnet" <<'PYEOF'
-import ipaddress
-import sys
+  if [ "$CHECK_ONLY" = 0 ]; then
+    cleanup_empty_unplanned_docker_networks
+  fi
 
-try:
-    network = ipaddress.ip_network(sys.argv[1], strict=False)
-except ValueError:
-    raise SystemExit(1)
-raise SystemExit(0 if not network.overlaps(ipaddress.ip_network("172.0.0.0/8")) else 1)
-PYEOF
-      then
-        forbidden_networks+=("${network_name}:${subnet}")
-      fi
-    done < <(docker network inspect "$network_id" --format '{{range .IPAM.Config}}{{.Subnet}}{{"\n"}}{{end}}' 2>/dev/null || true)
-  done < <(docker network ls -q 2>/dev/null || true)
-
-  [ "${#forbidden_networks[@]}" -eq 0 ] ||
-    die "检测到 Docker 172.x 网络：${forbidden_networks[*]}；请先停止并删除旧 bridge 网络后重试，禁止带 172.x 路由启动" "Docker 172.x networks detected: ${forbidden_networks[*]}; stop and remove the old bridge networks before retrying, refusing to start with 172.x routes" 1
+  local unplanned_networks
+  unplanned_networks="$(docker_network_unplanned_networks || true)"
+  [ -z "$unplanned_networks" ] ||
+    die "检测到未纳入 DOCKER_BIP 规划的 Docker 网络：${unplanned_networks}；请先停止并删除，或重新规划 DOCKER_BIP" "Docker networks outside the DOCKER_BIP plan were detected: ${unplanned_networks}; stop and remove them, or re-plan DOCKER_BIP" 1
 }
 
 set_env_value() { # set_env_value <file> <key> <value>
@@ -510,33 +468,13 @@ install_nginx_https_cert() {
   log "已安装 nginx HTTPS 文件入口证书：$dst_cert / $dst_key" "Installed nginx HTTPS file-entry certificate: $dst_cert / $dst_key"
 }
 
-cleanup_empty_legacy_docker_networks() {
-  local network_id network_name subnet legacy_subnet container_count
-
-  while IFS= read -r network_id; do
-    [ -n "$network_id" ] || continue
-    network_name="$(docker network inspect "$network_id" --format '{{.Name}}' 2>/dev/null || echo "$network_id")"
-    case "$network_name" in
-      bridge|host|none) continue ;;
-    esac
-
-    legacy_subnet=""
-    while IFS= read -r subnet; do
-      case "$subnet" in
-        172.*) legacy_subnet="$subnet"; break ;;
-      esac
-    done < <(docker network inspect "$network_id" --format '{{range .IPAM.Config}}{{.Subnet}}{{"\n"}}{{end}}' 2>/dev/null || true)
-    [ -n "$legacy_subnet" ] || continue
-
-    container_count="$(docker network inspect "$network_id" --format '{{len .Containers}}' 2>/dev/null || echo 1)"
-    if [ "$container_count" = 0 ]; then
-      log "全新安装：删除无容器的历史 Docker 172.x 网络：${network_name} (${legacy_subnet})" "Fresh install: removing unused legacy Docker 172.x network: ${network_name} (${legacy_subnet})"
-      docker network rm "$network_id" >/dev/null 2>&1 ||
-        warn "删除历史 Docker 网络失败：${network_name}；后续网段门禁将阻止启动" "Failed to remove legacy Docker network: ${network_name}; the network policy gate will block startup"
-    else
-      warn "历史 Docker 172.x 网络仍有 ${container_count} 个容器挂载：${network_name} (${legacy_subnet})；停止相关容器后重试" "Legacy Docker 172.x network still has ${container_count} attached container(s): ${network_name} (${legacy_subnet}); stop those containers and retry"
-    fi
-  done < <(docker network ls -q 2>/dev/null || true)
+cleanup_empty_unplanned_docker_networks() {
+  local removed_networks network_name subnet
+  removed_networks="$(docker_network_cleanup_unplanned_networks || true)"
+  while IFS=$'\t' read -r network_name subnet; do
+    [ -n "$network_name" ] || continue
+    log "清理无容器的规划外 Docker 网络：${network_name} (${subnet})" "Removed unused Docker network outside the plan: ${network_name} (${subnet})"
+  done <<< "$removed_networks"
 }
 
 fresh_install_reset() {
@@ -562,7 +500,7 @@ fresh_install_reset() {
     ( cd "$old_deploy" && docker compose -p "$COMPOSE_PROJECT" "${old_env_args[@]}" \
         "${old_compose_files[@]}" down --remove-orphans ) || warn "旧 OMC 栈停止返回非零，继续执行数据清理" "Stopping the existing OMC stack returned a non-zero status; continuing data cleanup"
   fi
-  cleanup_empty_legacy_docker_networks
+  cleanup_empty_unplanned_docker_networks
 
   [ -n "$PUBLIC_HOST_OVERRIDE" ] ||
     PUBLIC_HOST_OVERRIDE="$(deploy_env_file_value OMC_PUBLIC_HOST "$package_env" 2>/dev/null || true)"
@@ -978,6 +916,11 @@ fi
 merge_env_preserve "$PREV_ENV_SNAPSHOT" "$RELEASE_DIR/deploy/.env"
 [ -n "$PREV_ENV_SNAPSHOT" ] && rm -f "$PREV_ENV_SNAPSHOT" 2>/dev/null || true
 
+docker_network_plan ||
+  die "DOCKER_BIP 无效或无法重新计算 Docker 网段：${DOCKER_BIP:-<空>}" "DOCKER_BIP is invalid or its Docker network plan cannot be recalculated: ${DOCKER_BIP:-<empty>}" 1
+docker_network_write_env_file "$RELEASE_DIR/deploy/.env" ||
+  die "无法把 DOCKER_BIP 派生的 Docker 网段写入 $RELEASE_DIR/deploy/.env" "Unable to write the Docker network plan derived from DOCKER_BIP into $RELEASE_DIR/deploy/.env" 1
+
 # 资源限额 resources.env 整文件继承到新 release(交付包不含此文件,故仅在上一版存在时拷入)。
 if [ -n "$PREV_RESOURCES_SNAPSHOT" ] && [ ! -f "$RELEASE_DIR/deploy/resources.env" ]; then
   cp "$PREV_RESOURCES_SNAPSHOT" "$RELEASE_DIR/deploy/resources.env" 2>/dev/null ||
@@ -1131,7 +1074,8 @@ else
     fi
     upgrade_acs_trusted_proxy_cidrs \
       "$OMC_ROOT/etc/acs.prod.yaml" \
-      "$RELEASE_DIR/etc/acs.prod.yaml" ||
+      "$RELEASE_DIR/etc/acs.prod.yaml" \
+      "$DOCKER_COMPOSE_SUBNET" ||
       die "acs.prod.yaml 缺少可信 ACS 网关配置且自动补齐失败；未切换 current" "acs.prod.yaml is missing the trusted ACS gateway configuration and automatic completion failed; current was not switched" 1
     for service_config in acs.prod.yaml app.prod.yaml worker.prod.yaml; do
       if upgrade_prod_database_dsns \
