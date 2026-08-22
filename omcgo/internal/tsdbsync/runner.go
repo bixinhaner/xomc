@@ -25,12 +25,23 @@ import (
 // DefaultInterval 是影子维度表默认同步周期。
 const DefaultInterval = 60 * time.Second
 
+// DefaultCellBandInterval 是 cell_band_dim 从 device_parameters 派生的最小间隔。
+// 这条派生查询读取参数大表，且小区号/band 不是分钟级高频变化字段，因此不能跟普通维表同频跑。
+const DefaultCellBandInterval = 10 * time.Minute
+
+// DefaultCellBandQueryTimeout 防止参数大表派生查询退化成长事务。
+const DefaultCellBandQueryTimeout = 2 * time.Minute
+
 // SyncRunner 周期性把主库维度表全量刷入时序库影子表。
 type SyncRunner struct {
 	src      *pgxpool.Pool // 主库 PgPool（维度真值源）
 	dst      *pgxpool.Pool // 时序库 TsPool（影子表）
 	interval time.Duration
 	logger   *zap.Logger
+
+	cellBandInterval     time.Duration
+	cellBandQueryTimeout time.Duration
+	lastCellBandAttempt  time.Time
 }
 
 // NewSyncRunner 构造影子维度同步器。interval <= 0 时回退 DefaultInterval。
@@ -42,10 +53,12 @@ func NewSyncRunner(src, dst *pgxpool.Pool, interval time.Duration, logger *zap.L
 		logger = zap.NewNop()
 	}
 	return &SyncRunner{
-		src:      src,
-		dst:      dst,
-		interval: interval,
-		logger:   logger.Named("tsdbsync"),
+		src:                  src,
+		dst:                  dst,
+		interval:             interval,
+		logger:               logger.Named("tsdbsync"),
+		cellBandInterval:     DefaultCellBandInterval,
+		cellBandQueryTimeout: DefaultCellBandQueryTimeout,
 	}
 }
 
@@ -112,7 +125,16 @@ func (r *SyncRunner) Sync(ctx context.Context) error {
 	})
 
 	// 6) cell_band_dim ← 从 device_parameters 派生（device_id, cell_id, band）。
-	r.runTable(ctx, "cell_band_dim", r.syncCellBandDim)
+	// 该查询读参数大表，按独立低频节流，避免与参数同步写入持续争抢主库 IO。
+	if r.shouldSyncCellBandDim(start) {
+		r.markCellBandDimAttempt(start)
+		r.runTable(ctx, "cell_band_dim", r.syncCellBandDim)
+	} else {
+		r.logger.Debug("shadow-dim table sync skipped by throttle",
+			zap.String("table", "cell_band_dim"),
+			zap.Duration("interval", r.cellBandInterval),
+			zap.Time("last_attempt", r.lastCellBandAttempt))
+	}
 
 	// 7) perf_indicators_{enb,gnb,gsm} ← 同名镜像（指标名解析表，时序库查询直读）。
 	for _, t := range []string{"perf_indicators_enb", "perf_indicators_gnb", "perf_indicators_gsm"} {
@@ -129,6 +151,20 @@ func (r *SyncRunner) Sync(ctx context.Context) error {
 	}
 	r.logger.Debug("tsdb shadow-dim sync cycle finished", zap.Duration("took", time.Since(start)))
 	return nil
+}
+
+func (r *SyncRunner) shouldSyncCellBandDim(now time.Time) bool {
+	if r.cellBandInterval <= 0 {
+		return true
+	}
+	if r.lastCellBandAttempt.IsZero() {
+		return true
+	}
+	return !now.Before(r.lastCellBandAttempt.Add(r.cellBandInterval))
+}
+
+func (r *SyncRunner) markCellBandDimAttempt(now time.Time) {
+	r.lastCellBandAttempt = now
 }
 
 const metricDictionarySyncSQL = `WITH source AS (
@@ -475,6 +511,11 @@ SELECT DISTINCT ON (device_id, cell_id)
 // cell_band_dim 主键 (device_id, cell_id)：同一设备同一小区号若有多 fap_instance 取任一
 // （DISTINCT ON 去重，正常一个小区号对一个 band）。
 func (r *SyncRunner) syncCellBandDim(ctx context.Context) (int64, error) {
+	if r.cellBandQueryTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.cellBandQueryTimeout)
+		defer cancel()
+	}
 	cols := []string{"device_id", "cell_id", "band"}
 	data, err := r.collectRows(ctx, cellBandSyncSQL, len(cols))
 	if err != nil {

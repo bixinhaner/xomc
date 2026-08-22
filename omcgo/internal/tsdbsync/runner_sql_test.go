@@ -3,6 +3,7 @@ package tsdbsync
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,6 +66,27 @@ func TestCellBandSyncReadsParametersOnceAndKeepsTechnologyPairsSeparate(t *testi
 		"cell/band dimension sync must not rescan the full parameter table for every path family")
 	assert.Contains(t, normalized, "technology")
 	assert.Contains(t, normalized, "GROUP BY device_id, fap_instance, technology")
+}
+
+func TestCellBandDimSyncIsThrottledSeparatelyFromShadowDimCycle(t *testing.T) {
+	runner := NewSyncRunner(nil, nil, DefaultInterval, nil)
+	now := time.Unix(1_800_000_000, 0)
+
+	require.Equal(t, 10*time.Minute, runner.cellBandInterval)
+	assert.True(t, runner.shouldSyncCellBandDim(now), "first cycle must seed cell_band_dim")
+
+	runner.markCellBandDimAttempt(now)
+	assert.False(t, runner.shouldSyncCellBandDim(now.Add(DefaultInterval)),
+		"ordinary shadow dimensions may run every minute, but cell_band_dim must not rescan device_parameters that often")
+	assert.False(t, runner.shouldSyncCellBandDim(now.Add(9*time.Minute+59*time.Second)))
+	assert.True(t, runner.shouldSyncCellBandDim(now.Add(10*time.Minute)))
+}
+
+func TestCellBandDimSyncUsesBoundedQueryTimeout(t *testing.T) {
+	runner := NewSyncRunner(nil, nil, DefaultInterval, nil)
+	require.Equal(t, 2*time.Minute, runner.cellBandQueryTimeout)
+	assert.Greater(t, runner.cellBandQueryTimeout, DefaultInterval)
+	assert.Less(t, runner.cellBandQueryTimeout, runner.cellBandInterval)
 }
 
 func TestCellBandPartialIndexCoversTheSyncPredicate(t *testing.T) {

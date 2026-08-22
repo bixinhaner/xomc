@@ -214,6 +214,7 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (ReconcileStats, error) 
 		if live == nil || !isTerminal(live.Status) {
 			continue
 		}
+		live = repairSnapshotWithRoute(live, t)
 
 		// 分叉确认：PG 活跃态 vs Redis 终态。先按"检出即计"记 stale 指标
 		// （即便随后修复失败也已计入，反映分叉发生频率本身）。
@@ -268,6 +269,15 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (ReconcileStats, error) 
 			zap.Int("repair_failed", stats.RepairFailed))
 	}
 	return stats, nil
+}
+
+func repairSnapshotWithRoute(live, durable *Task) *Task {
+	if live == nil || durable == nil || live.DeviceSN != "" || durable.DeviceSN == "" {
+		return live
+	}
+	copied := *live
+	copied.DeviceSN = durable.DeviceSN
+	return &copied
 }
 
 func (r *Reconciler) listActivePage(ctx context.Context, olderThan time.Time) ([]*Task, error) {

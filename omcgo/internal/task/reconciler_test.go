@@ -145,6 +145,32 @@ func (f *fakeRepairer) updatedIDs() []string {
 	return ids
 }
 
+type fakeConditionalRepairer struct {
+	mu           sync.Mutex
+	transitioned []*Task
+	fromStatuses []TaskStatus
+}
+
+func (f *fakeConditionalRepairer) Update(_ context.Context, _ *Task) error {
+	return nil
+}
+
+func (f *fakeConditionalRepairer) TransitionIfStatus(
+	_ context.Context,
+	t *Task,
+	from TaskStatus,
+) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.transitioned = append(f.transitioned, t)
+	f.fromStatuses = append(f.fromStatuses, from)
+	return true, nil
+}
+
+func (f *fakeConditionalRepairer) GetByID(_ context.Context, _ string) (*Task, error) {
+	return nil, nil
+}
+
 func pgActiveTask(id, sn string, status TaskStatus) *Task {
 	return &Task{ID: id, DeviceSN: sn, Method: "SetParameterValues", Status: status}
 }
@@ -251,6 +277,47 @@ func Test_ReconcileOnce_RepairsPGStaleVsRedisTerminal(t *testing.T) {
 		assert.True(t, isTerminal(u.Status), "repaired task must carry terminal status")
 	}
 	assert.Equal(t, float64(2), counterValue(t, metrics.ReconcileTotal, "repaired"))
+}
+
+func Test_ReconcileOnce_RepairsLegacyRedisTerminalWithoutDeviceSN(t *testing.T) {
+	lister := &fakeActiveLister{active: []*Task{
+		pgActiveTask("t1", "SN1", TaskStatusSent),
+	}}
+	reader := &fakeQueueReader{byID: map[string]*Task{
+		"t1": redisTerminalTask("t1", "", TaskStatusCompleted),
+	}}
+	repairer := &fakeRepairer{}
+	rc := NewReconciler(lister, reader, repairer, nil, 0, 0, 0, zap.NewNop())
+
+	stats, err := rc.ReconcileOnce(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, 1, stats.Repaired)
+	require.Len(t, repairer.updated, 1)
+	assert.Equal(t, "SN1", repairer.updated[0].DeviceSN)
+	assert.Equal(t, TaskStatusCompleted, repairer.updated[0].Status)
+	assert.Empty(t, reader.byID["t1"].DeviceSN, "redis snapshot must not be mutated")
+}
+
+func Test_ReconcileOnce_ConditionalRepairCopiesDeviceSNFromDurableTask(t *testing.T) {
+	lister := &fakeActiveLister{active: []*Task{
+		pgActiveTask("t1", "SN1", TaskStatusSent),
+	}}
+	reader := &fakeQueueReader{byID: map[string]*Task{
+		"t1": redisTerminalTask("t1", "", TaskStatusCompleted),
+	}}
+	repairer := &fakeConditionalRepairer{}
+	rc := NewReconciler(lister, reader, repairer, nil, 0, 0, 0, zap.NewNop())
+
+	stats, err := rc.ReconcileOnce(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, 1, stats.Repaired)
+	require.Len(t, repairer.transitioned, 1)
+	assert.Equal(t, "SN1", repairer.transitioned[0].DeviceSN)
+	assert.Equal(t, TaskStatusCompleted, repairer.transitioned[0].Status)
+	assert.Equal(t, []TaskStatus{TaskStatusSent}, repairer.fromStatuses)
+	assert.Empty(t, reader.byID["t1"].DeviceSN, "redis snapshot must not be mutated")
 }
 
 // issue #20：分叉检出应记 stale-detection counter + recovery-action counter，
