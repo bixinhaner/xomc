@@ -111,7 +111,7 @@
 ## 4. 冗杂的本地开发与启动流（Developer Experience）
 
 ### 4.1 具体问题与现象
-*   **当前的开发启动体验**：我们在刚刚修复环境启动时，需要穿梭并手动运行诸多脚本组合（`stop-all.sh`, `start-deps.sh`, `dc.sh up`, `reset_and_import_seed_data.sh`），且在前端使用 Webpack/Vite 本地反代，后端某些模块跑容器并占据不同的私有网桥 IP (`173.18.0.0/16`)。
+*   **当前的开发启动体验**：我们在刚刚修复环境启动时，需要穿梭并手动运行诸多脚本组合（`stop-all.sh`, `start-deps.sh`, `dc.sh up`, `reset_and_import_seed_data.sh`），且在前端使用 Webpack/Vite 本地反代，后端某些模块跑容器并占据由 `DOCKER_BIP` 派生的私有网桥网段。
 *   **隐患**：造成极大的记忆负担。极容易发生“忘记配 VITE_API_PROXY_TARGET”、“网段地址被占用冲突（Pool overlaps）”、“没有正确打好测试种子数据只导一半的情况”等各类联调报错。
 
 ### 4.2 优化改动细节方案

@@ -23219,6 +23219,7 @@ CREATE INDEX IF NOT EXISTS idx_device_ups_info_last_online
 CREATE INDEX IF NOT EXISTS idx_device_ups_info_last_inform
     ON public.device_ups_info (last_inform_at DESC);
 
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -23232,6 +23233,7 @@ BEGIN
     END IF;
 END
 $$;
+-- +goose StatementEnd
 
 CREATE TABLE IF NOT EXISTS public.device_ups_batteries (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -23306,6 +23308,7 @@ WHERE EXISTS (
     WHERE u.device_id = b.device_id
 );
 
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -23319,6 +23322,7 @@ BEGIN
     END IF;
 END
 $$;
+-- +goose StatementEnd
 
 CREATE TABLE IF NOT EXISTS public.device_task_locations (
     task_id uuid PRIMARY KEY,
@@ -23327,6 +23331,7 @@ CREATE TABLE IF NOT EXISTS public.device_task_locations (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION public.sync_device_task_location()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -23345,7 +23350,9 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -23359,6 +23366,7 @@ BEGIN
     END IF;
 END
 $$;
+-- +goose StatementEnd
 
 -- Do not backfill historical device_tasks here. In long-lived deployments this
 -- table can contain millions of rows, and an unconditional upsert during every

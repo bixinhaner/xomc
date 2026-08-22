@@ -4,6 +4,26 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 NATS_SERVER_IMAGE="${NATS_SERVER_IMAGE:-nats:2.12.11-alpine3.22}"
 NATS_DOCKER_CID=""
+
+resolve_nats_docker_network() {
+  if [ -n "${NATS_DOCKER_NETWORK:-}" ]; then
+    printf '%s\n' "$NATS_DOCKER_NETWORK"
+    return 0
+  fi
+
+  local host_os docker_os
+  host_os="$(uname -s 2>/dev/null || printf 'unknown')"
+  docker_os="$(docker info --format '{{.OperatingSystem}}' 2>/dev/null || true)"
+  if [ "$host_os" = "Darwin" ]; then
+    printf 'bridge\n'
+    return 0
+  fi
+  case "$docker_os" in
+    *Docker\ Desktop*) printf 'bridge\n' ;;
+    *) printf 'host\n' ;;
+  esac
+}
+
 if [ -z "${NATS_SERVER_BIN:-}" ]; then
   NATS_SERVER_BIN="$(command -v nats-server || true)"
   if [ -z "$NATS_SERVER_BIN" ]; then
@@ -25,6 +45,15 @@ if [ -z "$NATS_SERVER_BIN" ]; then
     exit 1
   }
   NATS_SERVER_MODE=docker
+  NATS_DOCKER_NETWORK="$(resolve_nats_docker_network)"
+  case "$NATS_DOCKER_NETWORK" in
+    host|bridge) ;;
+    *)
+      echo "NATS_DOCKER_NETWORK must be host or bridge, got: $NATS_DOCKER_NETWORK" >&2
+      exit 1
+      ;;
+  esac
+  echo "GPV NATS Docker network: $NATS_DOCKER_NETWORK" >&2
 else
   NATS_SERVER_MODE=bin
 fi
@@ -78,9 +107,15 @@ start_nats() {
   STORE="$(mktemp -d)"
   LOG="$STORE/nats.log"
   if [ "$NATS_SERVER_MODE" = docker ]; then
-    NATS_DOCKER_CID="$(docker run -d --rm --name "omc-gpv-nats-$$" \
-      -p "127.0.0.1:${PORT}:4222" -v "$STORE/data:/data" "$NATS_SERVER_IMAGE" \
-      -js -a 0.0.0.0 -p 4222 -sd /data)" || return 1
+    local nats_bind_address=127.0.0.1
+    local docker_run_args=(--network "$NATS_DOCKER_NETWORK" -d --rm --name "omc-gpv-nats-$$")
+    if [ "$NATS_DOCKER_NETWORK" = bridge ]; then
+      nats_bind_address=0.0.0.0
+      docker_run_args+=( -p "127.0.0.1:$PORT:$PORT" )
+    fi
+    NATS_DOCKER_CID="$(docker run "${docker_run_args[@]}" \
+      -v "$STORE/data:/data" "$NATS_SERVER_IMAGE" \
+      -js -a "$nats_bind_address" -p "$PORT" -sd /data)" || return 1
     NATS_PID=""
   else
     "$NATS_SERVER_BIN" -js -a 127.0.0.1 -p "$PORT" -sd "$STORE/data" >"$LOG" 2>&1 &

@@ -13,7 +13,7 @@
 
 ```
 ERROR [acs internal] load metadata for docker.io/library/alpine:3.19
-ERROR [web internal] load metadata for docker.io/library/nginx:alpine
+ERROR [web internal] load metadata for docker.io/library/nginx:1.31.2-alpine
 target acs: failed to solve: DeadlineExceeded: alpine:3.19: failed to resolve source metadata
 dial tcp 98.159.108.61:443: i/o timeout
 ```
@@ -61,22 +61,9 @@ failed to do request: Head "https://registry-1.docker.io/...": dial tcp ... i/o 
 
 ```bash
 # === 1) 配 dockerd mirror + DNS ===
-sudo mkdir -p /etc/docker
-sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'
-{
-  "registry-mirrors": [
-    "https://docker.m.daocloud.io",
-    "https://docker.1panel.live",
-    "https://hub.rat.dev",
-    "https://docker.nju.edu.cn"
-  ],
-  "dns": ["223.5.5.5", "223.6.6.6", "114.114.114.114"],
-  "dns-opts": ["timeout:2", "attempts:3"]
-}
-EOF
-sudo systemctl daemon-reload
-sudo systemctl restart docker
-sleep 3
+export DOCKER_BIP=10.240.0.1/16
+bash deployments/docker/fix-docker-dns.sh
+bash deployments/release/bundle/setup-mirrors.sh --docker daocloud
 
 # === 2) 配 BuildKit mirror ===
 sudo mkdir -p /etc/buildkit
@@ -122,18 +109,8 @@ docker compose -f deployments/docker/docker-compose.yml up -d --build
 
 ```bash
 sudo mkdir -p /etc/docker
-sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'
-{
-  "registry-mirrors": [
-    "https://docker.m.daocloud.io",
-    "https://docker.1panel.live",
-    "https://hub.rat.dev",
-    "https://docker.nju.edu.cn"
-  ],
-  "dns": ["223.5.5.5", "223.6.6.6", "114.114.114.114"],
-  "dns-opts": ["timeout:2", "attempts:3"]
-}
-EOF
+export DOCKER_BIP=10.240.0.1/16
+bash deployments/release/bundle/setup-mirrors.sh --docker daocloud
 
 sudo systemctl daemon-reload
 sudo systemctl restart docker

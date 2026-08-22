@@ -25,16 +25,13 @@ networks:
   omcgo-net:
     name: omcgo-net
     driver: bridge
-    # 公司内网约定:Docker 网络落在 173.x,避开公司 172.x 内网(172.17/172.24… 仍在扩张)。
-    # omcgo-net 固定锁 173.18.0.0/16;docker0=173.17、自动池=173.19 由 install-docker.sh
-    # 写入 daemon.json,三段互不重叠。不锁 subnet 时 docker 会自动分配到 172.x,撞内网。
-    # ★ 本网段在 infra.yml 统一锁定;app/web/monitoring 三个 compose 文件不重复声明
-    #   subnet(它们与本文件一起 -f 传入,compose 合并后以此处为准)。换段改这一处即可。
+    # 子网由 DOCKER_BIP 规划库派生；部署安装会计算并写入 .env。
+    # ★ app/web/monitoring 三个 compose 文件也声明同一派生值，单独运行时不会回退到 Docker 默认地址池。
     ipam:
       driver: default
       config:
-        - subnet: 173.18.0.0/16
-          gateway: 173.18.0.1
+        - subnet: "${DOCKER_COMPOSE_SUBNET:?DOCKER_BIP plan is required}"
+          gateway: "${DOCKER_COMPOSE_GATEWAY:?DOCKER_BIP plan is required}"
 
 x-omc-json-log: &omc-json-log
   driver: json-file

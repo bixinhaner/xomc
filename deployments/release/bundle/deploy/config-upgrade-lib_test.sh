@@ -68,7 +68,7 @@ echo "PASS: production config upgrade adds dedicated PM Redis"
 cat > "$tmp/acs-proxy-template.yaml" <<'YAML'
 server:
   host: "0.0.0.0"
-  trusted_proxy_cidrs: ["173.18.0.0/16"]
+  trusted_proxy_cidrs: ["${DOCKER_COMPOSE_SUBNET}"]
 session:
   timeout: 5m
 YAML
@@ -79,8 +79,8 @@ server:
 session:
   timeout: 7m
 YAML
-upgrade_acs_trusted_proxy_cidrs "$tmp/acs-proxy-legacy.yaml" "$tmp/acs-proxy-template.yaml"
-grep -Fq '  trusted_proxy_cidrs: ["173.18.0.0/16"]' "$tmp/acs-proxy-legacy.yaml" || {
+upgrade_acs_trusted_proxy_cidrs "$tmp/acs-proxy-legacy.yaml" "$tmp/acs-proxy-template.yaml" "10.241.0.0/16"
+grep -Fq '  trusted_proxy_cidrs: ["${DOCKER_COMPOSE_SUBNET}"]' "$tmp/acs-proxy-legacy.yaml" || {
   echo "FAIL: legacy ACS config did not receive the trusted gateway CIDR" >&2
   exit 1
 }
@@ -92,6 +92,29 @@ before_acs_proxy="$(cksum < "$tmp/acs-proxy-legacy.yaml")"
 upgrade_acs_trusted_proxy_cidrs "$tmp/acs-proxy-legacy.yaml" "$tmp/acs-proxy-template.yaml"
 [ "$(cksum < "$tmp/acs-proxy-legacy.yaml")" = "$before_acs_proxy" ] || {
   echo "FAIL: trusted gateway migration must be idempotent" >&2
+  exit 1
+}
+
+cat > "$tmp/acs-proxy-old-default.yaml" <<'YAML'
+server:
+  host: "operator-host"
+  trusted_proxy_cidrs: ["173.18.0.0/16"]
+YAML
+upgrade_acs_trusted_proxy_cidrs "$tmp/acs-proxy-old-default.yaml" "$tmp/acs-proxy-template.yaml" "10.241.0.0/16"
+grep -Fq '  trusted_proxy_cidrs: ["${DOCKER_COMPOSE_SUBNET}"]' "$tmp/acs-proxy-old-default.yaml" || {
+  echo "FAIL: historical trusted gateway CIDR was not aligned to DOCKER_BIP" >&2
+  exit 1
+}
+
+cat > "$tmp/acs-proxy-custom.yaml" <<'YAML'
+server:
+  host: "operator-host"
+  trusted_proxy_cidrs: ["192.0.2.0/24"]
+YAML
+before_custom_proxy="$(cksum < "$tmp/acs-proxy-custom.yaml")"
+upgrade_acs_trusted_proxy_cidrs "$tmp/acs-proxy-custom.yaml" "$tmp/acs-proxy-template.yaml" "10.241.0.0/16"
+[ "$(cksum < "$tmp/acs-proxy-custom.yaml")" = "$before_custom_proxy" ] || {
+  echo "FAIL: operator trusted gateway CIDR was overwritten" >&2
   exit 1
 }
 

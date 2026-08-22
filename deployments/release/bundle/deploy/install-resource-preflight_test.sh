@@ -71,9 +71,10 @@ prepare_package() {
   local pkg="$1"
   mkdir -p "$pkg/deploy" "$pkg/etc" "$pkg/images" "$pkg/license/keystore"
   cp -a "$SCRIPT_DIR/." "$pkg/deploy/"
+  cp "$SCRIPT_DIR/../../../docker/docker-network-lib.sh" "$pkg/deploy/docker-network-lib.sh"
   cp "$SCRIPT_DIR/../../../../license-run-time/keystore/omcPublicKey.store" \
     "$pkg/license/keystore/omcPublicKey.store"
-  printf 'OMC_PUBLIC_HOST=10.0.0.1\n' >"$pkg/deploy/.env"
+  printf 'OMC_PUBLIC_HOST=10.0.0.1\nDOCKER_BIP=10.240.0.1/16\n' >"$pkg/deploy/.env"
   : >"$pkg/deploy/docker-compose.infra.yml"
   : >"$pkg/deploy/docker-compose.app.yml"
   cat >"$pkg/etc/worker.prod.yaml" <<'EOF'
@@ -116,6 +117,17 @@ EOF
   chmod +x "$bin/id" "$bin/docker" "$bin/systemctl" "$bin/sha256sum"
 }
 
+write_docker_daemon_json() {
+  cat >"$1" <<'EOF'
+{
+  "bip": "10.240.0.1/16",
+  "default-address-pools": [
+    {"base": "10.242.0.0/16", "size": 24}
+  ]
+}
+EOF
+}
+
 run_install() {
   local pkg="$1" root="$2" bin="$3" output="$4"
   shift 4
@@ -123,6 +135,7 @@ run_install() {
     PATH="$bin:$PATH" \
     DOCKER_LOG="$TMP/docker.log" \
     SYSTEMCTL_LOG="$TMP/systemctl.log" \
+    DOCKER_DAEMON_JSON="$TMP/daemon.json" \
     REAL_CP="${REAL_CP:-}" \
     bash "$pkg/deploy/install.sh" \
       --skip-infra --skip-monitoring --skip-web --yes \
@@ -135,6 +148,7 @@ ROOT_CHECK="$TMP/root-check"
 BIN_CHECK="$TMP/bin-check"
 prepare_package "$PKG_CHECK"
 prepare_stubs "$BIN_CHECK"
+write_docker_daemon_json "$TMP/daemon.json"
 mkdir -p "$ROOT_CHECK/releases/old/deploy" "$ROOT_CHECK/etc"
 ln -s "$ROOT_CHECK/releases/old" "$ROOT_CHECK/current"
 write_legacy_env "$ROOT_CHECK/releases/old/deploy/resources.env"
@@ -262,6 +276,7 @@ if env \
   PATH="$BIN_IMAGE:$PATH" \
   DOCKER_LOG="$TMP/docker.log" \
   SYSTEMCTL_LOG="$TMP/systemctl.log" \
+  DOCKER_DAEMON_JSON="$TMP/daemon.json" \
   MISSING_IMAGE="mirror/cadvisor:v1" \
   bash "$PKG_IMAGE/deploy/install.sh" \
     --skip-infra --skip-web --yes --check-only \
@@ -285,9 +300,11 @@ mkdir -p "$SVC_DIR"
 for file in svc.sh storage-paths-lib.sh resource-env-lib.sh resource-plan-metrics.sh monitoring-profile-lib.sh gpv-handoff-lib.sh; do
   cp "$SCRIPT_DIR/$file" "$SVC_DIR/$file"
 done
+cp "$SCRIPT_DIR/../../../docker/docker-network-lib.sh" "$SVC_DIR/docker-network-lib.sh"
 : >"$SVC_DIR/docker-compose.app.yml"
 cat >"$SVC_DIR/.env" <<EOF
 OMCGO_SKIP_MONITORING=1
+DOCKER_BIP=10.240.0.1/16
 POSTGRES_DATA_PATH=$TMP/data/postgres
 TSDB_DATA_PATH=$TMP/data/timescaledb
 REDIS_DATA_PATH=$TMP/data/redis

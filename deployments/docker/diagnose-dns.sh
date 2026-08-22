@@ -4,6 +4,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/docker-network-lib.sh"
+
 echo "========================================="
 echo "  Docker DNS 问题诊断工具"
 echo "========================================="
@@ -97,26 +100,41 @@ else
     check_result 1 "bridge 网络异常"
 fi
 
+NETWORK_ENV_FILE="${DOCKER_NETWORK_ENV_FILE:-$(cd "$SCRIPT_DIR/../.." && pwd)/.env}"
+BRIDGE_SUBNETS="$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true)"
+if docker_network_resolve_bip_from_config "$NETWORK_ENV_FILE" && docker_network_plan; then
+    if [ "$BRIDGE_SUBNETS" = "${DOCKER_NETWORK_SUBNET} " ]; then
+        check_result 0 "bridge 网络符合 DOCKER_BIP 规划 ($BRIDGE_SUBNETS)"
+    else
+        check_result 1 "bridge 网络不符合 DOCKER_BIP 规划 (${BRIDGE_SUBNETS:-未知}，期望 ${DOCKER_NETWORK_SUBNET:-未知})"
+        echo "  ${RED}请先按 DOCKER_BIP 规划运行 install-docker.sh，避免创建未规划网络${NC}"
+        exit 1
+    fi
+else
+    daemon_bip="$(docker_network_read_daemon_bip 2>/dev/null || true)"
+    warn_result "未提供 DOCKER_BIP 规划输入，跳过规划比对；daemon.json 当前 bip=${daemon_bip:-未知}（仅状态展示）"
+fi
+
 echo ""
 echo "3️⃣  容器 DNS 检查"
 echo "-----------------------------------------"
 
 # 检查容器 DNS 配置
 echo "  容器内 /etc/resolv.conf 内容:"
-docker run --rm alpine:3.19 cat /etc/resolv.conf 2>/dev/null | sed 's/^/    /' || {
+docker run --network bridge --rm alpine:3.19 cat /etc/resolv.conf 2>/dev/null | sed 's/^/    /' || {
     check_result 1 "无法启动测试容器"
 }
 
 # 测试容器 DNS 解析
 echo -n "  容器内 DNS 解析 (mirrors.aliyun.com)... "
-if docker run --rm alpine:3.19 nslookup mirrors.aliyun.com > /dev/null 2>&1; then
+if docker run --network bridge --rm alpine:3.19 nslookup mirrors.aliyun.com > /dev/null 2>&1; then
     check_result 0 "容器 DNS 解析正常"
 else
     check_result 1 "容器 DNS 解析失败"
 fi
 
 echo -n "  容器内 DNS 解析 (goproxy.cn)... "
-if docker run --rm alpine:3.19 nslookup goproxy.cn > /dev/null 2>&1; then
+if docker run --network bridge --rm alpine:3.19 nslookup goproxy.cn > /dev/null 2>&1; then
     check_result 0 "容器 DNS 解析正常"
 else
     check_result 1 "容器 DNS 解析失败"
@@ -124,7 +142,7 @@ fi
 
 # 测试容器网络
 echo -n "  容器内 HTTPS 连接... "
-if docker run --rm alpine:3.19 wget --spider -q https://mirrors.aliyun.com 2>/dev/null; then
+if docker run --network bridge --rm alpine:3.19 wget --spider -q https://mirrors.aliyun.com 2>/dev/null; then
     check_result 0 "容器 HTTPS 连接正常"
 else
     check_result 1 "容器 HTTPS 连接失败"
@@ -136,7 +154,7 @@ echo "-----------------------------------------"
 
 # 测试 Alpine 包管理器
 echo -n "  测试 apk add (git)... "
-if docker run --rm alpine:3.19 sh -c "apk add --no-cache git > /dev/null 2>&1"; then
+if docker run --network bridge --rm alpine:3.19 sh -c "apk add --no-cache git > /dev/null 2>&1"; then
     check_result 0 "apk add 正常"
 else
     check_result 1 "apk add 失败 (DNS 问题)"
@@ -144,7 +162,7 @@ fi
 
 # 测试 Go 模块下载
 echo -n "  测试 go mod download... "
-if docker run --rm -e GOPROXY=https://mirrors.aliyun.com/goproxy/,direct \
+if docker run --network bridge --rm -e GOPROXY=https://mirrors.aliyun.com/goproxy/,direct \
     golang:1.25-alpine sh -c \
     "cd /tmp && go mod init test && go get github.com/Masterminds/squirrel@v1.5.4" > /dev/null 2>&1; then
     check_result 0 "go mod download 正常"

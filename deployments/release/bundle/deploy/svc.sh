@@ -81,6 +81,16 @@ fi
 # compose 文件按存在性拼接（infra/app 必有；web/monitoring 看 skip flag 与存在性）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR" || die "无法进入脚本目录：$SCRIPT_DIR"
+if [ -f "$SCRIPT_DIR/docker-network-lib.sh" ]; then
+  . "$SCRIPT_DIR/docker-network-lib.sh"
+elif [ -f "$SCRIPT_DIR/../../../docker/docker-network-lib.sh" ]; then
+  . "$SCRIPT_DIR/../../../docker/docker-network-lib.sh"
+else
+  die "缺 docker-network-lib.sh；无法按 DOCKER_BIP 规划 Docker 网段"
+fi
+docker_network_resolve_bip "$SCRIPT_DIR/.env" ||
+  die "无法解析 Docker 网段规划（默认值或自定义 DOCKER_BIP 均不可用）"
+docker_network_plan || die "DOCKER_BIP 无效或无法派生 Docker 网段：${DOCKER_BIP:-<空>}"
 if [ -f "$SCRIPT_DIR/storage-paths-lib.sh" ]; then
   . "$SCRIPT_DIR/storage-paths-lib.sh"
 else

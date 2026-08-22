@@ -3,6 +3,10 @@
 > **场景**: 同样的 docker-compose,昨天能成功,今天报 DNS 错误  
 > **创建时间**: 2025-04-10
 
+> **平台边界**: `fix-docker-dns.sh` 仅支持 Linux 写入 `/etc/docker/daemon.json` 并重启
+> Docker。macOS/Docker Desktop 仅执行 `diagnose-dns.sh` 等诊断，配置请在 Docker
+> Desktop 的 Docker Engine 设置中手工完成。
+
 ---
 
 ## 🔍 **为什么昨天成功今天失败?**
@@ -43,11 +47,14 @@ bash diagnose-dns.sh
 ### **方法 2: 手动快速检查**
 
 ```bash
+# Docker 网段以客户规划的 DOCKER_BIP 为准
+cat /etc/docker/daemon.json | grep -E '"bip"|default-address-pools'
+
 # 1. 宿主机 DNS 正常吗?
 nslookup mirrors.aliyun.com
 
 # 2. Docker 容器 DNS 正常吗?
-docker run --rm alpine:3.19 nslookup mirrors.aliyun.com
+docker run --network bridge --rm alpine:3.19 nslookup mirrors.aliyun.com
 
 # 3. Docker daemon 有 DNS 配置吗?
 cat /etc/docker/daemon.json | grep dns
@@ -131,7 +138,7 @@ ps aux | grep Docker
 # 3. 重新启动 Docker Desktop
 
 # 4. 验证 DNS 配置生效
-docker run --rm alpine:3.19 cat /etc/resolv.conf
+docker run --network bridge --rm alpine:3.19 cat /etc/resolv.conf
 
 # 5. 重新构建
 docker compose build
@@ -220,7 +227,7 @@ FROM registry.cn-hangzhou.aliyuncs.com/library/golang:1.25-alpine
 
 **症状**:
 ```
-docker run --rm alpine:3.19 wget https://mirrors.aliyun.com
+docker run --network bridge --rm alpine:3.19 wget https://mirrors.aliyun.com
 # wget: can't connect to remote host: Connection refused
 ```
 
@@ -312,7 +319,7 @@ RUN for i in 1 2 3; do \
 
 - [ ] **2. 容器 DNS 正常?**
   ```bash
-  docker run --rm alpine:3.19 nslookup mirrors.aliyun.com
+  docker run --network bridge --rm alpine:3.19 nslookup mirrors.aliyun.com
   ```
 
 - [ ] **3. Docker daemon 有 DNS 配置?**
@@ -357,9 +364,10 @@ RUN for i in 1 2 3; do \
 cd deployments/docker
 bash diagnose-dns.sh
 
-# 2. 根据诊断结果修复
+# 2. 根据诊断结果修复（Linux）
 # 如果显示 "容器 DNS 解析失败"
 bash fix-docker-dns.sh
+# macOS/Docker Desktop：在 Docker Desktop → Settings → Docker Engine 中手工配置
 
 # 3. 重启 Docker
 # macOS: Docker Desktop → Restart
@@ -373,10 +381,12 @@ docker compose build
 
 ### **长期优化 (30 分钟)**:
 
-1. **配置 Docker daemon DNS** (必做)
+1. **配置 Docker daemon DNS（Linux）** (必做)
    ```bash
    bash fix-docker-dns.sh
    ```
+  macOS/Docker Desktop 请在 Docker Desktop → Settings → Docker Engine 中手工配置，
+  不运行会写 `/etc/docker/daemon.json` 的脚本。
 
 2. **配置多个 GOPROXY** (已完成)
    ```dockerfile

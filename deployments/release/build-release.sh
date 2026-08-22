@@ -74,6 +74,50 @@ validate_release_https_cert_assets() { # validate_release_https_cert_assets <dir
     die "OMC HTTPS 8443 证书与私钥不匹配：$cert / $key"
 }
 
+validate_release_migration_baseline() {
+  local baseline="$REPO_ROOT/omcgo/migrations/000001_init_schema.sql"
+  [ -f "$baseline" ] || die "缺少主库迁移基线：$baseline"
+  log "校验迁移基线的 Goose 语句边界 ..."
+  awk '
+    BEGIN { statement_open = 0; dollar_blocks = 0; errors = 0 }
+    /^-- \+goose StatementBegin[[:space:]]*$/ {
+      if (statement_open) {
+        print "nested Goose StatementBegin at line " NR > "/dev/stderr"
+        errors = 1
+      }
+      statement_open = 1
+      next
+    }
+    /^[[:space:]]*(DO|AS)[[:space:]]+\$[^[:space:]]*\$/ {
+      dollar_blocks++
+      if (!statement_open) {
+        print "PL/pgSQL dollar-quoted block lacks Goose StatementBegin at line " NR > "/dev/stderr"
+        errors = 1
+      }
+    }
+    /^-- \+goose StatementEnd[[:space:]]*$/ {
+      if (!statement_open) {
+        print "Goose StatementEnd without StatementBegin at line " NR > "/dev/stderr"
+        errors = 1
+      }
+      statement_open = 0
+      next
+    }
+    END {
+      if (statement_open) {
+        print "Goose StatementBegin without StatementEnd" > "/dev/stderr"
+        errors = 1
+      }
+      if (dollar_blocks == 0) {
+        print "migration baseline contains no PL/pgSQL dollar-quoted blocks" > "/dev/stderr"
+        errors = 1
+      }
+      exit errors
+    }
+  ' "$baseline" ||
+    die "迁移基线校验失败：PL/pgSQL 语句必须使用成对的 -- +goose StatementBegin/StatementEnd"
+}
+
 copy_release_https_cert_assets() { # copy_release_https_cert_assets <stage>
   local stage="$1" dst
   dst="$stage/$RELEASE_HTTPS_CERT_PACKAGE_DIR"
@@ -143,6 +187,8 @@ if [ "$VERIFY_HTTPS_CERT_PACKAGE_LAYOUT_ONLY" = 1 ]; then
   log "OMC HTTPS 8443 证书发布包路径校验通过：$RELEASE_HTTPS_CERT_PACKAGE_DIR/cert.pem / key.pem"
   exit 0
 fi
+
+validate_release_migration_baseline
 
 log "运行发布前回归门禁 ..."
 RELEASE_VERIFY_SCRIPTS=(
@@ -296,6 +342,7 @@ for ARCH in $ARCHES; do
   # 1.4 部署模板 + compose 文件 + nginx 配置 + 监控栈配置
   log "[$ARCH] 拷入部署模板 + 监控栈配置 ..."
   cp -r "$SCRIPT_DIR/bundle/deploy"       "$STAGE/deploy"
+  cp "$REPO_ROOT/deployments/docker/docker-network-lib.sh" "$STAGE/deploy/docker-network-lib.sh"
   cp -r "$REPO_ROOT/deployments/monitoring" "$STAGE/deploy/monitoring"
   cp "$REPO_ROOT/deployments/docker/nginx.conf"   "$STAGE/deploy/nginx.conf"
   cp "$REPO_ROOT/deployments/docker/default.conf" "$STAGE/deploy/default.conf"
@@ -366,6 +413,19 @@ OMCGO_DOCKER_ROOT_DIR=/var/lib/docker
 OMCGO_DOCKER_VOLUME_PREFIX=omcgo
 OMCGO_HOST_LOGS_PATH=/opt/omc/run/logs
 OMCGO_HOST_DATA_PATH=/opt/omc/data
+# Docker 网络规划默认使用 release.conf 的固定 DOCKER_BIP_DEFAULT；仅在与客户业务网冲突时，
+# 才在部署前配置自定义 DOCKER_BIP，以下派生值由 install.sh 自动生成。
+DOCKER_BIP=${DOCKER_BIP_DEFAULT}
+DOCKER_NETWORK_SUBNET=
+DOCKER_NETWORK_GATEWAY=
+DOCKER_COMPOSE_SUBNET=
+DOCKER_COMPOSE_GATEWAY=
+DOCKER_ADDR_POOL_BASE=
+DOCKER_ADDR_POOL_SIZE=
+DOCKER_TEST_SUBNET=
+DOCKER_TEST_GATEWAY=
+DOCKER_MIGRATION_SUBNET=
+DOCKER_MIGRATION_GATEWAY=
 # OMC 运行环境（容器内 entrypoint.sh 读）
 OMCGO_ENV=prod
 # JWT 密钥（app 容器读）—— 由 install.sh ensure_secrets 自动生成（#175）

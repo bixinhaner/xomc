@@ -98,3 +98,14 @@ services:
     depends_on:
       migrate-schema-test:
         condition: service_completed_successfully
+
+networks:
+  default:
+    # 测试网络独立命名，避免复用历史项目默认 bridge 网络。
+    name: omcgo-test-net
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: "${DOCKER_TEST_SUBNET:?DOCKER_BIP plan is required}"
+          gateway: "${DOCKER_TEST_GATEWAY:?DOCKER_BIP plan is required}"

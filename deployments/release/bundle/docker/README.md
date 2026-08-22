@@ -26,60 +26,90 @@ cd deployments/release
 
 可不下载；`build-release.sh` 会告警但继续，运维侧跳过"离线安装 Docker"即可。
 
-> ⚠️ **已装 Docker 的机器不会自动套用下面的网段配置**（`install-docker.sh` 的网段写入
-> 只在它真正安装/重装 dockerd 时执行）。已装机器请按"已装机器手动套用"一节手动改
-> `/etc/docker/daemon.json` 后 `systemctl restart docker`。
+## Docker 网段规划输入（DOCKER_BIP）
 
-## Docker 网段规划（重要：避开公司 172.x 内网）
+默认情况下使用固定的 Docker 网桥规划 `10.240.0.1/16`，通常不需要现场配置。
+只有该网段与客户业务网络冲突时，才需要在环境变量或部署 `.env` 中填写客户自定义的
+`DOCKER_BIP`。当前只允许
+`10.0.0.0/8`、`192.168.0.0/16`、`100.64.0.0/10`，并要求 docker0、Compose、
+自动地址池、测试和迁移五个派生网段全部落在对应允许范围内；`172.x`、公网段和派生
+越界值都会被拒绝。
 
-公司内网大量使用 `172.x` 段（如 `172.17`、`172.24`，且仍在扩张）。Docker **默认**
-把 `docker0` 放在 `172.17.0.0/16`、自动创建的网络放在 `172.18+`，会与公司内网**撞段**：
-宿主把 `172.17.0.0/16` 路由进 docker0，导致**公司 172.17 网段的电脑访问不了本机服务**
-（回程被 docker0 劫持）。
+规划库会按 `DOCKER_BIP` 所在网络块连续派生：
 
-为此 `install-docker.sh` 会把 Docker 全部网络迁到公司约定的 **`173.x`** 段（避开 172），
-三段互不重叠：
+| 用途 | 派生规则 | 生效位置 |
+|------|---------|---------|
+| `docker0` | `DOCKER_BIP` 所在网络块，网关为 `DOCKER_BIP` 地址 | `/etc/docker/daemon.json` 的 `bip` |
+| Compose 业务网 | 下一个同等大小的网络块 | `DOCKER_COMPOSE_SUBNET` |
+| Docker 自动地址池 | 再下一个同等大小的网络块；每个自动网络至少 `/24` | `default-address-pools` |
+| 测试网络 | 再下一个同等大小的网络块 | `DOCKER_TEST_SUBNET` |
+| 迁移基线网络 | 再下一个同等大小的网络块 | `DOCKER_MIGRATION_SUBNET` |
 
-| 用途 | 网段 | 由谁配置 |
-|------|------|---------|
-| `docker0` 默认网桥（`bip`） | `173.17.0.0/16` | `install-docker.sh` 写 `daemon.json` |
-| `omcgo-net`（compose 业务网，固定） | `173.18.0.0/16` | `docker-compose.infra.yml` 锁定 |
-| 其它/未来自动创建的网络（池） | `173.19.0.0/16`（每网络 /24） | `install-docker.sh` 写 `daemon.json` |
+例如客户规划 `10.240.0.1/16`，系统自动得到：
 
-> 说明：`173.x` 是公网地址族，这里**沿用公司既有内部系统的约定**（内网"借用"）。
-> 前提是本机与内网都不会去访问真实的 `173.17~173.19` 公网目的地。
+```text
+docker0       10.240.0.0/16
+Compose 业务网 10.241.0.0/16
+自动地址池     10.242.0.0/16（每个网络 /24）
+测试网络       10.243.0.0/16
+迁移基线网络   10.244.0.0/16
+```
 
-### 调整网段
+不要手工填写 `DOCKER_COMPOSE_SUBNET`、`DOCKER_ADDR_POOL_BASE` 或
+`DOCKER_TEST_SUBNET`、`DOCKER_MIGRATION_SUBNET`；这些值必须由 `DOCKER_BIP` 计算，防止
+网段漂移或重叠。
 
-- **改 `install-docker.sh`**：顶部三个变量 `DOCKER_BIP` / `DOCKER_ADDR_POOL_BASE` /
-  `DOCKER_ADDR_POOL_SIZE`，或部署前用同名环境变量覆盖：
-  ```bash
-  sudo DOCKER_BIP=173.17.0.1/16 DOCKER_ADDR_POOL_BASE=173.19.0.0/16 bash install-docker.sh
-  ```
-- **改 `omcgo-net`**：编辑 `deploy/docker-compose.infra.yml` 的 `networks.omcgo-net.ipam`
-  （app/web/monitoring 三个 compose 不重复声明 subnet，合并时以 infra 为准，只改这一处）。
-- 三段务必互不重叠，且都避开公司在用的网段。
+### 新部署规划
 
-### 已装机器手动套用（含当前测试机）
+通常不需要填写，交付包的 `deploy/.env` 已带固定默认值：
 
 ```bash
-sudo cp /etc/docker/daemon.json /etc/docker/daemon.json.bak 2>/dev/null
-# 用 python3 合并(保留 data-root / registry-mirrors 等键)
-sudo python3 - <<'PY'
-import json,os
-p="/etc/docker/daemon.json"; d={}
-if os.path.exists(p) and os.path.getsize(p):
-    try: d=json.load(open(p))
-    except: d={}
-d["bip"]="173.17.0.1/16"
-d["default-address-pools"]=[{"base":"173.19.0.0/16","size":24}]
-json.dump(d,open(p,"w"),indent=2,ensure_ascii=False); open(p,"a").write("\n")
-PY
-cd <部署目录> && docker compose down          # 停栈(释放旧 172.x 网络)
-sudo systemctl restart docker                 # 重建 docker0 到 173.17
-docker network prune -f                        # 清掉残留的 172.x 旧网桥
-docker compose up -d                           # omcgo-net 按 173.18 重建
-# 校验:172.x 不应再指向 docker0;docker0 应为 173.17
-ip route | grep -E '172\.(17|18|19|28)|docker0'
+DOCKER_BIP=10.240.0.1/16
 ```
-回滚：`sudo cp /etc/docker/daemon.json.bak /etc/docker/daemon.json && sudo systemctl restart docker`。
+
+只有发生业务网冲突时，才把这一行改成客户规划的可用地址，然后执行安装脚本。安装脚本会计算派生值并写回 `.env`，所有 Compose 和后续
+`svc.sh`、`healthcheck.sh` 操作都会复用该规划。
+
+`DOCKER_BIP` 的读取优先级是：显式环境变量，其次是部署 `.env`，最后是
+`/etc/docker/daemon.json` 中已有的合法 `bip`，最后才使用固定默认值
+`10.240.0.1/16`。因此升级旧环境时不会无故切换已有合法网桥；一旦在 `.env` 或环境变量
+中提供值，就以用户值为准。发布安装和 Docker 安装在计算或写入网络配置前都要求目标机
+已安装 `python3`。
+
+### 已装 Docker 修改规划
+
+```bash
+export DOCKER_BIP=10.240.0.1/16
+cd /opt/omc/infra/docker
+sudo -E bash install-docker.sh --skip-if-installed --no-mirror
+```
+
+修改 Docker 网桥前必须停止使用旧网段的容器。发布安装在执行网络门禁前只会自动删除
+无容器且属于 OMC 的规划外网络（`omcgo-*`、`omc-*` 或 Compose 项目标记为 `omc`/
+`omcgo`）；其他网络以及有容器依赖的网络不会被删除，必须先人工处理。
+
+`fix-docker-dns.sh` 的 daemon 配置写入和 Docker 重启仅支持 Linux。macOS/Docker
+Desktop 只执行 bridge/DNS 诊断并提示在 Docker Desktop 设置中手工配置，不写入
+`/etc/docker/daemon.json`。
+
+GPV NATS 验证脚本在 Linux Docker Engine 上默认使用 `--network host`，让宿主 Go
+测试直接访问临时 NATS 端口；在 macOS 或 Docker Desktop 上自动切换为
+`--network bridge` 并只发布 `127.0.0.1` 临时端口。平台探测异常时可显式指定：
+
+```bash
+# 在 OMC 交付包根目录执行（已安装环境可使用 /opt/omc/current）
+NATS_DOCKER_NETWORK=bridge bash deploy/verify-gpv-nats.sh
+```
+
+仅支持 `host` 和 `bridge`，不会使用 `none` 启动 NATS 验证容器。
+
+### 校验
+
+```bash
+cat /etc/docker/daemon.json
+ip -4 route
+docker network ls -q | xargs -r docker network inspect --format '{{.Name}} {{range .IPAM.Config}}{{.Subnet}} {{end}}'
+```
+
+所有 Docker bridge 都应属于当前 `DOCKER_BIP` 派生计划；如果修改了 `DOCKER_BIP`，
+必须重建旧 Compose 网络，单独修改 `docker-compose.yml` 不会改变已存在的 Docker 网络。

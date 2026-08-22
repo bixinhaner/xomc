@@ -4,6 +4,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/docker-network-lib.sh"
+
 echo "========================================="
 echo "  Docker 网络故障诊断工具"
 echo "========================================="
@@ -21,6 +24,22 @@ echo "-----------------------------------------"
 # 检查 Docker 网桥
 echo "Docker 网络列表:"
 docker network ls | grep bridge
+
+BRIDGE_SUBNETS="$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true)"
+NETWORK_ENV_FILE="${DOCKER_NETWORK_ENV_FILE:-$(cd "$SCRIPT_DIR/../.." && pwd)/.env}"
+if docker_network_resolve_bip_from_config "$NETWORK_ENV_FILE" && docker_network_plan; then
+    echo "Docker 网段规划检查 (DOCKER_BIP=$DOCKER_BIP, source=${DOCKER_BIP_SOURCE:-environment}):"
+    if [ "$BRIDGE_SUBNETS" != "${DOCKER_NETWORK_SUBNET} " ]; then
+        echo -e "${RED}❌ Docker bridge 不匹配 DOCKER_BIP 规划：实际=${BRIDGE_SUBNETS:-未知} 期望=${DOCKER_NETWORK_SUBNET}${NC}"
+        echo "  请先运行: DOCKER_BIP=$DOCKER_BIP sudo -E bash /opt/omc/infra/docker/install-docker.sh --skip-if-installed --no-mirror"
+        exit 1
+    else
+        echo -e "${GREEN}✅ Docker bridge 符合规划：$BRIDGE_SUBNETS${NC}"
+    fi
+else
+    daemon_bip="$(docker_network_read_daemon_bip 2>/dev/null || true)"
+    echo -e "${YELLOW}⚠️ 未提供 DOCKER_BIP 规划输入，跳过规划比对；daemon.json 当前 bip=${daemon_bip:-未知}（仅状态展示）${NC}"
+fi
 
 echo ""
 echo "bridge 网络详情:"
@@ -78,7 +97,7 @@ echo "-----------------------------------------"
 
 # 启动测试容器
 echo "启动测试容器..."
-CONTAINER_ID=$(docker run -d --rm alpine:3.19 sleep 300)
+CONTAINER_ID=$(docker run --network bridge -d --rm alpine:3.19 sleep 300)
 
 echo ""
 echo "容器 IP 地址:"
@@ -110,11 +129,10 @@ else
 fi
 
 echo -n "  ping 宿主机... "
-HOST_IP=$(docker exec $CONTAINER_ID route -n | grep '^0.0.0.0' | awk '{print $2}' | sed 's/\.1$/\.1/')
-if docker exec $CONTAINER_ID ping -c 1 -W 2 172.17.0.1 > /dev/null 2>&1; then
-    echo -e "${GREEN}✅ 通 (172.17.0.1)${NC}"
+if [ -n "$GATEWAY" ] && docker exec "$CONTAINER_ID" ping -c 1 -W 2 "$GATEWAY" > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ 通 ($GATEWAY)${NC}"
 else
-    echo -e "${RED}❌ 不通 (172.17.0.1)${NC}"
+    echo -e "${RED}❌ 不通 (网关: ${GATEWAY:-未知})${NC}"
 fi
 
 # 清理

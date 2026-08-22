@@ -62,10 +62,10 @@ test-integration:
 	bash scripts/integration_test.sh
 
 test-integration-up:
-	docker compose -f ../deployments/docker/docker-compose.test.yml up -d --wait
+	bash ../deployments/docker/dc-test.sh up -d --wait
 
 test-integration-down:
-	docker compose -f ../deployments/docker/docker-compose.test.yml down -v
+	bash ../deployments/docker/dc-test.sh down -v
 
 test-e2e:  ## Run end-to-end tests (requires Docker infrastructure)
 	bash scripts/e2e_test.sh

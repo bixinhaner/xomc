@@ -4,6 +4,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/docker-network-lib.sh"
+
 echo "=== Docker DNS 问题修复 ==="
 echo ""
 
@@ -12,6 +15,41 @@ if ! docker info > /dev/null 2>&1; then
     echo "❌ Docker 未运行,请先启动 Docker"
     exit 1
 fi
+
+HOST_OS="$(uname -s 2>/dev/null || echo unknown)"
+DOCKER_OPERATING_SYSTEM="$(docker info --format '{{.OperatingSystem}}' 2>/dev/null || true)"
+if [ "$HOST_OS" = "Darwin" ] || [[ "$DOCKER_OPERATING_SYSTEM" == *"Docker Desktop"* ]]; then
+    echo "⚠️  Docker Desktop/macOS 仅执行诊断，不写入 /etc/docker/daemon.json，也不通过 systemctl 重启 Docker。"
+    echo "当前 bridge 网络："
+    docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || echo "  无法读取 bridge 网络"
+    if docker image inspect alpine:3.19 >/dev/null 2>&1; then
+        if docker run --network bridge --rm alpine:3.19 nslookup mirrors.aliyun.com >/dev/null 2>&1; then
+            echo "✅ bridge 网络 DNS 解析正常"
+        else
+            echo "❌ bridge 网络 DNS 解析失败"
+        fi
+    else
+        echo "ℹ️  本地缺少 alpine:3.19，跳过容器 DNS 探针"
+    fi
+    echo "请在 Docker Desktop → Settings → Docker Engine 中手工配置 DNS，并按 Docker Desktop UI 重启。"
+    exit 0
+fi
+[ "$HOST_OS" = "Linux" ] || {
+    echo "❌ 当前系统不支持写入 Linux Docker daemon 配置：$HOST_OS"
+    exit 1
+}
+if ! docker_network_require_python3; then
+    echo "❌ 缺少 python3，无法安全计算和写入 Docker 网段策略"
+    exit 1
+fi
+if ! docker_network_resolve_bip; then
+    echo "❌ 无法解析 Docker 网段规划（默认值或自定义 DOCKER_BIP 均不可用）"
+    exit 1
+fi
+docker_network_plan || {
+    echo "❌ DOCKER_BIP 无效或无法派生 Docker 网段: $DOCKER_BIP"
+    exit 1
+}
 
 echo "1️⃣  备份当前 Docker 配置..."
 if [ -f /etc/docker/daemon.json ]; then
@@ -105,15 +143,41 @@ EOF
 fi
 
 echo ""
+echo "2️⃣  按 DOCKER_BIP 锁定 Docker 网段..."
+if ! command -v python3 > /dev/null 2>&1; then
+    echo "❌ 缺少 python3,无法安全写入 Docker 网段策略"
+    exit 1
+fi
+sudo python3 - /etc/docker/daemon.json "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" <<'PYEOF'
+import json
+import os
+import sys
+
+path, bip, pool_base, pool_size = sys.argv[1:]
+data = {}
+if os.path.exists(path) and os.path.getsize(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except json.JSONDecodeError:
+        data = {}
+data["bip"] = bip
+data["default-address-pools"] = [{"base": pool_base, "size": int(pool_size)}]
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, ensure_ascii=False)
+    handle.write("\n")
+PYEOF
+echo "✅ Docker 网段已按 DOCKER_BIP=$DOCKER_BIP 规划，地址池=$DOCKER_ADDR_POOL_BASE/$DOCKER_ADDR_POOL_SIZE"
+
+echo ""
 echo "3️⃣  重启 Docker 服务..."
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    echo "ℹ️  macOS 系统,请手动重启 Docker Desktop"
-    echo "   1. 点击菜单栏 Docker 图标"
-    echo "   2. 选择 'Restart'"
-    echo "   3. 等待重启完成"
-else
-    sudo systemctl restart docker
-    echo "✅ Docker 服务已重启"
+sudo systemctl restart docker
+echo "✅ Docker 服务已重启"
+
+BRIDGE_SUBNETS="$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true)"
+if [ "$BRIDGE_SUBNETS" != "${DOCKER_NETWORK_SUBNET} " ]; then
+    echo "❌ Docker bridge 不符合 DOCKER_BIP=$DOCKER_BIP 规划: ${BRIDGE_SUBNETS:-未知} (期望 ${DOCKER_NETWORK_SUBNET})"
+    exit 1
 fi
 
 echo ""
@@ -123,7 +187,7 @@ echo "✅ 构建缓存已清理"
 
 echo ""
 echo "5️⃣  测试 DNS 解析..."
-if docker run --rm alpine:3.19 nslookup mirrors.aliyun.com > /dev/null 2>&1; then
+if docker run --network bridge --rm alpine:3.19 nslookup mirrors.aliyun.com > /dev/null 2>&1; then
     echo "✅ DNS 解析正常"
 else
     echo "⚠️  DNS 解析可能仍有问题,请检查网络"

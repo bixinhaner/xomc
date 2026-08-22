@@ -3,6 +3,15 @@
 > **问题**: `docker compose build` 时 `go mod download` 报错 DNS 超时  
 > **错误**: `dial tcp: lookup mirrors.aliyun.com on 223.5.5.5:53: read udp 172.17.0.2:42280->223.5.5.5:53: i/o timeout`  
 > **创建时间**: 2025-04-10
+>
+> 以上 `172.17.0.2` 仅保留为历史故障样例。当前 Docker 网段以客户规划的 `DOCKER_BIP`
+> 为基准派生；规划库只接受 `10.0.0.0/8`、`192.168.0.0/16`、`100.64.0.0/10`，且
+> docker0、Compose、自动地址池、测试和迁移五个派生网段不得越界，请以规划库和 Compose
+> IPAM 校验为准。
+
+> **平台边界**：`fix-docker-dns.sh` 的 daemon 配置写入和 Docker 重启仅支持 Linux。
+> macOS/Docker Desktop 只适合运行诊断命令，并应在 Docker Desktop 的 Docker Engine
+> 设置中手工配置；脚本不会在 macOS 上写入 `/etc/docker/daemon.json`。
 
 ---
 
@@ -57,12 +66,20 @@ Docker 容器:
 
 **1. 创建或修改 `/etc/docker/daemon.json`**
 
-**方案 A: 使用修复脚本 (推荐,会合并配置)**
+Docker 网段默认使用 `10.240.0.1/16`。只有与客户业务网冲突时，才需要设置自定义
+`DOCKER_BIP`；未设置时脚本使用默认规划（已有合法 daemon 网桥仅作为存量兼容值）。
+
+**方案 A: 使用修复脚本 (Linux 推荐,会合并配置)**
 
 ```bash
 cd deployments/docker
+# DOCKER_BIP 由客户按实际业务网规划；脚本会自动派生其它 Docker 网段
+export DOCKER_BIP=10.240.0.1/16
 bash fix-docker-dns.sh
 ```
+
+上述脚本只在 Linux 上写入 `/etc/docker/daemon.json` 并重启 Docker；macOS/Docker
+Desktop 请使用 Docker Desktop → Settings → Docker Engine 手工配置。
 
 **脚本特性**:
 - ✅ 自动检测现有配置
@@ -72,32 +89,16 @@ bash fix-docker-dns.sh
 
 **方案 B: 手动配置**
 
-```bash
-# 如果 /etc/docker/daemon.json 不存在
-sudo cat > /etc/docker/daemon.json << 'EOF'
-{
-  "dns": [
-    "223.5.5.5",
-    "223.6.6.6",
-    "114.114.114.114",
-    "8.8.8.8"
-  ],
-  "dns-search": [],
-  "dns-opts": [
-    "timeout:2",
-    "attempts:3"
-  ]
-}
-EOF
+不要直接覆盖 `/etc/docker/daemon.json`，否则会丢失 Docker 网段规划。Linux 请设置客户
+规划的 `DOCKER_BIP` 后运行修复脚本；脚本会合并 DNS、`bip` 和自动地址池：
 
-# 如果已存在其他配置,使用 jq 合并
-sudo jq '. + {
-    "dns": ["223.5.5.5", "223.6.6.6", "114.114.114.114", "8.8.8.8"],
-    "dns-search": [],
-    "dns-opts": ["timeout:2", "attempts:3"]
-}' /etc/docker/daemon.json > /tmp/daemon.json.new
-sudo mv /tmp/daemon.json.new /etc/docker/daemon.json
+```bash
+export DOCKER_BIP=10.240.0.1/16
+bash deployments/docker/fix-docker-dns.sh
 ```
+
+macOS/Docker Desktop 请不要运行上述写配置脚本；使用 Docker Desktop → Settings →
+Docker Engine 手工配置并重启，或仅运行 `diagnose-dns.sh` 检查 bridge/DNS 状态。
 
 **2. 重启 Docker**
 
@@ -118,7 +119,7 @@ docker builder prune -f
 **4. 测试 DNS 解析**
 
 ```bash
-docker run --rm alpine:3.19 nslookup mirrors.aliyun.com
+docker run --network bridge --rm alpine:3.19 nslookup mirrors.aliyun.com
 ```
 
 **5. 重新构建**
@@ -262,12 +263,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-migra
 ### **立即修复 (5 分钟)**
 
 ```bash
-# 1. 配置 Docker DNS (方案 1)
-sudo cat > /etc/docker/daemon.json << 'EOF'
-{
-  "dns": ["223.5.5.5", "223.6.6.6", "114.114.114.114", "8.8.8.8"]
-}
-EOF
+# 1. 先按客户规划设置 Docker 网段，再配置 Docker DNS (方案 1)
+export DOCKER_BIP=10.240.0.1/16
+bash deployments/docker/fix-docker-dns.sh
 
 # 2. 重启 Docker
 # macOS: Docker Desktop → Restart
@@ -314,11 +312,11 @@ jobs:
 cat /etc/docker/daemon.json
 
 # 查看容器 DNS 配置
-docker run --rm alpine:3.19 cat /etc/resolv.conf
+docker run --network bridge --rm alpine:3.19 cat /etc/resolv.conf
 
 # 测试 DNS 解析
-docker run --rm alpine:3.19 nslookup mirrors.aliyun.com
-docker run --rm alpine:3.19 nslookup goproxy.cn
+docker run --network bridge --rm alpine:3.19 nslookup mirrors.aliyun.com
+docker run --network bridge --rm alpine:3.19 nslookup goproxy.cn
 ```
 
 ---
@@ -327,13 +325,13 @@ docker run --rm alpine:3.19 nslookup goproxy.cn
 
 ```bash
 # 测试 DNS 端口
-docker run --rm alpine:3.19 nc -vz -u 223.5.5.5 53
+docker run --network bridge --rm alpine:3.19 nc -vz -u 223.5.5.5 53
 
 # 测试 HTTPS 连接
-docker run --rm alpine:3.19 wget --spider https://mirrors.aliyun.com
+docker run --network bridge --rm alpine:3.19 wget --spider https://mirrors.aliyun.com
 
 # 测试 GOPROXY
-docker run --rm golang:1.25-alpine go env GOPROXY
+docker run --network bridge --rm golang:1.25-alpine go env GOPROXY
 ```
 
 ---
@@ -357,8 +355,8 @@ docker network ls
 docker network inspect bridge
 
 # 查看容器网络
-docker run --rm alpine:3.19 ip addr
-docker run --rm alpine:3.19 route -n
+docker run --network bridge --rm alpine:3.19 ip addr
+docker run --network bridge --rm alpine:3.19 route -n
 
 # 抓包分析
 sudo tcpdump -i docker0 port 53 -n
@@ -385,12 +383,9 @@ sudo journalctl -u docker -f
 ### **开发环境**: 方案 1 + 方案 3A
 
 ```bash
-# 1. 配置 Docker DNS
-sudo cat > /etc/docker/daemon.json << 'EOF'
-{
-  "dns": ["223.5.5.5", "223.6.6.6", "114.114.114.114"]
-}
-EOF
+# 1. 按客户规划配置 Docker DNS 和网段
+export DOCKER_BIP=10.240.0.1/16
+bash deployments/docker/fix-docker-dns.sh
 
 # 2. 修改 Dockerfile 添加重试
 # (参考方案 3A)

@@ -14,7 +14,7 @@
 #                                                          /var 可用 < 15G 时还会问要不要把数据目录切到 /home
 #   sudo bash install-docker.sh --mirror daocloud        # 一气呵成，装完直接配 DaoCloud 加速
 #   sudo bash install-docker.sh --no-mirror              # 装完不动 daemon.json，跳过加速
-#   sudo bash install-docker.sh --skip-if-installed      # 已装则静默 0 退出（脚本里调）
+#   sudo bash install-docker.sh --skip-if-installed      # 已装则只断言 DOCKER_BIP 规划后退出
 #   sudo bash install-docker.sh --uninstall              # 卸载 docker 引擎(默认 dry-run)
 #   sudo bash install-docker.sh --uninstall --force --keep-data
 #                                                        # 真删 dockerd / 二进制 / systemd unit,但保留 /var/lib/docker
@@ -27,7 +27,7 @@
 #                         其它任意 URL 请单独运行 ../setup-mirrors.sh 后手编 daemon.json
 #   --no-mirror           装完不引导加速、不动 daemon.json（用户后期可单独运行
 #                         ../setup-mirrors.sh）
-#   --skip-if-installed   已检测到 docker 时静默 0 退出（install.sh 调用时用）
+#   --skip-if-installed   已检测到 docker 时跳过引擎安装，但仍断言 DOCKER_BIP 规划（install.sh 调用时用）
 #
 #   ── 卸载模式 ─────────────────────────────────────────────────────────────
 #   --uninstall           进入卸载模式(默认 dry-run,仅打印将要做的动作,不实际执行)
@@ -69,6 +69,15 @@ log()  { echo -e "\033[1;36m[install-docker]\033[0m $*"; }
 warn() { echo -e "\033[1;33m[install-docker][警告]\033[0m $*" >&2; }
 die()  { echo -e "\033[1;31m[install-docker][错误]\033[0m $*" >&2; exit 1; }
 
+SCRIPT_DIR="$(dirname "$SELF")"
+if [ -f "$SCRIPT_DIR/docker-network-lib.sh" ]; then
+  . "$SCRIPT_DIR/docker-network-lib.sh"
+elif [ -f "$SCRIPT_DIR/../../../docker/docker-network-lib.sh" ]; then
+  . "$SCRIPT_DIR/../../../docker/docker-network-lib.sh"
+else
+  die "缺少 docker-network-lib.sh；无法按 DOCKER_BIP 规划 Docker 网段"
+fi
+
 # ── 参数解析 ────────────────────────────────────────────────────────────
 MIRROR=""
 NO_MIRROR=0
@@ -90,44 +99,75 @@ while [ $# -gt 0 ]; do
 done
 
 # ── Docker 网段规划 ───────────────────────────────────────────────────────
-# 公司内网约定：Docker 网络一律落在 173.x 段,避开公司 172.x 内网(172.17/172.24
-# 等仍在不断扩张)。三段互不重叠、整体避开 172:
-#   - docker0 默认网桥(bip)          → 173.17.0.0/16
-#   - omcgo-net(compose 业务网,固定) → 173.18.0.0/16（在 docker-compose.infra.yml 锁定）
-#   - 其它/未来自动创建的网络(池)     → 173.19.0.0/16，每网络 /24
-# 如需换段:改下面三个变量(或部署前用同名环境变量覆盖)即可,改一处即生效。
-# 说明:173.x 是公网地址族,这里沿用公司既有内部系统的约定(内网"借用"),
-#       前提是本机及内网都不会去访问真实的 173.17~173.19 公网目的地。
-DOCKER_BIP="${DOCKER_BIP:-173.17.0.1/16}"
-DOCKER_ADDR_POOL_BASE="${DOCKER_ADDR_POOL_BASE:-173.19.0.0/16}"
-DOCKER_ADDR_POOL_SIZE="${DOCKER_ADDR_POOL_SIZE:-24}"
+if [ "$UNINSTALL" = 0 ]; then
+  docker_network_require_python3 ||
+    die "缺少 python3，无法计算和校验 Docker 网段，不能继续安装 Docker" "python3 is required to calculate and validate Docker networks; Docker installation cannot continue"
+  if ! docker_network_resolve_bip; then
+    die "无法解析 Docker 网段规划（默认值或自定义 DOCKER_BIP 均不可用）" \
+      "Unable to resolve the Docker network plan (neither the default nor a custom DOCKER_BIP is usable)"
+  fi
+  docker_network_plan || die "DOCKER_BIP 无效或无法派生 Docker 网段：$DOCKER_BIP"
+  log "Docker 网段来源：${DOCKER_BIP_SOURCE:-unknown}，规划输入：$DOCKER_BIP"
+fi
 
-# ── assert_docker_network：幂等断言 docker0 网段(bip)+ 自动池(#155)──────────────
+cleanup_empty_unplanned_docker_networks() {
+  local removed_networks network_name subnet
+  removed_networks="$(docker_network_cleanup_unplanned_networks || true)"
+  while IFS=$'\t' read -r network_name subnet; do
+    [ -n "$network_name" ] || continue
+    log "清理无容器的规划外 Docker 网络：${network_name} (${subnet})"
+  done <<< "$removed_networks"
+}
+
+assert_no_unplanned_docker_networks() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker info >/dev/null 2>&1 || return 0
+
+  cleanup_empty_unplanned_docker_networks
+
+  local unplanned_networks
+  unplanned_networks="$(docker_network_unplanned_networks || true)"
+  [ -z "$unplanned_networks" ] ||
+    die "检测到未纳入 DOCKER_BIP 规划的 Docker 网络：${unplanned_networks}；请先停止并删除，或重新规划 DOCKER_BIP" \
+      "Docker networks outside the DOCKER_BIP plan were detected: ${unplanned_networks}; stop and remove them, or re-plan DOCKER_BIP"
+}
+
+# ── assert_docker_network：幂等断言 DOCKER_BIP 网段(bip)+ 自动池(#155)────────────
 # docker0 的 bip 由 /etc/docker/daemon.json 控制(compose 管不到 docker0)。历史 bug:bip 只
 # 在"全新装 dockerd"分支写,docker 已装即整段跳过、--skip-if-installed 更直接 exit 0 →
-# 一旦 daemon.json 被引擎升级覆盖 / 清空 / 手改丢失,docker0 回落默认 172.17 撞公司内网,
+# 一旦 daemon.json 被引擎升级覆盖 / 清空 / 手改丢失,docker0 会回落 Docker 默认网段并产生冲突,
 # 且后续部署不修复、静默回退。本函数让每次部署都断言 bip:已正确→不动不重启;漂移→写
 # daemon.json(python3 merge 保其它键)+ (docker 在跑时)重启使 docker0 生效。
 assert_docker_network() {
-  local DAEMON_JSON=/etc/docker/daemon.json cur_bip=""
-  if ! command -v python3 >/dev/null 2>&1; then
-    warn "未装 python3,无法 merge daemon.json 网段。请手动设 bip=${DOCKER_BIP} + default-address-pools=${DOCKER_ADDR_POOL_BASE}(/${DOCKER_ADDR_POOL_SIZE})"
-    return 0
-  fi
+  local DAEMON_JSON="${DOCKER_DAEMON_JSON:-/etc/docker/daemon.json}" cur_bip="" cur_pool_base="" cur_pool_size="" network_state=""
+  docker_network_plan || die "DOCKER_BIP 无效或无法派生 Docker 网段：$DOCKER_BIP"
   mkdir -p /etc/docker
   if [ -f "$DAEMON_JSON" ] && [ -s "$DAEMON_JSON" ]; then
-    cur_bip="$(python3 -c "import json
-try: print(json.load(open('$DAEMON_JSON')).get('bip',''))
-except Exception: print('')" 2>/dev/null || true)"
+    network_state="$(python3 - "$DAEMON_JSON" <<'PYEOF'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        data = json.load(handle)
+except (OSError, json.JSONDecodeError):
+    data = {}
+
+pools = data.get("default-address-pools")
+pool = pools[0] if isinstance(pools, list) and pools and isinstance(pools[0], dict) else {}
+print(f"{data.get('bip', '')}\t{pool.get('base', '')}\t{pool.get('size', '')}")
+PYEOF
+    )" || network_state=""
+    IFS=$'\t' read -r cur_bip cur_pool_base cur_pool_size <<< "$network_state"
   fi
-  if [ "$cur_bip" = "$DOCKER_BIP" ]; then
-    log "docker0 网段已是 bip=${DOCKER_BIP}，无需改动"
+  if [ "$cur_bip" = "$DOCKER_BIP" ] &&
+     [ "$cur_pool_base" = "$DOCKER_ADDR_POOL_BASE" ] &&
+     [ "$cur_pool_size" = "$DOCKER_ADDR_POOL_SIZE" ]; then
+    log "Docker 网段策略已生效：bip=${DOCKER_BIP}，Compose=${DOCKER_COMPOSE_SUBNET}，地址池=${DOCKER_ADDR_POOL_BASE}/${DOCKER_ADDR_POOL_SIZE}，无需改动"
     return 0
   fi
-  [ -n "$cur_bip" ] && log "docker0 bip 漂移(当前 '${cur_bip}' ≠ 约定 '${DOCKER_BIP}')，重新断言"
+  [ -n "$cur_bip" ] && log "Docker 网段策略漂移：bip='${cur_bip}'/pool='${cur_pool_base}/${cur_pool_size}'，按 DOCKER_BIP 重新断言"
   [ -f "$DAEMON_JSON" ] && cp -a "$DAEMON_JSON" "$DAEMON_JSON.bak.$(date +%Y%m%d%H%M%S)" || true
-  # best-effort：写失败只 warn 不中止部署(本函数在每次部署的 precheck 都会跑,set -e 下
-  # 裸 python3 失败会拖垮整个部署)。失败时 docker0 维持原状,与历史行为一致。
   if ! python3 - "$DAEMON_JSON" "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" <<'PYEOF'
 import json, os, sys
 p, bip, pool_base, pool_size = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
@@ -141,12 +181,11 @@ with open(p, 'w') as f:
     json.dump(data, f, indent=2, ensure_ascii=False); f.write('\n')
 PYEOF
   then
-    warn "写 ${DAEMON_JSON} 网段失败,docker0 bip 未更新(请手动设 bip=${DOCKER_BIP})"
-    return 0
+    die "写 ${DAEMON_JSON} 网段失败；禁止在 Docker 网段未按 DOCKER_BIP 规划时继续"
   fi
   log "已写入 ${DAEMON_JSON}：bip=${DOCKER_BIP}, default-address-pools=${DOCKER_ADDR_POOL_BASE}(/${DOCKER_ADDR_POOL_SIZE})"
   # docker 在运行 → 重启使 docker0 新 bip 生效(全新装时 docker 尚未起,交给后面的
-  # systemctl enable --now)。omcgo-net 锁 173.18 不受 bip 影响;仅 bip 实际漂移时才重启,
+  # systemctl enable --now)。Compose 网段由同一个 DOCKER_BIP 规划派生；仅网桥实际漂移时才重启,
   # 稳态零打扰(业务容器会随 docker 重启而重启)。
   if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet docker 2>/dev/null; then
     log "bip 变更且 docker 在运行,重启 docker 使 docker0 生效(业务容器会随之重启)..."
@@ -355,7 +394,7 @@ fi
 # 2026-05-29 改：docker 已装的环境(尤其 apt 装 docker.io + docker-compose 老仓
 # 库),Compose 是 Python V1,无法解析 compose v3.x 语法。这里把"已装跳过"拆为
 # 两档:
-#   - --skip-if-installed (install.sh 内部探测用):docker 已装就完全 exit 0
+#   - --skip-if-installed (install.sh 内部探测用):docker 已装则只执行网段断言后 exit 0
 #   - 默认(运维直跑):跳过 dockerd/containerd 二进制 + systemd unit 安装,
 #                     但**继续**走到下面的 cli-plugins 安装(docker-compose V2
 #                     plugin + docker-buildx),保证 `docker compose` 可用。
@@ -363,7 +402,8 @@ SKIP_DOCKERD=0
 if command -v docker >/dev/null 2>&1; then
   if [ "$SKIP_IF_INSTALLED" = 1 ]; then
     log "已检测到 Docker：$(docker --version)，跳过安装；仍断言 docker0 网段（--skip-if-installed）"
-    assert_docker_network   # #155：即便不装 docker,也每次部署断言 docker0 bip,防 172.17 回落
+    assert_docker_network   # #155：即便不装 docker,也每次部署断言 docker0 bip
+    assert_no_unplanned_docker_networks
     exit 0
   fi
   log "已检测到 Docker：$(docker --version)，跳过 dockerd/containerd 二进制与 systemd unit 安装"
@@ -571,13 +611,17 @@ systemctl enable --now docker
 
 echo
 docker version
+assert_no_unplanned_docker_networks
 log "Docker 安装完成。"
 
 fi  # ← end "if [ \"$SKIP_DOCKERD\" = 0 ]" 包住 systemd unit + daemon.json + systemctl 启动
 
 # docker 已装(SKIP_DOCKERD=1,运维直跑未带 --skip-if-installed):上面全新装段被整段跳过,
-# 这里补断言 docker0 网段,确保 bip 漂移(回落 172.17)也能被每次部署修复(#155)。
-[ "$SKIP_DOCKERD" = 1 ] && assert_docker_network
+# 这里补断言 docker0 网段,确保 bip 漂移也能被每次部署修复(#155)。
+if [ "$SKIP_DOCKERD" = 1 ]; then
+  assert_docker_network
+  assert_no_unplanned_docker_networks
+fi
 
 # ── 加速镜像配置 ────────────────────────────────────────────────────────
 if [ "$NO_MIRROR" = 1 ]; then

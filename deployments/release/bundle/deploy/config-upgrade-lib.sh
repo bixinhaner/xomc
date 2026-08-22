@@ -258,21 +258,62 @@ acs_has_trusted_proxy_cidrs() {
 }
 
 # Older retained ACS configs predate the trusted Web gateway declaration. Copy
-# only this server child from the release template; never rewrite other server
-# timeouts, TLS paths, or operator settings.
+# only this server child from the release template; a historical built-in
+# gateway CIDR is migrated to the DOCKER_BIP-derived template, while any
+# operator-customized CIDR remains untouched.
 upgrade_acs_trusted_proxy_cidrs() {
-  local live_config="$1" template_config="$2" template_line tmp
+  local live_config="$1" template_config="$2" desired_cidr="${3:-}" template_line planned_line tmp
   [ -f "$live_config" ] || return 1
   [ -f "$template_config" ] || return 1
-  acs_has_trusted_proxy_cidrs "$live_config" && return 0
   template_line="$(awk '
     /^[^[:space:]#][^:]*:/ { in_server = ($0 ~ /^server:[[:space:]]*(#.*)?$/) }
     in_server && /^[[:space:]]+trusted_proxy_cidrs:[[:space:]]*/ { print; found=1; exit }
     END { if (!found) exit 1 }
   ' "$template_config")" || return 1
 
+  planned_line="$template_line"
+  if [ -n "$desired_cidr" ] && [[ "$template_line" != *'${DOCKER_COMPOSE_SUBNET'* ]]; then
+    planned_line="$(printf '%s\n' "$template_line" | awk -v desired="$desired_cidr" '
+      {
+        prefix = $0
+        comment = ""
+        if (index($0, "#") > 0) comment = " " substr($0, index($0, "#"))
+        sub(/trusted_proxy_cidrs:.*/, "", prefix)
+        print prefix "trusted_proxy_cidrs: [\"" desired "\"]" comment
+      }
+    ')" || return 1
+  fi
+
+  if acs_has_trusted_proxy_cidrs "$live_config"; then
+    [ -n "$desired_cidr" ] || return 0
+    tmp="$(mktemp "${live_config}.trusted-proxy.tmp.XXXXXX")" || return 1
+    if ! awk -v addition="$planned_line" '
+        /^[^[:space:]#][^:]*:/ { in_server = ($0 ~ /^server:[[:space:]]*(#.*)?$/) }
+        in_server && /^[[:space:]]+trusted_proxy_cidrs:[[:space:]]*/ {
+          if ($0 ~ /\["173\.18\.0\.0\/16"\]/ && index($0, "${DOCKER_COMPOSE_SUBNET}") == 0) {
+            print addition
+          } else {
+            print
+          }
+          changed = 1
+          next
+        }
+        { print }
+        END { if (!changed) exit 42 }
+      ' "$live_config" > "$tmp"; then
+      rm -f "$tmp"
+      return 1
+    fi
+    if ! cmp -s "$live_config" "$tmp"; then
+      mv -f "$tmp" "$live_config" || { rm -f "$tmp"; return 1; }
+    else
+      rm -f "$tmp"
+    fi
+    return 0
+  fi
+
   tmp="$(mktemp "${live_config}.trusted-proxy.tmp.XXXXXX")" || return 1
-  if ! awk -v addition="$template_line" '
+  if ! awk -v addition="$planned_line" '
       /^[^[:space:]#][^:]*:/ {
         if (in_server && !inserted) { print addition; inserted=1 }
         in_server = ($0 ~ /^server:[[:space:]]*(#.*)?$/)

@@ -24,6 +24,14 @@
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=secrets-lib.sh
 . "$DIR/secrets-lib.sh" || { echo "ERROR: 无法加载 secrets-lib.sh" >&2; exit 1; }
+if [ -f "$DIR/docker-network-lib.sh" ]; then
+  . "$DIR/docker-network-lib.sh"
+elif [ -f "$DIR/../../../docker/docker-network-lib.sh" ]; then
+  . "$DIR/../../../docker/docker-network-lib.sh"
+else
+  echo "ERROR: 缺少 docker-network-lib.sh，无法按 DOCKER_BIP 规划 Docker 网段" >&2
+  exit 1
+fi
 
 # ---- 配置（可被环境变量 / 参数覆盖）----
 OMC_ROOT="${OMC_ROOT:-/opt/omc}"
@@ -91,6 +99,9 @@ detect_compose() {
 # （兼容 --skip-web/--skip-monitoring 部署，不存在的 compose 文件自动跳过）。
 build_dc() {
   cd "$DEPLOY_DIR" || die "进不去部署目录：$DEPLOY_DIR"
+  docker_network_resolve_bip "$DEPLOY_DIR/.env" ||
+    die "无法解析 Docker 网段规划（默认值或自定义 DOCKER_BIP 均不可用）"
+  docker_network_plan || die "DOCKER_BIP 无效或无法派生 Docker 网段：${DOCKER_BIP:-<空>}"
   # shellcheck disable=SC2206  # $COMPOSE 需按词拆分（"docker compose" → 两元素）
   DC=( $COMPOSE -p "$COMPOSE_PROJECT" )
   [ -f .env ]           && DC+=( --env-file .env )

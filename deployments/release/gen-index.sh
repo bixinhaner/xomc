@@ -216,12 +216,12 @@ sudo bash install-docker.sh --mirror daocloud       # 装完直接配 DaoCloud �
 sudo bash install-docker.sh --mirror xuanyuan       # 装完直接配轩辕加速(https://docker.xuanyuan.me)
 sudo bash install-docker.sh --mirror official       # 装完不配镜像,回归 Docker Hub 官方
 sudo bash install-docker.sh --no-mirror             # 装完不动 daemon.json,跳过加速引导
-sudo bash install-docker.sh --skip-if-installed     # 已装 docker 时静默 0 退出(脚本里调用)
+sudo DOCKER_BIP=10.240.0.1/16 bash install-docker.sh --skip-if-installed --no-mirror  # 按客户规划网段修复已装 Docker
 sudo bash install-docker.sh --uninstall             # 卸载 docker 引擎(dry-run,仅列 9 步计划;不动 OMC 业务数据)
 sudo bash install-docker.sh --uninstall --force     # 真删:dockerd/二进制/systemd unit + apt/yum 系统包
 sudo bash install-docker.sh --uninstall --force --keep-data  # 真删但保留数据目录,日后重装可复用镜像
 sudo bash install-docker.sh -h                      # 查看所有参数</pre>
-<p class="tip">install-docker.sh 自动:解压二进制 → 断言 docker0 网段(bip <code>173.17</code>/自动池 <code>173.19</code>,避开公司 <code>172</code> 内网)→ 写 containerd / docker 的 systemd 单元 → <code>enable --now</code> 开机自启 → 验证 → 引导加速镜像。<br>
+<p class="tip">install-docker.sh 默认使用固定 <code>DOCKER_BIP=10.240.0.1/16</code>；用户显式环境变量或部署 .env 中的自定义值优先，存量环境无用户值时兼容已有合法 daemon.json bip → 仅允许 10/8、192.168/16、100.64/10 且校验五个派生网段不越界 → 清理无容器的 OMC 规划外网络（其他网络或仍有容器挂载的网络需人工处理）→ 要求 python3 → 写入 daemon.json → 写 containerd / docker 的 systemd 单元 → <code>enable --now</code> 开机自启 → 验证 → 引导加速镜像。<br>
 <b>已装 docker 时</b>:跳过 dockerd 安装,但**仍补装** docker compose V2 + buildx plugin 到 <code>/usr/local/lib/docker/cli-plugins/</code>,解决系统 apt 装的 V1 Python compose 不识别 v3.x 写法问题;网段断言照跑。<br>
 <b>卸载 docker 引擎</b>用 <code>--uninstall</code>(默认 dry-run,加 <code>--force</code> 真删,<code>--keep-data</code> 保留镜像数据);它只清 docker 本身,<b>不删</b> <code>/opt/omc</code> 等 OMC 业务数据 —— 先 <code>uninstall.sh</code> 再 <code>install-docker.sh --uninstall</code>。</p>
 
