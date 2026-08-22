@@ -1,7 +1,7 @@
 # OMC 前端 —— 内网离线部署用（业务镜像 IMAGE_WEB，含 nginx + 已构建前端）
 #
 # 镜像由 build-release.sh 经 Dockerfile.web 多阶段构建产出（npm workspace 三阶
-# 段：deps / builder / nginx:alpine + COPY dist + nginx 配置），随项目交付包发
+# 段：deps / builder / nginx:1.31.2-alpine + COPY dist + nginx 配置），随项目交付包发
 # 布；运维侧 docker load 即用，无需再做前端构建。
 #
 # 镜像内已 COPY nginx.conf / default.conf；本 compose 仍把同目录两个 conf 文件

@@ -26,12 +26,14 @@ cd deployments/release
 
 可不下载；`build-release.sh` 会告警但继续，运维侧跳过"离线安装 Docker"即可。
 
-## Docker 网段规划（唯一输入：DOCKER_BIP）
+## Docker 网段规划输入（DOCKER_BIP）
 
-`DOCKER_BIP` 是客户侧唯一需要规划的 Docker 网桥地址。生产安装不会替客户选择
-默认网段；如果没有配置 `DOCKER_BIP`，安装会停止并要求先完成网络规划。客户应根据
-实际业务网、路由和安全策略选择不冲突的 IPv4 网段；当前实现仍拒绝 `172.0.0.0/8`，
-以避免再次产生公司内网冲突。
+默认情况下使用固定的 Docker 网桥规划 `10.240.0.1/16`，通常不需要现场配置。
+只有该网段与客户业务网络冲突时，才需要在环境变量或部署 `.env` 中填写客户自定义的
+`DOCKER_BIP`。当前只允许
+`10.0.0.0/8`、`192.168.0.0/16`、`100.64.0.0/10`，并要求 docker0、Compose、
+自动地址池、测试和迁移五个派生网段全部落在对应允许范围内；`172.x`、公网段和派生
+越界值都会被拒绝。
 
 规划库会按 `DOCKER_BIP` 所在网络块连续派生：
 
@@ -59,14 +61,20 @@ Compose 业务网 10.241.0.0/16
 
 ### 新部署规划
 
-在交付包的 `deploy/.env` 中只填写：
+通常不需要填写，交付包的 `deploy/.env` 已带固定默认值：
 
 ```bash
 DOCKER_BIP=10.240.0.1/16
 ```
 
-然后执行安装脚本。安装脚本会计算派生值并写回 `.env`，所有 Compose 和后续
+只有发生业务网冲突时，才把这一行改成客户规划的可用地址，然后执行安装脚本。安装脚本会计算派生值并写回 `.env`，所有 Compose 和后续
 `svc.sh`、`healthcheck.sh` 操作都会复用该规划。
+
+`DOCKER_BIP` 的读取优先级是：显式环境变量，其次是部署 `.env`，最后是
+`/etc/docker/daemon.json` 中已有的合法 `bip`，最后才使用固定默认值
+`10.240.0.1/16`。因此升级旧环境时不会无故切换已有合法网桥；一旦在 `.env` 或环境变量
+中提供值，就以用户值为准。发布安装和 Docker 安装在计算或写入网络配置前都要求目标机
+已安装 `python3`。
 
 ### 已装 Docker 修改规划
 
@@ -76,8 +84,13 @@ cd /opt/omc/infra/docker
 sudo -E bash install-docker.sh --skip-if-installed --no-mirror
 ```
 
-修改Docker网桥前必须停止使用旧网段的容器。发布安装在执行网络门禁前会自动删除
-无容器的规划外网络；有容器依赖的规划外网络不会被删除，必须先人工处理。
+修改 Docker 网桥前必须停止使用旧网段的容器。发布安装在执行网络门禁前只会自动删除
+无容器且属于 OMC 的规划外网络（`omcgo-*`、`omc-*` 或 Compose 项目标记为 `omc`/
+`omcgo`）；其他网络以及有容器依赖的网络不会被删除，必须先人工处理。
+
+`fix-docker-dns.sh` 的 daemon 配置写入和 Docker 重启仅支持 Linux。macOS/Docker
+Desktop 只执行 bridge/DNS 诊断并提示在 Docker Desktop 设置中手工配置，不写入
+`/etc/docker/daemon.json`。
 
 GPV NATS 验证脚本在 Linux Docker Engine 上默认使用 `--network host`，让宿主 Go
 测试直接访问临时 NATS 端口；在 macOS 或 Docker Desktop 上自动切换为

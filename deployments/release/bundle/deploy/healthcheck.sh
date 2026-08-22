@@ -76,8 +76,9 @@ else
   echo "  [FAIL] 缺 docker-network-lib.sh，无法按 DOCKER_BIP 规划 Docker 网段" >&2
   exit 1
 fi
-if ! docker_network_resolve_bip "$DEPLOY_DIR/.env"; then
-  echo "  [FAIL] 未找到 DOCKER_BIP；请在 $DEPLOY_DIR/.env 中配置客户规划网段，或通过环境变量传入" >&2
+if ! docker_network_resolve_bip_from_config "$DEPLOY_DIR/.env"; then
+  daemon_bip="$(docker_network_read_daemon_bip 2>/dev/null || true)"
+  echo "  [FAIL] 无法解析 Docker 网段规划（默认值或自定义 DOCKER_BIP 均不可用；daemon.json 当前 bip 仅作状态展示：${daemon_bip:-<空>}）" >&2
   exit 1
 fi
 docker_network_plan || {

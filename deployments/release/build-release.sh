@@ -413,8 +413,9 @@ OMCGO_DOCKER_ROOT_DIR=/var/lib/docker
 OMCGO_DOCKER_VOLUME_PREFIX=omcgo
 OMCGO_HOST_LOGS_PATH=/opt/omc/run/logs
 OMCGO_HOST_DATA_PATH=/opt/omc/data
-# Docker 网络规划唯一输入。部署前请按客户实际业务网规划 DOCKER_BIP；以下派生值由 install.sh 自动生成。
-DOCKER_BIP=
+# Docker 网络规划默认使用 release.conf 的固定 DOCKER_BIP_DEFAULT；仅在与客户业务网冲突时，
+# 才在部署前配置自定义 DOCKER_BIP，以下派生值由 install.sh 自动生成。
+DOCKER_BIP=${DOCKER_BIP_DEFAULT}
 DOCKER_NETWORK_SUBNET=
 DOCKER_NETWORK_GATEWAY=
 DOCKER_COMPOSE_SUBNET=

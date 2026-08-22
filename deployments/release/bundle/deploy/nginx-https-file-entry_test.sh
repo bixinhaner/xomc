@@ -6,6 +6,7 @@ RELEASE_DEPLOY="$REPO_ROOT/deployments/release/bundle/deploy"
 BUILD_RELEASE="$REPO_ROOT/deployments/release/build-release.sh"
 GITIGNORE="$REPO_ROOT/.gitignore"
 REPO_CERT_DIR="$RELEASE_DEPLOY/nginx-cert"
+NGINX_TEST_IMAGE="${NGINX_TEST_IMAGE:-nginx:1.31.2-alpine}"
 NGINX_DEFAULT="$REPO_ROOT/deployments/docker/default.conf"
 ENTRYPOINT="$REPO_ROOT/deployments/docker/docker-entrypoint.d/10-enable-https-file-entry.sh"
 DEV_COMPOSE="$REPO_ROOT/deployments/docker/docker-compose.yml"
@@ -201,7 +202,7 @@ PY
   else
     bad "python3 is required for temporary-certificate upload/download smoke fixture"
   fi
-  if command -v docker >/dev/null 2>&1 && docker image inspect nginx:alpine >/dev/null 2>&1; then
+  if command -v docker >/dev/null 2>&1 && docker image inspect "$NGINX_TEST_IMAGE" >/dev/null 2>&1; then
     nginx_legacy_conf="$TMP/nginx-1024-test.conf"
     cat >"$nginx_legacy_conf" <<'NGINX'
 events {}
@@ -222,9 +223,9 @@ NGINX
         -v "$OPENSSL_LEGACY_CONF:/etc/nginx/openssl-legacy.cnf:ro" \
         -v "$REPO_CERT_DIR:/etc/nginx/cert:ro" \
         -v "$nginx_legacy_conf:/etc/nginx/nginx.conf:ro" \
-        nginx:alpine nginx -t
+        "$NGINX_TEST_IMAGE" nginx -t
   else
-    echo "WARN: docker or local nginx:alpine image unavailable; 1024-bit nginx config execution test skipped" >&2
+    echo "WARN: docker or local $NGINX_TEST_IMAGE image unavailable; 1024-bit nginx config execution test skipped" >&2
   fi
 else
   echo "WARN: openssl unavailable; certificate mismatch execution tests skipped" >&2

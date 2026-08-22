@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 # Resolve and derive every Docker network value from DOCKER_BIP.
+# The fixed fallback keeps ordinary deployments configuration-free; operators only
+# need to override it when the default range overlaps the business network.
+DOCKER_BIP_DEFAULT="10.240.0.1/16"
+
 docker_network_env_value() {
   local file="$1" key="$2"
   [ -f "$file" ] || return 0
@@ -35,26 +39,53 @@ except (OSError, json.JSONDecodeError):
 PYEOF
 }
 
-docker_network_resolve_bip() {
+docker_network_require_python3() {
+  command -v python3 >/dev/null 2>&1 || {
+    echo "python3 is required for Docker network planning and validation" >&2
+    return 1
+  }
+}
+
+docker_network_resolve_bip_from_user_config() {
   local file value
   if [ -n "${DOCKER_BIP:-}" ]; then
+    DOCKER_BIP_SOURCE=environment
     return 0
   fi
   for file in "$@"; do
     value="$(docker_network_env_value "$file" DOCKER_BIP)"
     if [ -n "$value" ]; then
       DOCKER_BIP="$value"
-      export DOCKER_BIP
+      DOCKER_BIP_SOURCE="$file"
+      export DOCKER_BIP DOCKER_BIP_SOURCE
       return 0
     fi
   done
+  return 1
+}
+
+docker_network_resolve_bip_from_config() {
+  docker_network_resolve_bip_from_user_config "$@" && return 0
+  DOCKER_BIP="$DOCKER_BIP_DEFAULT"
+  DOCKER_BIP_SOURCE=default
+  export DOCKER_BIP DOCKER_BIP_SOURCE
+  return 0
+}
+
+docker_network_resolve_bip() {
+  local value
+  docker_network_resolve_bip_from_user_config "$@" && return 0
   value="$(docker_network_read_daemon_bip "${DOCKER_DAEMON_JSON:-/etc/docker/daemon.json}")"
-  if [ -n "$value" ]; then
+  if [ -n "$value" ] && (DOCKER_BIP="$value" docker_network_plan >/dev/null 2>&1); then
     DOCKER_BIP="$value"
-    export DOCKER_BIP
+    DOCKER_BIP_SOURCE="${DOCKER_DAEMON_JSON:-/etc/docker/daemon.json}"
+    export DOCKER_BIP DOCKER_BIP_SOURCE
     return 0
   fi
-  return 1
+  DOCKER_BIP="$DOCKER_BIP_DEFAULT"
+  DOCKER_BIP_SOURCE=default
+  export DOCKER_BIP DOCKER_BIP_SOURCE
+  return 0
 }
 
 docker_network_plan() {
@@ -62,10 +93,7 @@ docker_network_plan() {
     echo "DOCKER_BIP must be planned by the operator" >&2
     return 1
   }
-  command -v python3 >/dev/null 2>&1 || {
-    echo "python3 is required to calculate the Docker network plan" >&2
-    return 1
-  }
+  docker_network_require_python3 || return 1
 
   local plan key value
   plan="$(python3 - "$DOCKER_BIP" <<'PYEOF'
@@ -84,8 +112,14 @@ if not 16 <= interface.network.prefixlen <= 24:
     raise SystemExit("DOCKER_BIP prefix must be between /16 and /24")
 if interface.ip == interface.network.network_address or interface.ip == interface.network.broadcast_address:
     raise SystemExit("DOCKER_BIP must use a host address, not a network or broadcast address")
-if interface.network.overlaps(ipaddress.ip_network("172.0.0.0/8")):
-  raise SystemExit("DOCKER_BIP must not use the reserved 172.0.0.0/8 range")
+
+allowed_ranges = [
+  ipaddress.ip_network("10.0.0.0/8"),
+  ipaddress.ip_network("192.168.0.0/16"),
+  ipaddress.ip_network("100.64.0.0/10"),
+]
+if not any(interface.network.subnet_of(allowed) for allowed in allowed_ranges):
+  raise SystemExit("DOCKER_BIP must be within 10.0.0.0/8, 192.168.0.0/16, or 100.64.0.0/10")
 
 base = int(interface.network.network_address)
 block_size = interface.network.num_addresses
@@ -94,7 +128,10 @@ for offset in range(5):
     start = base + offset * block_size
     if start + block_size > 2**32:
         raise SystemExit("DOCKER_BIP leaves insufficient IPv4 space for the derived Docker networks")
-    networks.append(ipaddress.ip_network((start, interface.network.prefixlen)))
+    network = ipaddress.ip_network((start, interface.network.prefixlen))
+    if not any(network.subnet_of(allowed) for allowed in allowed_ranges):
+      raise SystemExit("DOCKER_BIP derived Docker networks must stay within the allowed range")
+    networks.append(network)
 
 pool_size = max(interface.network.prefixlen, 24)
 print(f"DOCKER_NETWORK_SUBNET={networks[0]}")
@@ -220,6 +257,20 @@ docker_network_unplanned_networks() {
   done < <(docker network ls -q 2>/dev/null || true)
 }
 
+docker_network_is_omc_owned() {
+  local network_id="$1" network_name compose_project
+  network_name="$(docker network inspect "$network_id" --format '{{.Name}}' 2>/dev/null || true)"
+  case "$network_name" in
+    omcgo-*|omc-*) return 0 ;;
+  esac
+
+  compose_project="$(docker network inspect "$network_id" --format '{{index .Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
+  case "$compose_project" in
+    omc|omcgo) return 0 ;;
+  esac
+  return 1
+}
+
 docker_network_cleanup_unplanned_networks() {
   command -v docker >/dev/null 2>&1 || return 0
   docker info >/dev/null 2>&1 || return 0
@@ -231,6 +282,7 @@ docker_network_cleanup_unplanned_networks() {
     case "$network_name" in
       bridge|host|none) continue ;;
     esac
+    docker_network_is_omc_owned "$network_id" || continue
 
     unplanned_subnet=""
     while IFS= read -r subnet; do

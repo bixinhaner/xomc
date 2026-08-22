@@ -76,7 +76,7 @@ RUN grep -oE '/assets/[^"]+\.js' webcode/dist/index.html | while read f; do \
 
 # 阶段3: Nginx 静态服务
 # V1 发布在根目录；旧 /v2、/v3 URL 由 Nginx 重定向到根路径。
-FROM nginx:alpine
+FROM nginx:1.31.2-alpine
 COPY --from=builder /app/webcode/dist    /usr/share/nginx/html
 COPY deployments/docker/nginx.conf /etc/nginx/nginx.conf
 ARG NGINX_DEFAULT_CONF=deployments/docker/default.conf

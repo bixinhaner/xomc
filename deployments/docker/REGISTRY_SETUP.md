@@ -13,7 +13,7 @@
 
 ```
 ERROR [acs internal] load metadata for docker.io/library/alpine:3.19
-ERROR [web internal] load metadata for docker.io/library/nginx:alpine
+ERROR [web internal] load metadata for docker.io/library/nginx:1.31.2-alpine
 target acs: failed to solve: DeadlineExceeded: alpine:3.19: failed to resolve source metadata
 dial tcp 98.159.108.61:443: i/o timeout
 ```

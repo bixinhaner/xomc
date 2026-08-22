@@ -82,8 +82,11 @@ docker compose version
 ```bash
 # 在项目根目录 goomc/ 下执行
 
-# 1. 规划网段、构建所有镜像并后台启动
-DOCKER_BIP=10.240.0.1/16 bash deployments/docker/dc.sh up -d --build
+# 1. 使用默认网段构建所有镜像并后台启动
+bash deployments/docker/dc.sh up -d --build
+
+# 只有默认网段与客户业务网冲突时，才传入自定义规划：
+# DOCKER_BIP=10.250.0.1/16 bash deployments/docker/dc.sh up -d --build
 
 # 如需后续命令不再重复传参，请把同一个客户规划值写入项目根 .env：
 # DOCKER_BIP=10.240.0.1/16
@@ -98,7 +101,7 @@ bash deployments/docker/dc.sh logs -f
 ### 4.2 日常启动（跳过构建）
 
 ```bash
-# 项目根 .env 已配置 DOCKER_BIP 后执行
+# 默认使用 10.240.0.1/16；项目根 .env 中可填写冲突时的自定义 DOCKER_BIP
 bash deployments/docker/dc.sh up -d
 ```
 
@@ -322,7 +325,7 @@ OMCGO_JWT_SECRET=your-strong-secret-here
   └─ COPY omcmb/webcode/ 源码
   └─ npm run build → /app/dist
 
-阶段2（runtime）：nginx:alpine
+阶段2（runtime）：nginx:1.31.2-alpine
   └─ 复制构建产物 /app/dist → /usr/share/nginx/html
   └─ COPY nginx.conf → /etc/nginx/nginx.conf（内嵌到镜像，无需运行时挂载）
   └─ COPY default.conf → /etc/nginx/conf.d/default.conf（内嵌到镜像，无需运行时挂载）

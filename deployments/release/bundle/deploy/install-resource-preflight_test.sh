@@ -276,6 +276,7 @@ if env \
   PATH="$BIN_IMAGE:$PATH" \
   DOCKER_LOG="$TMP/docker.log" \
   SYSTEMCTL_LOG="$TMP/systemctl.log" \
+  DOCKER_DAEMON_JSON="$TMP/daemon.json" \
   MISSING_IMAGE="mirror/cadvisor:v1" \
   bash "$PKG_IMAGE/deploy/install.sh" \
     --skip-infra --skip-web --yes --check-only \
@@ -303,6 +304,7 @@ cp "$SCRIPT_DIR/../../../docker/docker-network-lib.sh" "$SVC_DIR/docker-network-
 : >"$SVC_DIR/docker-compose.app.yml"
 cat >"$SVC_DIR/.env" <<EOF
 OMCGO_SKIP_MONITORING=1
+DOCKER_BIP=10.240.0.1/16
 POSTGRES_DATA_PATH=$TMP/data/postgres
 TSDB_DATA_PATH=$TMP/data/timescaledb
 REDIS_DATA_PATH=$TMP/data/redis

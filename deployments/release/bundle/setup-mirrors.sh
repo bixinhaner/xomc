@@ -221,13 +221,10 @@ configure_docker() {
   [ -z "$choice" ] && { log "Docker：未指定 --docker，跳过"; return; }
   command -v docker >/dev/null 2>&1 || { warn "Docker：未检测到 docker，跳过本项"; return; }
 
-  if [ -z "${DOCKER_BIP:-}" ]; then
-    DOCKER_BIP="$(docker_network_read_daemon_bip "$DAEMON_JSON")"
-    export DOCKER_BIP
-  fi
-  if [ -z "${DOCKER_BIP:-}" ]; then
-    die "Docker：未找到 DOCKER_BIP；请先设置客户规划的 Docker 网桥网段，或确认 daemon.json 已配置 bip"
-  fi
+  docker_network_require_python3 ||
+    die "Docker：缺少 python3，无法计算和校验 Docker 网段，不能修改 daemon.json"
+  docker_network_resolve_bip "${DOCKER_NETWORK_ENV_FILE:-$SCRIPT_DIR/deploy/.env}" ||
+    die "Docker：无法解析网段规划（默认值或自定义 DOCKER_BIP 均不可用）"
   docker_network_plan || die "Docker：DOCKER_BIP 无效或无法派生网络：$DOCKER_BIP"
 
   local urls=""
@@ -244,8 +241,7 @@ configure_docker() {
   local OLD_HASH=""
   [ -f "$DAEMON_JSON" ] && OLD_HASH="$(sha256sum "$DAEMON_JSON" | cut -d' ' -f1)"
 
-  if command -v python3 >/dev/null 2>&1; then
-    python3 - "$DAEMON_JSON" "$urls" "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" <<'PYEOF'
+  python3 - "$DAEMON_JSON" "$urls" "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" <<'PYEOF'
 import json, os, sys
 p, urls, bip, pool_base, pool_size = sys.argv[1:]
 data = {}
@@ -264,18 +260,6 @@ with open(p, 'w') as f:
     json.dump(data, f, indent=2, ensure_ascii=False)
     f.write('\n')
 PYEOF
-  else
-    # 降级：无 python3 时只在 daemon.json 不存在/空文件场景生成最小配置
-    if [ -s "$DAEMON_JSON" ]; then
-      die "Docker：未装 python3 且 daemon.json 已有内容；无法安全合并 DOCKER_BIP 网段和 registry-mirrors。请先运行 install-docker.sh 修复网段，或安装 python3" \
-        "Docker: python3 is unavailable and daemon.json already has content; cannot safely merge the DOCKER_BIP network plan and registry mirrors. Run install-docker.sh first or install python3"
-    fi
-    if [ -z "$urls" ]; then
-      printf '{\n  "bip": "%s",\n  "default-address-pools": [{"base": "%s", "size": %s}]\n}\n' "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" > "$DAEMON_JSON"
-    else
-      printf '{\n  "bip": "%s",\n  "default-address-pools": [{"base": "%s", "size": %s}],\n  "registry-mirrors": ["%s"]\n}\n' "$DOCKER_BIP" "$DOCKER_ADDR_POOL_BASE" "$DOCKER_ADDR_POOL_SIZE" "$urls" > "$DAEMON_JSON"
-    fi
-  fi
 
   local NEW_HASH=""
   [ -f "$DAEMON_JSON" ] && NEW_HASH="$(sha256sum "$DAEMON_JSON" | cut -d' ' -f1)"

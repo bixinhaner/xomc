@@ -16,8 +16,34 @@ if ! docker info > /dev/null 2>&1; then
     exit 1
 fi
 
+HOST_OS="$(uname -s 2>/dev/null || echo unknown)"
+DOCKER_OPERATING_SYSTEM="$(docker info --format '{{.OperatingSystem}}' 2>/dev/null || true)"
+if [ "$HOST_OS" = "Darwin" ] || [[ "$DOCKER_OPERATING_SYSTEM" == *"Docker Desktop"* ]]; then
+    echo "⚠️  Docker Desktop/macOS 仅执行诊断，不写入 /etc/docker/daemon.json，也不通过 systemctl 重启 Docker。"
+    echo "当前 bridge 网络："
+    docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || echo "  无法读取 bridge 网络"
+    if docker image inspect alpine:3.19 >/dev/null 2>&1; then
+        if docker run --network bridge --rm alpine:3.19 nslookup mirrors.aliyun.com >/dev/null 2>&1; then
+            echo "✅ bridge 网络 DNS 解析正常"
+        else
+            echo "❌ bridge 网络 DNS 解析失败"
+        fi
+    else
+        echo "ℹ️  本地缺少 alpine:3.19，跳过容器 DNS 探针"
+    fi
+    echo "请在 Docker Desktop → Settings → Docker Engine 中手工配置 DNS，并按 Docker Desktop UI 重启。"
+    exit 0
+fi
+[ "$HOST_OS" = "Linux" ] || {
+    echo "❌ 当前系统不支持写入 Linux Docker daemon 配置：$HOST_OS"
+    exit 1
+}
+if ! docker_network_require_python3; then
+    echo "❌ 缺少 python3，无法安全计算和写入 Docker 网段策略"
+    exit 1
+fi
 if ! docker_network_resolve_bip; then
-    echo "❌ 未找到 DOCKER_BIP；请先设置客户规划的 DOCKER_BIP，或确认 daemon.json 已配置 bip"
+    echo "❌ 无法解析 Docker 网段规划（默认值或自定义 DOCKER_BIP 均不可用）"
     exit 1
 fi
 docker_network_plan || {
@@ -145,15 +171,8 @@ echo "✅ Docker 网段已按 DOCKER_BIP=$DOCKER_BIP 规划，地址池=$DOCKER_
 
 echo ""
 echo "3️⃣  重启 Docker 服务..."
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    echo "ℹ️  macOS 系统,请手动重启 Docker Desktop"
-    echo "   1. 点击菜单栏 Docker 图标"
-    echo "   2. 选择 'Restart'"
-    echo "   3. 等待重启完成"
-else
-    sudo systemctl restart docker
-    echo "✅ Docker 服务已重启"
-fi
+sudo systemctl restart docker
+echo "✅ Docker 服务已重启"
 
 BRIDGE_SUBNETS="$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true)"
 if [ "$BRIDGE_SUBNETS" != "${DOCKER_NETWORK_SUBNET} " ]; then

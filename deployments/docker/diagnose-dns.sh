@@ -100,17 +100,19 @@ else
     check_result 1 "bridge 网络异常"
 fi
 
-if docker_network_resolve_bip && docker_network_plan; then
-    BRIDGE_SUBNETS="$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true)"
+NETWORK_ENV_FILE="${DOCKER_NETWORK_ENV_FILE:-$(cd "$SCRIPT_DIR/../.." && pwd)/.env}"
+BRIDGE_SUBNETS="$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true)"
+if docker_network_resolve_bip_from_config "$NETWORK_ENV_FILE" && docker_network_plan; then
+    if [ "$BRIDGE_SUBNETS" = "${DOCKER_NETWORK_SUBNET} " ]; then
+        check_result 0 "bridge 网络符合 DOCKER_BIP 规划 ($BRIDGE_SUBNETS)"
+    else
+        check_result 1 "bridge 网络不符合 DOCKER_BIP 规划 (${BRIDGE_SUBNETS:-未知}，期望 ${DOCKER_NETWORK_SUBNET:-未知})"
+        echo "  ${RED}请先按 DOCKER_BIP 规划运行 install-docker.sh，避免创建未规划网络${NC}"
+        exit 1
+    fi
 else
-    BRIDGE_SUBNETS=""
-fi
-if [ "$BRIDGE_SUBNETS" = "${DOCKER_NETWORK_SUBNET} " ]; then
-    check_result 0 "bridge 网络符合 DOCKER_BIP 规划 ($BRIDGE_SUBNETS)"
-else
-    check_result 1 "bridge 网络不符合 DOCKER_BIP 规划 (${BRIDGE_SUBNETS:-未知}，期望 ${DOCKER_NETWORK_SUBNET:-未知})"
-    echo "  ${RED}请先按 DOCKER_BIP 规划运行 install-docker.sh，避免创建未规划网络${NC}"
-    exit 1
+    daemon_bip="$(docker_network_read_daemon_bip 2>/dev/null || true)"
+    warn_result "未提供 DOCKER_BIP 规划输入，跳过规划比对；daemon.json 当前 bip=${daemon_bip:-未知}（仅状态展示）"
 fi
 
 echo ""

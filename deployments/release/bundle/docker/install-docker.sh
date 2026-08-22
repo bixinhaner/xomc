@@ -99,11 +99,16 @@ while [ $# -gt 0 ]; do
 done
 
 # ── Docker 网段规划 ───────────────────────────────────────────────────────
-if ! docker_network_resolve_bip; then
-  die "未找到 DOCKER_BIP；请先设置客户规划的 Docker 网桥网段，或确认 daemon.json 已配置 bip" \
-    "DOCKER_BIP is required; set the customer-planned Docker bridge network or configure bip in daemon.json"
+if [ "$UNINSTALL" = 0 ]; then
+  docker_network_require_python3 ||
+    die "缺少 python3，无法计算和校验 Docker 网段，不能继续安装 Docker" "python3 is required to calculate and validate Docker networks; Docker installation cannot continue"
+  if ! docker_network_resolve_bip; then
+    die "无法解析 Docker 网段规划（默认值或自定义 DOCKER_BIP 均不可用）" \
+      "Unable to resolve the Docker network plan (neither the default nor a custom DOCKER_BIP is usable)"
+  fi
+  docker_network_plan || die "DOCKER_BIP 无效或无法派生 Docker 网段：$DOCKER_BIP"
+  log "Docker 网段来源：${DOCKER_BIP_SOURCE:-unknown}，规划输入：$DOCKER_BIP"
 fi
-docker_network_plan || die "DOCKER_BIP 无效或无法派生 Docker 网段：$DOCKER_BIP"
 
 cleanup_empty_unplanned_docker_networks() {
   local removed_networks network_name subnet

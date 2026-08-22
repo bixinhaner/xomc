@@ -238,6 +238,8 @@ PUBLIC_HOST_OVERRIDE="${OMC_PUBLIC_HOST:-}"
 INFRA_DIR="/opt/omc/infra"
 OMC_ROOT="/opt/omc"
 COMPOSE_PROJECT="omcgo"
+# Keep the raw environment input empty here so the resolver can still honor a
+# custom value from deploy/.env before applying the fixed default.
 DOCKER_BIP="${DOCKER_BIP:-}"
 
 while [ $# -gt 0 ]; do
@@ -276,11 +278,14 @@ esac
 
 [ "$(id -u)" = 0 ] || die "请以 root 执行（sudo bash $0 ...）" "Run as root (sudo bash $0 ...)." 1
 
-if ! docker_network_resolve_bip "$PKG_ROOT/deploy/.env" "$OMC_ROOT/current/deploy/.env"; then
-  die "未找到 DOCKER_BIP；请在 deploy/.env 中填写客户规划的 Docker 网桥网段" "DOCKER_BIP is required; set the customer-planned Docker bridge network in deploy/.env" 1
-fi
+docker_network_require_python3 ||
+  die "缺少 python3，无法计算和校验 Docker 网段，不能继续安装" "python3 is required to calculate and validate Docker networks; installation cannot continue" 1
+
+docker_network_resolve_bip "$PKG_ROOT/deploy/.env" "$OMC_ROOT/current/deploy/.env" ||
+  die "无法解析 Docker 网段规划（默认值或自定义 DOCKER_BIP 均不可用）" "Unable to resolve the Docker network plan (neither the default nor a custom DOCKER_BIP is usable)" 1
 docker_network_plan ||
   die "DOCKER_BIP 无效或无法派生 Docker 网段：${DOCKER_BIP:-<空>}" "DOCKER_BIP is invalid or its Docker network plan cannot be derived: ${DOCKER_BIP:-<empty>}" 1
+log "Docker 网段来源：${DOCKER_BIP_SOURCE:-unknown}，规划输入：$DOCKER_BIP" "Docker network source: ${DOCKER_BIP_SOURCE:-unknown}; plan input: $DOCKER_BIP"
 if [ "$CHECK_ONLY" = 0 ] && [ -f "$PKG_ROOT/deploy/.env" ]; then
   docker_network_write_env_file "$PKG_ROOT/deploy/.env" ||
     die "无法把 DOCKER_BIP 派生的 Docker 网段写入 $PKG_ROOT/deploy/.env" "Unable to write the Docker network plan derived from DOCKER_BIP into $PKG_ROOT/deploy/.env" 1

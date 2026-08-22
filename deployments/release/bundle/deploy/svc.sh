@@ -88,9 +88,8 @@ elif [ -f "$SCRIPT_DIR/../../../docker/docker-network-lib.sh" ]; then
 else
   die "缺 docker-network-lib.sh；无法按 DOCKER_BIP 规划 Docker 网段"
 fi
-if ! docker_network_resolve_bip "$SCRIPT_DIR/.env"; then
-  die "未找到 DOCKER_BIP；请在 $SCRIPT_DIR/.env 中配置客户规划网段，或通过环境变量传入"
-fi
+docker_network_resolve_bip "$SCRIPT_DIR/.env" ||
+  die "无法解析 Docker 网段规划（默认值或自定义 DOCKER_BIP 均不可用）"
 docker_network_plan || die "DOCKER_BIP 无效或无法派生 Docker 网段：${DOCKER_BIP:-<空>}"
 if [ -f "$SCRIPT_DIR/storage-paths-lib.sh" ]; then
   . "$SCRIPT_DIR/storage-paths-lib.sh"

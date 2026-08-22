@@ -5,8 +5,13 @@
 > **创建时间**: 2025-04-10
 >
 > 以上 `172.17.0.2` 仅保留为历史故障样例。当前 Docker 网段以客户规划的 `DOCKER_BIP`
-> 为基准派生；新建或重建 Docker 网络不得复用任何 `172.x` 网段，请以规划库和 Compose
+> 为基准派生；规划库只接受 `10.0.0.0/8`、`192.168.0.0/16`、`100.64.0.0/10`，且
+> docker0、Compose、自动地址池、测试和迁移五个派生网段不得越界，请以规划库和 Compose
 > IPAM 校验为准。
+
+> **平台边界**：`fix-docker-dns.sh` 的 daemon 配置写入和 Docker 重启仅支持 Linux。
+> macOS/Docker Desktop 只适合运行诊断命令，并应在 Docker Desktop 的 Docker Engine
+> 设置中手工配置；脚本不会在 macOS 上写入 `/etc/docker/daemon.json`。
 
 ---
 
@@ -61,7 +66,10 @@ Docker 容器:
 
 **1. 创建或修改 `/etc/docker/daemon.json`**
 
-**方案 A: 使用修复脚本 (推荐,会合并配置)**
+Docker 网段默认使用 `10.240.0.1/16`。只有与客户业务网冲突时，才需要设置自定义
+`DOCKER_BIP`；未设置时脚本使用默认规划（已有合法 daemon 网桥仅作为存量兼容值）。
+
+**方案 A: 使用修复脚本 (Linux 推荐,会合并配置)**
 
 ```bash
 cd deployments/docker
@@ -69,6 +77,9 @@ cd deployments/docker
 export DOCKER_BIP=10.240.0.1/16
 bash fix-docker-dns.sh
 ```
+
+上述脚本只在 Linux 上写入 `/etc/docker/daemon.json` 并重启 Docker；macOS/Docker
+Desktop 请使用 Docker Desktop → Settings → Docker Engine 手工配置。
 
 **脚本特性**:
 - ✅ 自动检测现有配置
@@ -78,13 +89,16 @@ bash fix-docker-dns.sh
 
 **方案 B: 手动配置**
 
-不要直接覆盖 `/etc/docker/daemon.json`，否则会丢失 Docker 网段规划。请设置客户规划的
-`DOCKER_BIP` 后运行修复脚本；脚本会合并 DNS、`bip` 和自动地址池：
+不要直接覆盖 `/etc/docker/daemon.json`，否则会丢失 Docker 网段规划。Linux 请设置客户
+规划的 `DOCKER_BIP` 后运行修复脚本；脚本会合并 DNS、`bip` 和自动地址池：
 
 ```bash
 export DOCKER_BIP=10.240.0.1/16
 bash deployments/docker/fix-docker-dns.sh
 ```
+
+macOS/Docker Desktop 请不要运行上述写配置脚本；使用 Docker Desktop → Settings →
+Docker Engine 手工配置并重启，或仅运行 `diagnose-dns.sh` 检查 bridge/DNS 状态。
 
 **2. 重启 Docker**
 
