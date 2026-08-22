@@ -27,7 +27,9 @@ func TestConnMetrics_AllMetricNamesRegistered(t *testing.T) {
 	names := metricNames(families)
 	for _, want := range []string{
 		"nats_conn_status",
+		"nats_conn_state",
 		"nats_reconnect_total",
+		"nats_conn_closed_total",
 		"nats_msgs_in_total",
 		"nats_msgs_out_total",
 	} {
@@ -52,6 +54,29 @@ func TestConnMetrics_StatusReflectsConnected(t *testing.T) {
 	stub.setConnected(true)
 	cm.sample()
 	require.Equal(t, float64(1), testutil.ToFloat64(cm.Status))
+}
+
+func TestConnMetrics_StateReflectsNATSStatus(t *testing.T) {
+	t.Parallel()
+
+	stub := newStubConn(true, 0, 0)
+	stub.setStatus(nats.CONNECTED)
+	reg := prometheus.NewRegistry()
+	cm := registerConnMetricsWithProvider(stub, reg, WithConnMetricsInterval(time.Hour))
+	defer cm.Stop()
+
+	require.Equal(t, float64(1), testutil.ToFloat64(cm.State.WithLabelValues("connected")))
+	require.Equal(t, float64(0), testutil.ToFloat64(cm.State.WithLabelValues("reconnecting")))
+
+	stub.setStatus(nats.RECONNECTING)
+	cm.sample()
+	require.Equal(t, float64(0), testutil.ToFloat64(cm.State.WithLabelValues("connected")))
+	require.Equal(t, float64(1), testutil.ToFloat64(cm.State.WithLabelValues("reconnecting")))
+
+	stub.setStatus(nats.CLOSED)
+	cm.sample()
+	require.Equal(t, float64(0), testutil.ToFloat64(cm.State.WithLabelValues("reconnecting")))
+	require.Equal(t, float64(1), testutil.ToFloat64(cm.State.WithLabelValues("closed")))
 }
 
 func TestConnMetrics_MsgCountersIncreaseMonotonically(t *testing.T) {
@@ -100,6 +125,23 @@ func TestConnMetrics_ReconnectHandlerInstalled(t *testing.T) {
 	require.Equal(t, float64(2), testutil.ToFloat64(cm.ReconnectTotal))
 }
 
+func TestConnMetrics_ClosedHandlerInstalled(t *testing.T) {
+	t.Parallel()
+
+	stub := newStubConn(true, 0, 0)
+	reg := prometheus.NewRegistry()
+	cm := registerConnMetricsWithProvider(stub, reg, WithConnMetricsInterval(time.Hour))
+	defer cm.Stop()
+
+	cb := stub.closedHandler()
+	require.NotNil(t, cb, "RegisterConnMetrics must install closed handler")
+	require.Equal(t, float64(0), testutil.ToFloat64(cm.ClosedTotal))
+
+	cb(nil)
+	cb(nil)
+	require.Equal(t, float64(2), testutil.ToFloat64(cm.ClosedTotal))
+}
+
 func TestConnMetrics_StopIdempotent(t *testing.T) {
 	t.Parallel()
 
@@ -116,7 +158,7 @@ func TestConnMetrics_BackgroundSampling(t *testing.T) {
 	var calls atomic.Int64
 	sampler := func() connSnapshot {
 		calls.Add(1)
-		return connSnapshot{Connected: true, MsgsIn: uint64(calls.Load()), MsgsOut: uint64(calls.Load())}
+		return connSnapshot{Connected: true, State: nats.CONNECTED, MsgsIn: uint64(calls.Load()), MsgsOut: uint64(calls.Load())}
 	}
 	reg := prometheus.NewRegistry()
 	cm := RegisterConnMetricsWithSampler(sampler, reg, WithConnMetricsInterval(15*time.Millisecond))
@@ -147,13 +189,16 @@ func TestRegisterConnMetricsWithSampler_NilSamplerPanics(t *testing.T) {
 type stubConn struct {
 	mu          sync.Mutex
 	connected   bool
+	status      nats.Status
 	stats       nats.Statistics
 	reconnectCB nats.ConnHandler
+	closedCB    nats.ConnHandler
 }
 
 func newStubConn(connected bool, in, out uint64) *stubConn {
 	return &stubConn{
 		connected: connected,
+		status:    nats.CONNECTED,
 		stats:     nats.Statistics{InMsgs: in, OutMsgs: out},
 	}
 }
@@ -170,16 +215,40 @@ func (s *stubConn) IsConnected() bool {
 	return s.connected
 }
 
+func (s *stubConn) Status() nats.Status {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.status
+}
+
 func (s *stubConn) SetReconnectHandler(cb nats.ConnHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reconnectCB = cb
 }
 
+func (s *stubConn) SetClosedHandler(cb nats.ConnHandler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closedCB = cb
+}
+
 func (s *stubConn) setConnected(v bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.connected = v
+	if v {
+		s.status = nats.CONNECTED
+	} else {
+		s.status = nats.DISCONNECTED
+	}
+}
+
+func (s *stubConn) setStatus(status nats.Status) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.status = status
+	s.connected = status == nats.CONNECTED
 }
 
 func (s *stubConn) setStats(in, out uint64) {
@@ -192,6 +261,12 @@ func (s *stubConn) handler() nats.ConnHandler {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.reconnectCB
+}
+
+func (s *stubConn) closedHandler() nats.ConnHandler {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closedCB
 }
 
 // metricNames 提取 gather 出的所有 metric family 名字。

@@ -28,6 +28,7 @@ import (
 //
 // terminated / dropped 是"静默丢消息"的两条路径，告警阈值建议见 PR 遗留段。
 type EventBusMetrics struct {
+	PublishTotal  *prometheus.CounterVec
 	DeliveryTotal *prometheus.CounterVec
 	AckFailures   *prometheus.CounterVec
 	HandlerTime   *prometheus.HistogramVec
@@ -60,6 +61,10 @@ const pmQueueStatsDurable = "pm-workers"
 // NewEventBusMetrics creates and registers EventBus delivery metrics.
 func NewEventBusMetrics(reg prometheus.Registerer) *EventBusMetrics {
 	m := &EventBusMetrics{
+		PublishTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_eventbus_publish_total",
+			Help: "NATS JetStream publish outcomes by subject, outcome, and bounded error class.",
+		}, []string{"subject", "outcome", "error_class"}),
 		DeliveryTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "omc_eventbus_delivery_total",
 			Help: "NATS JetStream message delivery outcomes by subject and outcome (ack/nak/terminated/dropped).",
@@ -106,6 +111,7 @@ func NewEventBusMetrics(reg prometheus.Registerer) *EventBusMetrics {
 	m.QueueSampleTimestampSeconds.WithLabelValues(SubjectPMFileReceived, pmQueueStatsDurable).Set(0)
 	if reg != nil {
 		reg.MustRegister(
+			m.PublishTotal,
 			m.DeliveryTotal,
 			m.AckFailures,
 			m.HandlerTime,
@@ -150,6 +156,11 @@ func newQueueGauge(name, help string) *prometheus.GaugeVec {
 
 // outcome 标签取值常量，避免散落字符串拼写漂移。
 const (
+	publishOutcomeSuccess        = "success"
+	publishOutcomeFailed         = "failed"
+	publishOutcomeRecovered      = "recovered"
+	publishOutcomeRecoveryFailed = "recovery_failed"
+
 	deliveryOutcomeAck        = "ack"
 	deliveryOutcomeNak        = "nak"
 	deliveryOutcomeTerminated = "terminated"
@@ -158,7 +169,7 @@ const (
 
 var (
 	ackFailureActions = []string{"ack", "nak", "term", "in_progress"}
-	ackFailureClasses = []string{"context_canceled", "deadline", "connection_closed", "other"}
+	ackFailureClasses = []string{"context_canceled", "deadline", "connection_closed", "reconnecting", "other"}
 )
 
 // inc 是 EventBusMetrics 的 nil 安全自增入口：metrics 未注入时（单进程 / 单测）静默 no-op。
@@ -167,6 +178,13 @@ func (m *EventBusMetrics) inc(subject, outcome string) {
 		return
 	}
 	m.DeliveryTotal.WithLabelValues(subject, outcome).Inc()
+}
+
+func (m *EventBusMetrics) incPublish(subject, outcome, errorClass string) {
+	if m == nil {
+		return
+	}
+	m.PublishTotal.WithLabelValues(subject, outcome, errorClass).Inc()
 }
 
 func (m *EventBusMetrics) initConsumerObservation(subject, durable string) {

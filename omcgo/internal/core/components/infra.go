@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
+	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -274,6 +275,13 @@ func (inf *Infra) CreateEventBus() {
 	// issue #20：注入投递结果指标（ack/nak/terminated/dropped），让 max-retries 终止
 	// 与解析丢弃不再静默；所有进程（app/acs/worker）经此统一入口都自动带上。
 	bus.SetMetrics(event.NewEventBusMetrics(inf.MetricsReg))
+	bus.SetJetStreamRefreshFunc(func(ctx context.Context) (*nats.Conn, event.JetStreamPublisher, error) {
+		conn, js, err := inf.NATS.RefreshJetStream(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		return conn, js, nil
+	})
 	inf.EventBus = bus
 	inf.GS.Register("eventbus", 2, func(ctx context.Context) error { return inf.EventBus.Close() })
 }

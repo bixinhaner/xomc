@@ -1,10 +1,14 @@
 package event
 
 import (
+	"context"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -129,9 +133,11 @@ func TestNewEventBusMetrics_Registered(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewEventBusMetrics(reg)
 	require.NotNil(t, m)
+	assert.NotNil(t, m.PublishTotal)
 	assert.NotNil(t, m.DeliveryTotal)
 
 	// CounterVec 无观测时 Gather 不返回，先打一个点再断言注册成功。
+	m.incPublish("device.inform.periodic", publishOutcomeSuccess, "")
 	m.inc("pm.file.received", deliveryOutcomeAck)
 	m.incAckFailure("pm.file.received", "pm-workers", "ack", "other")
 	m.observeHandlerDuration("pm.file.received", "pm-workers", time.Millisecond)
@@ -143,6 +149,7 @@ func TestNewEventBusMetrics_Registered(t *testing.T) {
 	for _, f := range families {
 		names[f.GetName()] = true
 	}
+	assert.True(t, names["omc_eventbus_publish_total"], "publish counter should be registered")
 	assert.True(t, names["omc_eventbus_delivery_total"], "delivery counter should be registered")
 	assert.True(t, names["omc_eventbus_ack_failures_total"], "ack failure counter should be registered")
 	assert.True(t, names["omc_eventbus_handler_duration_seconds"], "handler duration histogram should be registered")
@@ -164,6 +171,20 @@ func TestEventBusMetrics_Inc_ByOutcome(t *testing.T) {
 		testutil.ToFloat64(m.DeliveryTotal.WithLabelValues("alarm.raised", deliveryOutcomeDropped)))
 }
 
+func TestEventBusMetrics_IncPublish_ByOutcomeAndErrorClass(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewEventBusMetrics(reg)
+
+	m.incPublish("device.inform.periodic", publishOutcomeSuccess, "")
+	m.incPublish("device.inform.periodic", publishOutcomeFailed, "deadline")
+	m.incPublish("device.inform.periodic", publishOutcomeFailed, "deadline")
+
+	assert.Equal(t, float64(1),
+		testutil.ToFloat64(m.PublishTotal.WithLabelValues("device.inform.periodic", publishOutcomeSuccess, "")))
+	assert.Equal(t, float64(2),
+		testutil.ToFloat64(m.PublishTotal.WithLabelValues("device.inform.periodic", publishOutcomeFailed, "deadline")))
+}
+
 func TestEventBusMetrics_IncAckFailure_ByActionAndClass(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewEventBusMetrics(reg)
@@ -176,6 +197,17 @@ func TestEventBusMetrics_IncAckFailure_ByActionAndClass(t *testing.T) {
 		testutil.ToFloat64(m.AckFailures.WithLabelValues(SubjectCommandGetParamsResponse, "device-rpc-gpv", "ack", "other")))
 	assert.Equal(t, float64(1),
 		testutil.ToFloat64(m.AckFailures.WithLabelValues(SubjectCommandGetParamsResponse, "device-rpc-gpv", "in_progress", "deadline")))
+}
+
+func TestClassifyAckError_NATSConnectionStates(t *testing.T) {
+	assert.Equal(t, "none", classifyAckError(nil))
+	assert.Equal(t, "context_canceled", classifyAckError(context.Canceled))
+	assert.Equal(t, "deadline", classifyAckError(context.DeadlineExceeded))
+	assert.Equal(t, "connection_closed", classifyAckError(io.EOF))
+	assert.Equal(t, "connection_closed", classifyAckError(nats.ErrConnectionClosed))
+	assert.Equal(t, "connection_closed", classifyAckError(nats.ErrConnectionDraining))
+	assert.Equal(t, "reconnecting", classifyAckError(nats.ErrConnectionReconnecting))
+	assert.Equal(t, "other", classifyAckError(errors.New("boom")))
 }
 
 func TestEventBusMetrics_ContractUsesOnlyLowCardinalityLabels(t *testing.T) {
@@ -206,6 +238,7 @@ func TestEventBusMetrics_ContractUsesOnlyLowCardinalityLabels(t *testing.T) {
 func TestEventBusMetrics_NilSafe(t *testing.T) {
 	var m *EventBusMetrics
 	assert.NotPanics(t, func() {
+		m.incPublish("any.subject", publishOutcomeSuccess, "")
 		m.inc("any.subject", deliveryOutcomeAck)
 		m.incAckFailure("any.subject", "durable", "ack", "other")
 		m.observeHandlerDuration("any.subject", "durable", time.Millisecond)

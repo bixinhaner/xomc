@@ -26,6 +26,7 @@ const (
 	gpvPendingMsgLimit       = 200000
 	gpvPendingBytesLimit     = 256 * 1024 * 1024
 	defaultPullFetchWait     = 500 * time.Millisecond
+	defaultRefreshCooldown   = 2 * time.Second
 
 	// 以下三个常量专为 provision-gpv pull consumer 调优。
 	gpvPullBatchSize      = 64               // 每次 Fetch 最多拉取 64 条
@@ -373,6 +374,15 @@ type queueStatsReader interface {
 	NextMessage(ctx context.Context, stream string, startSequence uint64, subject string) (*nats.RawStreamMsg, error)
 }
 
+// JetStreamPublisher is the minimal producer surface NATSEventBus needs.
+// nats.JetStreamContext implements it; tests can inject a narrow fake without
+// implementing the entire JetStream management interface.
+type JetStreamPublisher interface {
+	Publish(subj string, data []byte, opts ...nats.PubOpt) (*nats.PubAck, error)
+}
+
+type JetStreamRefreshFunc func(context.Context) (*nats.Conn, JetStreamPublisher, error)
+
 type jetStreamQueueStatsReader struct {
 	js nats.JetStreamContext
 }
@@ -400,14 +410,20 @@ func (r jetStreamQueueStatsReader) NextMessage(ctx context.Context, stream strin
 type NATSEventBus struct {
 	conn               *nats.Conn
 	js                 nats.JetStreamContext
+	publisher          JetStreamPublisher
 	subs               []*nats.Subscription // push / queue subscriptions
 	pullSubscriptions  []*pullSubscription  // pull subscriptions；Close() 负责 drain + unsubscribe
 	keyedSubscriptions []*keyedQueueSubscription
 	mu                 sync.Mutex
+	refreshMu          sync.Mutex
+	publisherVersion   uint64
+	refreshCooldown    time.Duration
+	lastRefreshAttempt time.Time
 	pullTuning         map[string]PullTuning
 	queueTuning        map[string]QueueTuning
 	logger             *zap.Logger
 	metrics            *EventBusMetrics // issue #20：投递结果指标；nil 时（单进程/单测）静默 no-op。
+	refreshJetStream   JetStreamRefreshFunc
 	queueStatsReader   queueStatsReader // nil 时直接通过 js 读取；测试可替换为受控 reader。
 	ctx                context.Context
 	cancel             context.CancelFunc
@@ -570,13 +586,15 @@ func (b *NATSEventBus) runQueueStatsMetricSampler(ctx context.Context, subject, 
 func NewNATSEventBus(conn *nats.Conn, js nats.JetStreamContext, logger *zap.Logger) *NATSEventBus {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &NATSEventBus{
-		conn:        conn,
-		js:          js,
-		pullTuning:  make(map[string]PullTuning),
-		queueTuning: make(map[string]QueueTuning),
-		logger:      logger,
-		ctx:         ctx,
-		cancel:      cancel,
+		conn:            conn,
+		js:              js,
+		publisher:       js,
+		refreshCooldown: defaultRefreshCooldown,
+		pullTuning:      make(map[string]PullTuning),
+		queueTuning:     make(map[string]QueueTuning),
+		logger:          logger,
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 }
 
@@ -596,6 +614,12 @@ func (b *NATSEventBus) SetMetrics(m *EventBusMetrics) {
 	b.metrics = m
 }
 
+func (b *NATSEventBus) SetJetStreamRefreshFunc(fn JetStreamRefreshFunc) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.refreshJetStream = fn
+}
+
 // NewQueueHealthSampler returns the single owner for PM queue-health metric
 // observation. QueueStats itself remains a read-only collection method so
 // disk-projection callers cannot accidentally create duplicate samples.
@@ -613,16 +637,103 @@ func (b *NATSEventBus) SetPullTuning(subject string, tuning PullTuning) {
 }
 
 func (b *NATSEventBus) Publish(ctx context.Context, subject string, evt Event) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	evt.Subject = subject
 	data, err := json.Marshal(evt)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}
+	opts := publishOptions(ctx, evt)
 
-	_, err = b.js.Publish(subject, data)
+	publisherVersion, err := b.publishRaw(subject, data, opts...)
 	if err != nil {
+		errorClass := classifyAckError(err)
+		b.metrics.incPublish(subject, publishOutcomeFailed, errorClass)
+		if shouldRefreshJetStreamAfterPublish(err) && ctx.Err() == nil {
+			if refreshErr := b.refreshPublisher(ctx, publisherVersion); refreshErr != nil {
+				b.metrics.incPublish(subject, publishOutcomeRecoveryFailed, classifyAckError(refreshErr))
+				return fmt.Errorf("refresh NATS producer after publish failure: %w", refreshErr)
+			}
+			if _, retryErr := b.publishRaw(subject, data, opts...); retryErr != nil {
+				b.metrics.incPublish(subject, publishOutcomeRecoveryFailed, classifyAckError(retryErr))
+				return fmt.Errorf("publish to NATS after producer refresh: %w", retryErr)
+			}
+			b.metrics.incPublish(subject, publishOutcomeRecovered, errorClass)
+			return nil
+		}
 		return fmt.Errorf("publish to NATS: %w", err)
 	}
+	b.metrics.incPublish(subject, publishOutcomeSuccess, "")
+	return nil
+}
+
+func publishOptions(ctx context.Context, evt Event) []nats.PubOpt {
+	opts := []nats.PubOpt{nats.Context(ctx)}
+	if evt.ID != "" {
+		opts = append(opts, nats.MsgId(evt.ID))
+	}
+	return opts
+}
+
+func (b *NATSEventBus) publishRaw(subject string, data []byte, opts ...nats.PubOpt) (uint64, error) {
+	b.mu.Lock()
+	publisher := b.publisher
+	publisherVersion := b.publisherVersion
+	b.mu.Unlock()
+	_, err := publisher.Publish(subject, data, opts...)
+	return publisherVersion, err
+}
+
+func (b *NATSEventBus) refreshPublisher(ctx context.Context, failedPublisherVersion uint64) error {
+	b.refreshMu.Lock()
+	defer b.refreshMu.Unlock()
+
+	b.mu.Lock()
+	if b.publisherVersion != failedPublisherVersion {
+		b.mu.Unlock()
+		return nil
+	}
+	refreshFn := b.refreshJetStream
+	cooldown := b.refreshCooldown
+	lastAttempt := b.lastRefreshAttempt
+	if cooldown <= 0 {
+		cooldown = defaultRefreshCooldown
+	}
+	now := time.Now()
+	if !lastAttempt.IsZero() && now.Sub(lastAttempt) < cooldown {
+		b.mu.Unlock()
+		return fmt.Errorf("NATS producer refresh cooling down: %w", nats.ErrConnectionReconnecting)
+	}
+	b.lastRefreshAttempt = now
+	b.mu.Unlock()
+
+	if refreshFn == nil {
+		return errors.New("NATS producer refresh is not configured")
+	}
+
+	conn, publisher, err := refreshFn(ctx)
+	if err != nil {
+		return err
+	}
+	if publisher == nil {
+		return errors.New("NATS producer refresh returned nil publisher")
+	}
+
+	b.mu.Lock()
+	if b.publisherVersion != failedPublisherVersion {
+		b.mu.Unlock()
+		return nil
+	}
+	b.conn = conn
+	b.publisher = publisher
+	b.publisherVersion++
+	if js, ok := publisher.(nats.JetStreamContext); ok {
+		b.js = js
+		b.queueStatsReader = nil
+	}
+	b.mu.Unlock()
 	return nil
 }
 
@@ -1749,11 +1860,20 @@ func classifyAckError(err error) string {
 		return "context_canceled"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "deadline"
-	case errors.Is(err, io.EOF):
+	case errors.Is(err, nats.ErrConnectionClosed), errors.Is(err, nats.ErrConnectionDraining), errors.Is(err, io.EOF):
 		return "connection_closed"
+	case errors.Is(err, nats.ErrConnectionReconnecting):
+		return "reconnecting"
 	default:
 		return "other"
 	}
+}
+
+func shouldRefreshJetStreamAfterPublish(err error) bool {
+	return errors.Is(err, nats.ErrConnectionClosed) ||
+		errors.Is(err, nats.ErrConnectionDraining) ||
+		errors.Is(err, nats.ErrConnectionReconnecting) ||
+		errors.Is(err, io.EOF)
 }
 
 // processKeyedMsg keeps a failed head message inside its device lane until it
