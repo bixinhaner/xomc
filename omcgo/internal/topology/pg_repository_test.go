@@ -103,8 +103,13 @@ func TestMoveGroupDevicesToDefaultTx_UpdatesMembershipsToDefaultGroup(t *testing
 func TestGetTreeWithCounts_DefaultGroupCountsLegacyUngroupedDevices(t *testing.T) {
 	t.Parallel()
 
-	assert.Contains(t, getTreeWithCountsRawSQL, "WHEN dg.id = $1::uuid")
-	assert.Contains(t, getTreeWithCountsRawSQL, "NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id)")
+	assert.Contains(t, getTreeWithCountsRawSQL, "COALESCE(dgm.group_id, $1::uuid) AS group_id")
+	assert.Contains(t, getTreeWithCountsRawSQL, "LEFT JOIN device_group_members dgm ON dgm.device_id = d.id")
+	assert.Contains(t, getTreeWithCountsRawSQL, "WHERE d.deleted_at IS NULL")
+	assert.Contains(t, getTreeWithCountsRawSQL, "GROUP BY COALESCE(dgm.group_id, $1::uuid)")
+	assert.NotContains(t, getTreeWithCountsRawSQL, "LATERAL")
+	assert.NotContains(t, getTreeWithCountsRawSQL, "NOT EXISTS")
+	assert.NotContains(t, getTreeWithCountsRawSQL, "ungrouped_devices")
 }
 
 func TestDeviceGroupCountsCache_InvalidationRejectsInFlightStaleResult(t *testing.T) {
