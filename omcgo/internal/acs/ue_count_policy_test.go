@@ -39,12 +39,16 @@ type stubUECountTaskService struct {
 	created   []*task.CreateTaskRequest
 	block     bool
 	entered   chan struct{}
+	openCalls *atomic.Int32
 }
 
 func (s *stubUECountTaskService) LatestOpenTaskByDeviceAndMethod(
 	ctx context.Context,
 	_, _, _ string,
 ) (*task.Task, error) {
+	if s.openCalls != nil {
+		s.openCalls.Add(1)
+	}
 	if s.block {
 		if s.entered != nil {
 			select {
@@ -377,7 +381,7 @@ func TestUECountPolicy_EnqueueCoalescesPendingDevice(t *testing.T) {
 	assert.Len(t, policy.queue, 1)
 }
 
-func TestUECountPolicy_EnqueueRejectsOverflowWithoutAcquiringLease(t *testing.T) {
+func TestUECountPolicy_EnqueueDefersBacklogWithoutAcquiringLease(t *testing.T) {
 	var acquireCalls atomic.Int32
 	policy := NewUECountPolicy(
 		&stubUECountPathResolver{},
@@ -390,9 +394,59 @@ func TestUECountPolicy_EnqueueRejectsOverflowWithoutAcquiringLease(t *testing.T)
 	require.NoError(t, policy.Enqueue(context.Background(), "SN-220"))
 	err := policy.Enqueue(context.Background(), "SN-221")
 
-	require.ErrorIs(t, err, ErrUECountPolicyQueueFull)
+	require.NoError(t, err)
 	assert.Len(t, policy.queue, 1)
 	assert.Zero(t, acquireCalls.Load())
+	assert.Len(t, policy.deferred, 1)
+}
+
+func TestUECountPolicy_EnqueueDefersAndLaterReadmitsDevice(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	policy := NewUECountPolicy(
+		&stubUECountPathResolver{},
+		&stubUECountTaskService{},
+		stubUECountProbeGate{acquired: true},
+		zap.NewNop(),
+	)
+	policy.queue = make(chan string, 4)
+	policy.now = func() time.Time { return now }
+
+	require.NoError(t, policy.Enqueue(context.Background(), "SN-220"))
+	require.NoError(t, policy.Enqueue(context.Background(), "SN-221"))
+	require.NoError(t, policy.Enqueue(context.Background(), "SN-222"))
+	assert.Len(t, policy.queue, 2)
+	assert.Len(t, policy.deferred, 1)
+
+	now = now.Add(defaultUECountProbeRetry - time.Second)
+	require.NoError(t, policy.Enqueue(context.Background(), "SN-222"))
+	assert.Len(t, policy.queue, 2)
+
+	<-policy.queue
+	<-policy.queue
+	now = now.Add(2 * time.Second)
+	require.NoError(t, policy.Enqueue(context.Background(), "SN-222"))
+	assert.Len(t, policy.queue, 1)
+	assert.Empty(t, policy.deferred)
+}
+
+func TestUECountPolicy_ProcessDefersBacklogBeforeDatabaseLookup(t *testing.T) {
+	var openCalls atomic.Int32
+	tasks := &stubUECountTaskService{openCalls: &openCalls}
+	policy := NewUECountPolicy(
+		&stubUECountPathResolver{paths: []string{"Device.DeviceInfo.UE_Count"}},
+		tasks,
+		stubUECountProbeGate{acquired: true},
+		zap.NewNop(),
+	)
+	policy.queue = make(chan string, 16)
+	policy.queue <- "queued-backlog"
+
+	err := policy.process(context.Background(), "SN-220")
+
+	require.ErrorIs(t, err, errUECountPolicyDeferred)
+	assert.Zero(t, openCalls.Load())
+	assert.Zero(t, tasks.createdCount())
+	assert.Len(t, policy.deferred, 1)
 }
 
 func TestUECountPolicy_DefaultWorkerCountStaysConservative(t *testing.T) {

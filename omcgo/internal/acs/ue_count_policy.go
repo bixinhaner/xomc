@@ -26,6 +26,9 @@ const (
 	ueCountProbeSpreadSlot                 = 5 * time.Minute
 	defaultUECountQueueSize                = 4096
 	defaultUECountWorkerCount              = 4
+	ueCountAdmissionBacklogDivisor         = 2
+	ueCountProcessBacklogDivisor           = 16
+	ueCountDeferredPruneInterval           = time.Minute
 	defaultUECountTaskRetryIntervalSeconds = 30
 	// 任务生命周期必须覆盖聚合关闭宽限(12m)、下一次 Periodic Inform(5m)
 	// 和调度抖动(1m)。结果即使晚于 12m 关闭点到达，也会由现有迟到事件重算吸收。
@@ -34,7 +37,7 @@ const (
 	defaultUECountTaskMaxRetries = defaultUECountTaskExpiresInSeconds / defaultUECountTaskRetryIntervalSeconds
 )
 
-var ErrUECountPolicyQueueFull = errors.New("UE count policy queue is full")
+var errUECountPolicyDeferred = errors.New("UE count policy deferred due to local backlog")
 
 // UECountPathResolver resolves concrete, product-supported standard paths for
 // the current device. PathTranslationService satisfies this interface.
@@ -170,6 +173,9 @@ type UECountPolicy struct {
 	queue       chan string
 	pendingMu   sync.Mutex
 	pending     map[string]struct{}
+	deferred    map[string]time.Time
+	pruneAfter  time.Time
+	now         func() time.Time
 	workerCount int
 }
 
@@ -190,6 +196,8 @@ func NewUECountPolicy(
 		logger:      logger.Named("ue-count-policy"),
 		queue:       make(chan string, defaultUECountQueueSize),
 		pending:     make(map[string]struct{}, defaultUECountQueueSize),
+		deferred:    make(map[string]time.Time, defaultUECountQueueSize),
+		now:         time.Now,
 		workerCount: defaultUECountWorkerCount,
 	}
 }
@@ -225,16 +233,32 @@ func (p *UECountPolicy) ShouldTrigger(eventCodes []string) bool {
 // deliberately performs no Redis, PostgreSQL, or path-translation calls so a
 // slow dependency can never extend the Inform request latency.
 //
-// A full queue does not consume the distributed probe lease. The next periodic
-// Inform can therefore retry instead of silently losing the probe for one hour.
+// A saturated queue defers the local device briefly instead of consuming the
+// distributed probe lease. The next periodic Inform can therefore retry after
+// the local backlog has drained.
 func (p *UECountPolicy) Enqueue(_ context.Context, deviceSN string) error {
 	if !p.Enabled() {
 		return nil
 	}
+	now := p.clockNow()
 	p.pendingMu.Lock()
+	p.pruneDeferredLocked(now)
+	if p.isDeferredLocked(deviceSN, now) {
+		p.pendingMu.Unlock()
+		p.recordEnqueue("deferred")
+		p.observeQueueDepth()
+		return nil
+	}
 	if _, exists := p.pending[deviceSN]; exists {
 		p.pendingMu.Unlock()
 		p.recordEnqueue("coalesced")
+		return nil
+	}
+	if p.shouldDeferAdmission() {
+		p.deferLocked(deviceSN, now)
+		p.pendingMu.Unlock()
+		p.recordEnqueue("deferred")
+		p.observeQueueDepth()
 		return nil
 	}
 	p.pending[deviceSN] = struct{}{}
@@ -246,9 +270,11 @@ func (p *UECountPolicy) Enqueue(_ context.Context, deviceSN string) error {
 		return nil
 	default:
 		delete(p.pending, deviceSN)
+		p.deferLocked(deviceSN, now)
 		p.pendingMu.Unlock()
-		p.recordEnqueue("rejected")
-		return ErrUECountPolicyQueueFull
+		p.recordEnqueue("deferred")
+		p.observeQueueDepth()
+		return nil
 	}
 }
 
@@ -288,9 +314,12 @@ func (p *UECountPolicy) runWorker(ctx context.Context) {
 				if err != nil {
 					result = "error"
 				}
+				if errors.Is(err, errUECountPolicyDeferred) {
+					result = "deferred"
+				}
 				p.metrics.UECountProcessTotal.WithLabelValues(result).Inc()
 			}
-			if err != nil {
+			if err != nil && !errors.Is(err, errUECountPolicyDeferred) {
 				p.logger.Warn("process UE count query failed",
 					zap.String("device_sn", deviceSN),
 					zap.Error(err))
@@ -314,11 +343,84 @@ func (p *UECountPolicy) observeQueueDepth() {
 	}
 }
 
+func (p *UECountPolicy) shouldDeferAdmission() bool {
+	return len(p.queue) >= queueThreshold(cap(p.queue), ueCountAdmissionBacklogDivisor)
+}
+
+func (p *UECountPolicy) shouldDeferProcess() bool {
+	return len(p.queue) >= queueThreshold(cap(p.queue), ueCountProcessBacklogDivisor)
+}
+
+func queueThreshold(capacity, divisor int) int {
+	if capacity <= 0 {
+		return 0
+	}
+	if divisor <= 1 {
+		return capacity
+	}
+	threshold := capacity / divisor
+	if threshold < 1 {
+		return 1
+	}
+	return threshold
+}
+
+func (p *UECountPolicy) deferDevice(deviceSN string, now time.Time) {
+	p.pendingMu.Lock()
+	defer p.pendingMu.Unlock()
+	p.deferLocked(deviceSN, now)
+}
+
+func (p *UECountPolicy) deferLocked(deviceSN string, now time.Time) {
+	if p.deferred == nil {
+		p.deferred = make(map[string]time.Time, defaultUECountQueueSize)
+	}
+	p.deferred[deviceSN] = now.Add(defaultUECountProbeRetry)
+}
+
+func (p *UECountPolicy) isDeferredLocked(deviceSN string, now time.Time) bool {
+	until, ok := p.deferred[deviceSN]
+	if !ok {
+		return false
+	}
+	if now.Before(until) {
+		return true
+	}
+	delete(p.deferred, deviceSN)
+	return false
+}
+
+func (p *UECountPolicy) pruneDeferredLocked(now time.Time) {
+	if p.deferred == nil {
+		return
+	}
+	if !p.pruneAfter.IsZero() && now.Before(p.pruneAfter) {
+		return
+	}
+	for deviceSN, until := range p.deferred {
+		if !now.Before(until) {
+			delete(p.deferred, deviceSN)
+		}
+	}
+	p.pruneAfter = now.Add(ueCountDeferredPruneInterval)
+}
+
+func (p *UECountPolicy) clockNow() time.Time {
+	if p.now == nil {
+		return time.Now()
+	}
+	return p.now()
+}
+
 // process creates a normal (non sync-gpv) system task so the existing GPV
 // response subscriber persists device_parameters and refreshes device_info.
 func (p *UECountPolicy) process(ctx context.Context, deviceSN string) (retErr error) {
 	if !p.Enabled() {
 		return nil
+	}
+	if p.shouldDeferProcess() {
+		p.deferDevice(deviceSN, p.clockNow())
+		return errUECountPolicyDeferred
 	}
 	timeout := p.timeout
 	if timeout <= 0 {
