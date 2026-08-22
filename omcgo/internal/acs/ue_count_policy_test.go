@@ -394,3 +394,14 @@ func TestUECountPolicy_EnqueueRejectsOverflowWithoutAcquiringLease(t *testing.T)
 	assert.Len(t, policy.queue, 1)
 	assert.Zero(t, acquireCalls.Load())
 }
+
+func TestUECountPolicy_DefaultWorkerCountStaysConservative(t *testing.T) {
+	policy := NewUECountPolicy(
+		&stubUECountPathResolver{},
+		&stubUECountTaskService{},
+		stubUECountProbeGate{acquired: true},
+		zap.NewNop(),
+	)
+
+	assert.Equal(t, 4, policy.workerCount)
+}
