@@ -2,8 +2,8 @@
 //
 // 老 PgLicenseRepository.CountDevices 与 LicenseRepository 接口一起删除后，
 // enforcer / monitor 需要一个独立的 DeviceCounter 实现。本文件提供一个最
-// 简单的 pgxpool 实现，仅 SELECT COUNT(*) FROM devices —— 与 license 表
-// 完全无关，放在 license 包只是为了 DI 收敛（caller 不必跨包 wire）。
+// 简单的 pgxpool 实现，实时统计 devices 在线未删除行 —— 与 license 表完全无关，
+// 放在 license 包只是为了 DI 收敛（caller 不必跨包 wire）。
 package license
 
 import (
@@ -23,6 +23,20 @@ func NewPgDeviceCounter(pool *pgxpool.Pool) *PgDeviceCounter {
 	return &PgDeviceCounter{pool: pool}
 }
 
+const countDevicesSQL = `SELECT COUNT(*)::int FROM devices WHERE is_online = true AND deleted_at IS NULL`
+
+const countDevicesByTypeSQL = `WITH online_products AS (
+		SELECT product_id, COUNT(*)::int AS cnt
+		FROM devices
+		WHERE is_online = true AND deleted_at IS NULL
+		GROUP BY product_id
+	)
+	SELECT UPPER(COALESCE(p.alarm_ne_type, '')) AS ne_type,
+	       COALESCE(SUM(op.cnt), 0)::int AS cnt
+	FROM online_products op
+	LEFT JOIN products p ON op.product_id = p.id
+	GROUP BY UPPER(COALESCE(p.alarm_ne_type, ''))`
+
 // CountDevices 返回当前**在线**设备数（is_online=true 且未进回收站）。
 //
 // 容量口径（issue #316）：license 容量限制的是"在线/接入"设备数，离线和回收站
@@ -30,8 +44,7 @@ func NewPgDeviceCounter(pool *pgxpool.Pool) *PgDeviceCounter {
 // 容量裁决与 monitor 容量阈值告警。
 func (c *PgDeviceCounter) CountDevices(ctx context.Context) (int, error) {
 	var count int
-	if err := c.pool.QueryRow(ctx,
-		"SELECT COUNT(*) FROM devices WHERE is_online = true AND deleted_at IS NULL").Scan(&count); err != nil {
+	if err := c.pool.QueryRow(ctx, countDevicesSQL).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count devices: %w", err)
 	}
 	return count, nil
@@ -46,12 +59,7 @@ func (c *PgDeviceCounter) CountDevices(ctx context.Context) (int, error) {
 // capacityGroupUsage 合计，本方法不做归并。product_id 为
 // NULL 的设备（孤儿）计入空串 key ""。只数在线设备（is_online=true 且未进回收站）。
 func (c *PgDeviceCounter) CountDevicesByType(ctx context.Context) (map[string]int, error) {
-	const q = `SELECT UPPER(COALESCE(p.alarm_ne_type, '')) AS ne_type, COUNT(*) AS cnt
-		FROM devices d
-		LEFT JOIN products p ON d.product_id = p.id
-		WHERE d.is_online = true AND d.deleted_at IS NULL
-		GROUP BY p.alarm_ne_type`
-	rows, err := c.pool.Query(ctx, q)
+	rows, err := c.pool.Query(ctx, countDevicesByTypeSQL)
 	if err != nil {
 		return nil, fmt.Errorf("count devices by type: %w", err)
 	}
