@@ -72,6 +72,21 @@ func TestPMStreamingAggregationMigrationContract(t *testing.T) {
 	require.Contains(t, dockerfile, "COPY deployments/release/bundle/deploy/tsdb-schema-reconcile.sql")
 }
 
+func TestPMWindowVersionMetadataBackfillPendingIndexMigrationContract(t *testing.T) {
+	tsdbSQL := readMigration(t, filepath.Join("..", "..", "migrations", "tsdb", "000001_tsdb_schema.sql"))
+
+	for _, fragment := range []string{
+		"CREATE INDEX IF NOT EXISTS idx_pm_aggregation_windows_version_backfill_pending",
+		"task_version_id",
+		"entity_key",
+		"granularity",
+		"window_start",
+		"WHERE version_effective_from IS NULL",
+	} {
+		require.Contains(t, tsdbSQL, fragment)
+	}
+}
+
 func TestPMBuiltinTaskRecoveryMigrationContract(t *testing.T) {
 	mainSQL := readMigration(t, filepath.Join("..", "..", "migrations", "000001_init_schema.sql"))
 	seedSQL := readMigration(t, filepath.Join("..", "..", "migrations", "seed", "000001_init_seed.sql"))

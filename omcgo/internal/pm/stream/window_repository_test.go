@@ -426,6 +426,43 @@ func TestVersionMetadataBackfillLockSQL(t *testing.T) {
 	}
 }
 
+func TestVersionMetadataBackfillUpdateIsBoundedToBatch(t *testing.T) {
+	versionID := uuid.MustParse("77777777-7777-4777-8777-777777777777")
+	effectiveFrom := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
+	effectiveTo := effectiveFrom.Add(24 * time.Hour)
+	version := &TaskVersionSnapshot{
+		EffectiveFrom: effectiveFrom,
+		EffectiveTo:   &effectiveTo,
+	}
+
+	query, args := versionMetadataBackfillUpdateSQL(versionID, version, 123)
+	for _, fragment := range []string{
+		"WITH candidates AS",
+		"version_effective_from IS NULL",
+		"ORDER BY entity_key, granularity, window_start",
+		"LIMIT $4",
+		"UPDATE pm_aggregation_windows AS w",
+		"FROM candidates AS c",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("version metadata backfill SQL %q missing %q", query, fragment)
+		}
+	}
+	for _, forbidden := range []string{
+		"UPDATE pm_aggregation_windows SET version_effective_from",
+		"LIMIT 123",
+	} {
+		if strings.Contains(query, forbidden) {
+			t.Fatalf("version metadata backfill SQL %q must keep bounded placeholders, found %q", query, forbidden)
+		}
+	}
+	for _, want := range []any{effectiveFrom, effectiveTo, versionID, uint64(123)} {
+		if !containsSQLArg(args, want) {
+			t.Fatalf("version metadata backfill args %v missing %v", args, want)
+		}
+	}
+}
+
 func TestObserveReceivedReopensRecoveredFailedWindow(t *testing.T) {
 	key := WindowKey{
 		TaskVersionID: uuid.MustParse("33333333-3333-3333-3333-333333333333"),

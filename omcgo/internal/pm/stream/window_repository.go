@@ -38,10 +38,14 @@ type claimVersionFilter struct {
 	exclude    bool
 }
 
-// versionMetadataBackfillLockID serializes the one-time historical metadata
-// backfill across app and worker startup. The value is the ASCII bytes for
-// "PMVMETA", kept stable because PostgreSQL advisory locks are process-wide.
-const versionMetadataBackfillLockID int64 = 0x504d564d455441
+const (
+	// versionMetadataBackfillLockID serializes the one-time historical metadata
+	// backfill across app and worker startup. The value is the ASCII bytes for
+	// "PMVMETA", kept stable because PostgreSQL advisory locks are process-wide.
+	versionMetadataBackfillLockID int64 = 0x504d564d455441
+
+	versionMetadataBackfillBatchSize uint64 = 5000
+)
 
 func NewWindowRepository(pool *pgxpool.Pool) *WindowRepository {
 	return &WindowRepository{pool: pool}
@@ -135,22 +139,54 @@ func (r *WindowRepository) backfillVersionMetadata(
 		if version == nil || version.EffectiveFrom.IsZero() {
 			continue
 		}
-		query, args, buildErr := storage.Psql.Update("pm_aggregation_windows").
-			Set("version_effective_from", version.EffectiveFrom).
-			Set("version_effective_to", version.EffectiveTo).
-			Where(sq.Eq{"task_version_id": versionID, "version_effective_from": nil}).
-			ToSql()
-		if buildErr != nil {
-			return false, fmt.Errorf("build PM aggregation version metadata backfill: %w", buildErr)
-		}
-		if _, execErr := tx.Exec(ctx, query, args...); execErr != nil {
-			return false, fmt.Errorf("backfill PM aggregation version metadata: %w", execErr)
+		for {
+			query, args := versionMetadataBackfillUpdateSQL(
+				versionID,
+				version,
+				versionMetadataBackfillBatchSize,
+			)
+			tag, execErr := tx.Exec(ctx, query, args...)
+			if execErr != nil {
+				return false, fmt.Errorf("backfill PM aggregation version metadata: %w", execErr)
+			}
+			if tag.RowsAffected() < int64(versionMetadataBackfillBatchSize) {
+				break
+			}
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit PM aggregation version metadata backfill: %w", err)
 	}
 	return true, nil
+}
+
+func versionMetadataBackfillUpdateSQL(
+	versionID uuid.UUID,
+	version *TaskVersionSnapshot,
+	limit uint64,
+) (string, []any) {
+	return `
+WITH candidates AS (
+  SELECT task_version_id, entity_key, granularity, window_start
+  FROM pm_aggregation_windows
+  WHERE task_version_id = $3
+    AND version_effective_from IS NULL
+  ORDER BY entity_key, granularity, window_start
+  LIMIT $4
+)
+UPDATE pm_aggregation_windows AS w
+SET version_effective_from = $1,
+    version_effective_to = $2
+FROM candidates AS c
+WHERE w.task_version_id = c.task_version_id
+  AND w.entity_key = c.entity_key
+  AND w.granularity = c.granularity
+  AND w.window_start = c.window_start`, []any{
+			version.EffectiveFrom,
+			versionEffectiveTo(version),
+			versionID,
+			limit,
+		}
 }
 
 func versionMetadataBackfillLockSQL(tryLock bool) string {

@@ -217,4 +217,15 @@ CREATE INDEX IF NOT EXISTS idx_pm_aggregation_rollup_claim_due
     ON public.pm_aggregation_rollup_outbox (next_attempt_at, created_at, event_id)
     WHERE published_at IS NULL AND consumed_at IS NULL AND barrier_eligible;
 
+-- Existing baseline-1 TSDBs do not rerun the consolidated schema file, so they
+-- can miss the pending-version index needed by startup metadata backfill.
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_windows_version_backfill_pending
+    ON public.pm_aggregation_windows (
+        task_version_id,
+        entity_key,
+        granularity,
+        window_start
+    )
+    WHERE version_effective_from IS NULL;
+
 COMMIT;
