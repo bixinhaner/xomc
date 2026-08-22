@@ -76,7 +76,7 @@ cd /opt/omc/infra/docker
 sudo -E bash install-docker.sh --skip-if-installed --no-mirror
 ```
 
-修改 Docker 网桥前必须停止使用旧网段的容器。发布安装在执行网络门禁前会自动删除
+修改Docker网桥前必须停止使用旧网段的容器。发布安装在执行网络门禁前会自动删除
 无容器的规划外网络；有容器依赖的规划外网络不会被删除，必须先人工处理。
 
 GPV NATS 验证脚本在 Linux Docker Engine 上默认使用 `--network host`，让宿主 Go
