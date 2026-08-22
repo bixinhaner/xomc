@@ -25,7 +25,7 @@ const (
 	defaultUECountProbeRetry               = 5 * time.Minute
 	ueCountProbeSpreadSlot                 = 5 * time.Minute
 	defaultUECountQueueSize                = 4096
-	defaultUECountWorkerCount              = 32
+	defaultUECountWorkerCount              = 4
 	defaultUECountTaskRetryIntervalSeconds = 30
 	// 任务生命周期必须覆盖聚合关闭宽限(12m)、下一次 Periodic Inform(5m)
 	// 和调度抖动(1m)。结果即使晚于 12m 关闭点到达，也会由现有迟到事件重算吸收。
