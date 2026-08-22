@@ -23,16 +23,19 @@ type StartupSyncSubmitter interface {
 	SubmitStartupDeviceOnlineFullSync(ctx context.Context, dev *model.Device, idempotencyKey, sourceEventID string) (*DeviceOnlineFullSyncResult, error)
 }
 
-// StartupSyncer performs one full-parameter reconciliation for every online
-// device after OMC startup. It is independent of the periodic-sync switch.
+// StartupSyncer performs a bounded full-parameter reconciliation for online
+// devices after OMC startup. It is independent of the periodic-sync switch.
 type StartupSyncer struct {
-	lister    OnlineDevicePageLister
-	submitter StartupSyncSubmitter
-	leader    LeaderElector
-	logger    *zap.Logger
-	pageSize  int
-	runID     uuid.UUID
-	retryWait func(context.Context, time.Duration) error
+	lister         OnlineDevicePageLister
+	submitter      StartupSyncSubmitter
+	leader         LeaderElector
+	logger         *zap.Logger
+	pageSize       int
+	runID          uuid.UUID
+	maxSubmissions int
+	maxRetryRounds int
+	submitInterval time.Duration
+	retryWait      func(context.Context, time.Duration) error
 }
 
 type redeployPendingDevice struct {
@@ -43,11 +46,24 @@ type redeployPendingDevice struct {
 
 const redeployRetryDelay = 10 * time.Second
 
+const defaultStartupSyncRetryRounds = 1
+
 func NewStartupSyncer(lister OnlineDevicePageLister, submitter StartupSyncSubmitter, leader LeaderElector, pageSize int, logger *zap.Logger) *StartupSyncer {
 	if pageSize <= 0 || pageSize > 1000 {
 		pageSize = 200
 	}
 	return &StartupSyncer{lister: lister, submitter: submitter, leader: leader, logger: logger, pageSize: pageSize, runID: uuid.New(), retryWait: waitStartupRetry}
+}
+
+func (s *StartupSyncer) WithSubmissionBudget(maxSubmissions int, submitInterval time.Duration) *StartupSyncer {
+	if maxSubmissions > 0 {
+		s.maxSubmissions = maxSubmissions
+	}
+	s.maxRetryRounds = defaultStartupSyncRetryRounds
+	if submitInterval > 0 {
+		s.submitInterval = submitInterval
+	}
+	return s
 }
 
 func (s *StartupSyncer) Run(ctx context.Context) error {
@@ -74,11 +90,20 @@ func (s *StartupSyncer) Run(ctx context.Context) error {
 
 	startedAt := time.Now()
 	s.logger.Info("OMC redeploy full parameter sync started",
-		zap.String("trigger", "omc_redeploy"), zap.String("redeploy_id", s.runID.String()))
+		zap.String("trigger", "omc_redeploy"), zap.String("redeploy_id", s.runID.String()),
+		zap.Int("max_submission_attempts", s.maxSubmissions),
+		zap.Int("max_retry_rounds", s.maxRetryRounds),
+		zap.Duration("submit_interval", s.submitInterval))
+	attempted := 0
 	enqueued := 0
+	limited := false
 	pending := make([]redeployPendingDevice, 0)
 	afterID := uuid.Nil
 	for page := 1; ; page++ {
+		if s.submissionBudgetReached(attempted) {
+			limited = true
+			break
+		}
 		var devices []*model.Device
 		for attempt := 1; ; attempt++ {
 			var err error
@@ -100,8 +125,18 @@ func (s *StartupSyncer) Run(ctx context.Context) error {
 					zap.String("device_id", dev.ID.String()), zap.String("device_sn", dev.SerialNumber))
 				continue
 			}
+			if s.submissionBudgetReached(attempted) {
+				limited = true
+				break
+			}
+			if s.submitInterval > 0 && attempted > 0 {
+				if err := s.retryWait(ctx, s.submitInterval); err != nil {
+					return err
+				}
+			}
 			key := "omc-redeploy:" + uuid.NewSHA1(s.runID, []byte(dev.ID.String())).String()
 			sourceEventID := "omc-redeploy:" + s.runID.String() + ":" + dev.ID.String()
+			attempted++
 			result, err := s.submitWithRetry(ctx, dev, key, sourceEventID)
 			if err != nil {
 				if ctx.Err() != nil {
@@ -119,12 +154,12 @@ func (s *StartupSyncer) Run(ctx context.Context) error {
 				pending = append(pending, redeployPendingDevice{device: dev, idempotencyKey: key, sourceEventID: sourceEventID})
 			}
 		}
-		if len(devices) < s.pageSize {
+		if limited || len(devices) < s.pageSize {
 			break
 		}
 		afterID = devices[len(devices)-1].ID
 	}
-	for round := 1; len(pending) > 0; round++ {
+	for round := 1; len(pending) > 0 && (s.maxRetryRounds <= 0 || round <= s.maxRetryRounds); round++ {
 		s.logger.Warn("OMC redeploy parameter sync retry round scheduled",
 			zap.String("trigger", "omc_redeploy"), zap.String("redeploy_id", s.runID.String()),
 			zap.Int("round", round), zap.Int("pending_devices", len(pending)))
@@ -133,6 +168,17 @@ func (s *StartupSyncer) Run(ctx context.Context) error {
 		}
 		next := make([]redeployPendingDevice, 0, len(pending))
 		for _, item := range pending {
+			if s.submissionBudgetReached(attempted) {
+				limited = true
+				next = append(next, item)
+				continue
+			}
+			if s.submitInterval > 0 && attempted > 0 {
+				if err := s.retryWait(ctx, s.submitInterval); err != nil {
+					return err
+				}
+			}
+			attempted++
 			result, err := s.submitWithRetry(ctx, item.device, item.idempotencyKey, item.sourceEventID)
 			if err != nil || result == nil {
 				if ctx.Err() != nil {
@@ -145,10 +191,23 @@ func (s *StartupSyncer) Run(ctx context.Context) error {
 		}
 		pending = next
 	}
+	if len(pending) > 0 {
+		s.logger.Warn("OMC redeploy parameter sync left pending after bounded startup budget",
+			zap.String("trigger", "omc_redeploy"), zap.String("redeploy_id", s.runID.String()),
+			zap.Int("pending_devices", len(pending)),
+			zap.Int("attempted", attempted),
+			zap.Int("max_submission_attempts", s.maxSubmissions),
+			zap.Int("max_retry_rounds", s.maxRetryRounds))
+	}
 	s.logger.Info("OMC redeploy full parameter sync completed",
 		zap.String("trigger", "omc_redeploy"), zap.String("redeploy_id", s.runID.String()),
-		zap.Int("enqueued", enqueued), zap.Duration("duration", time.Since(startedAt)))
+		zap.Int("attempted", attempted), zap.Int("enqueued", enqueued),
+		zap.Bool("limited", limited), zap.Duration("duration", time.Since(startedAt)))
 	return nil
+}
+
+func (s *StartupSyncer) submissionBudgetReached(attempted int) bool {
+	return s.maxSubmissions > 0 && attempted >= s.maxSubmissions
 }
 
 func (s *StartupSyncer) submitWithRetry(ctx context.Context, dev *model.Device, key, sourceEventID string) (*DeviceOnlineFullSyncResult, error) {

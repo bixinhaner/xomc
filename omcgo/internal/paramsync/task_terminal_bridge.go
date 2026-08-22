@@ -26,7 +26,7 @@ func NewTaskTerminalBridge(bus event.EventBus) *TaskTerminalBridge {
 func (b *TaskTerminalBridge) Start() error {
 	for _, subject := range []string{event.SubjectTaskCompleted, event.SubjectTaskFailed, event.SubjectTaskCancelled} {
 		queue := "param-sync-terminal-" + strings.ReplaceAll(subject, ".", "-")
-		sub, err := b.bus.QueueSubscribe(subject, queue, b.Handle)
+		sub, err := b.bus.PullSubscribe(subject, queue, b.Handle)
 		if err != nil {
 			return fmt.Errorf("subscribe parameter sync terminal task %s: %w", subject, err)
 		}

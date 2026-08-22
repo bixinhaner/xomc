@@ -22,13 +22,13 @@ import (
 )
 
 const (
-	defaultBatchInformWorkers       = 4
-	defaultBatchInformMaxBatchSize  = 200
-	defaultBatchInformInputBuffer   = 2500
-	maxBatchInformWorkers           = 4
-	maxBatchInformMaxBatchSize      = 200
-	maxBatchInformInputBuffer       = 2500
-	maxBatchInformProjectionWorkers = 4
+	defaultBatchInformWorkers       = 2
+	defaultBatchInformMaxBatchSize  = 100
+	defaultBatchInformInputBuffer   = 1500
+	maxBatchInformWorkers           = 2
+	maxBatchInformMaxBatchSize      = 100
+	maxBatchInformInputBuffer       = 1500
+	maxBatchInformProjectionWorkers = 2
 	batchInformFlushAttemptTimeout  = 10 * time.Second
 )
 

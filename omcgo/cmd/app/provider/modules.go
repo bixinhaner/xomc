@@ -76,6 +76,10 @@ import (
 
 type startupOnlineDeviceLister struct{ pool *pgxpool.Pool }
 
+func shouldScheduleStartupFullSync(hasDeviceRepo, hasParamSyncStarter, releaseSyncReady bool) bool {
+	return hasDeviceRepo && hasParamSyncStarter && !releaseSyncReady
+}
+
 func (l startupOnlineDeviceLister) ListOnlineDevices(ctx context.Context, afterID uuid.UUID, pageSize int) ([]*model.Device, error) {
 	queryBuilder := storage.Psql.Select("id", "serial_number", "COALESCE(product_class, '')").
 		From("devices").
@@ -791,7 +795,8 @@ func initProvisionModule(c *Container) error {
 	}
 
 	releaseCampaignID, hasReleaseIdentity := buildinfo.ReleaseCampaignID()
-	if c.DeviceRepo != nil && c.miscDeps.paramSyncStarter != nil {
+	releaseSyncReady := hasReleaseIdentity && c.miscDeps.paramSyncStarter != nil
+	if shouldScheduleStartupFullSync(c.DeviceRepo != nil, c.miscDeps.paramSyncStarter != nil, releaseSyncReady) {
 		startupLeader := provision.NewPGAdvisoryLeaderElector(c.PgPool, "startup_param_syncer", logger)
 		startupSyncer := provision.NewStartupSyncer(
 			startupOnlineDeviceLister{pool: c.PgPool},
@@ -799,6 +804,9 @@ func initProvisionModule(c *Container) error {
 			startupLeader,
 			200,
 			logger,
+		).WithSubmissionBudget(
+			boundedPositiveInt(c.Cfg.ParamSync.StartupSyncMaxSubmissions, paramSyncStartupMaxSubmissions, paramSyncStartupMaxSubmissions),
+			paramSyncStartupSubmitIntervalFromApp(c.Cfg.ParamSync.StartupSyncSubmitInterval),
 		)
 		startupSyncCtx, cancelStartupSync := context.WithCancel(context.Background())
 		if c.GS != nil {
@@ -813,9 +821,13 @@ func initProvisionModule(c *Container) error {
 				logger.Warn("OMC redeploy full parameter sync exited with error", zap.Error(err))
 			}
 		}()
-		logger.Info("OMC redeploy full parameter sync scheduled for all online devices")
+		logger.Info("OMC redeploy full parameter sync scheduled for bounded online-device batch",
+			zap.Int("max_submission_attempts", paramSyncStartupMaxSubmissions),
+			zap.Duration("submit_interval", paramSyncStartupSubmitInterval))
+	} else if releaseSyncReady {
+		logger.Info("OMC redeploy full parameter sync delegated to release scheduler",
+			zap.String("campaign_id", releaseCampaignID.String()))
 	}
-	releaseSyncReady := hasReleaseIdentity && c.miscDeps.paramSyncStarter != nil
 	if periodicSyncStarter != nil || releaseSyncReady {
 		// T-0124 周期同步与 Issue #148 发布同步共用同一个 scheduler、
 		// PG leader、批次、并发和 stagger 参数。

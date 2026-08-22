@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/event"
 )
 
 func TestRunPeriodicMaintenanceLoopsDoNotStarveEachOther(t *testing.T) {
@@ -64,9 +65,14 @@ func TestParamSyncMaintenanceWorkerBudgetRemainsBounded(t *testing.T) {
 	assert.LessOrEqual(t, paramSyncOutboxBatchLimit, 10)
 	assert.LessOrEqual(t, paramSyncQueuedBatchLimit, 25)
 	assert.LessOrEqual(t, paramSyncAdmissionReconcileLimit, 100)
-	assert.LessOrEqual(t, paramSyncResultConsumerShards, 4)
-	assert.LessOrEqual(t, paramSyncResultConsumerQueue, 32)
-	assert.LessOrEqual(t, paramSyncResultConsumerQueueMax, 64)
+	assert.LessOrEqual(t, paramSyncResultConsumerShards, 2)
+	assert.LessOrEqual(t, paramSyncResultConsumerQueue, 16)
+	assert.LessOrEqual(t, paramSyncResultConsumerQueueMax, 32)
+	assert.LessOrEqual(t, paramSyncResultPullConcurrency, 2)
+	assert.LessOrEqual(t, paramSyncResultMaxAckPending, 32)
+	assert.LessOrEqual(t, paramSyncTerminalPullConcurrency, 2)
+	assert.LessOrEqual(t, paramSyncTerminalMaxAckPending, 32)
+	assert.LessOrEqual(t, paramSyncStartupMaxSubmissions, 500)
 }
 
 func TestParamSyncPullTuningFromAppClampsOversizedConfig(t *testing.T) {
@@ -90,6 +96,43 @@ func TestParamSyncPullTuningFromAppUsesBackpressureDefaults(t *testing.T) {
 	assert.Equal(t, paramSyncResultPullConcurrency, tuning.Concurrency)
 	assert.Equal(t, paramSyncResultMaxAckPending, tuning.MaxAckPending)
 	assert.Equal(t, paramSyncResultAckWait, tuning.AckWait)
+}
+
+func TestParamSyncTerminalPullTuningUsesBackpressureDefaults(t *testing.T) {
+	tuning := paramSyncTerminalPullTuning()
+
+	assert.Equal(t, paramSyncTerminalPullBatchSize, tuning.BatchSize)
+	assert.Equal(t, paramSyncTerminalPullConcurrency, tuning.Concurrency)
+	assert.Equal(t, paramSyncTerminalMaxAckPending, tuning.MaxAckPending)
+	assert.Equal(t, paramSyncTerminalAckWait, tuning.AckWait)
+}
+
+type recordingPullTuningSetter struct {
+	tunings map[string]event.PullTuning
+}
+
+func (s *recordingPullTuningSetter) SetPullTuning(subject string, tuning event.PullTuning) {
+	if s.tunings == nil {
+		s.tunings = make(map[string]event.PullTuning)
+	}
+	s.tunings[subject] = tuning
+}
+
+func TestApplyParamSyncPullTuningsCoversTerminalTaskSubjects(t *testing.T) {
+	setter := &recordingPullTuningSetter{}
+
+	applyParamSyncPullTunings(setter, appconfig.ParamSyncConfig{})
+
+	assert.Equal(t, paramSyncPullTuningFromApp(appconfig.ParamSyncConfig{}), setter.tunings[event.SubjectParamSyncTaskResult])
+	terminalTuning := paramSyncTerminalPullTuning()
+	assert.Equal(t, terminalTuning, setter.tunings[event.SubjectTaskCompleted])
+	assert.Equal(t, terminalTuning, setter.tunings[event.SubjectTaskFailed])
+	assert.Equal(t, terminalTuning, setter.tunings[event.SubjectTaskCancelled])
+}
+
+func TestParamSyncStartupSubmitIntervalFromAppUsesDefault(t *testing.T) {
+	assert.Equal(t, paramSyncStartupSubmitInterval, paramSyncStartupSubmitIntervalFromApp(0))
+	assert.Equal(t, 10*time.Millisecond, paramSyncStartupSubmitIntervalFromApp(10*time.Millisecond))
 }
 
 func TestBoundedPositiveIntUsesDefaultAndMax(t *testing.T) {

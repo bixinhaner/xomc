@@ -15,6 +15,8 @@ func TestParamSyncConfigValidate(t *testing.T) {
 	}).validate())
 	assert.ErrorContains(t, (ParamSyncConfig{ResultConsumerQueueDepth: -1}).validate(), "queue_depth")
 	assert.ErrorContains(t, (ParamSyncConfig{ResultConsumerMaxAckPending: -1}).validate(), "max_ack_pending")
+	assert.ErrorContains(t, (ParamSyncConfig{StartupSyncMaxSubmissions: -1}).validate(), "startup_sync_max_submissions")
+	assert.ErrorContains(t, (ParamSyncConfig{StartupSyncSubmitInterval: -time.Second}).validate(), "startup_sync_submit_interval")
 	assert.ErrorContains(t, (ParamSyncConfig{RecoveryTaskBudget: -1}).validate(), "recovery_task_budget")
 	assert.NoError(t, (ParamSyncConfig{ManualOfflineMode: "queue"}).validate())
 	assert.ErrorContains(t, (ParamSyncConfig{ManualOfflineMode: "drop"}).validate(), "manual_offline_mode")
