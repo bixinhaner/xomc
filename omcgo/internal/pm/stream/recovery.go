@@ -21,6 +21,7 @@ const (
 	recoveryTerminalBatchLimit  = 512
 	recoveryRuntimeCleanupLimit = uint64(256)
 	recoveryRuntimeCleanupTime  = 10 * time.Second
+	recoveryMissingSourceRetry  = 6 * time.Hour
 )
 
 type recoverySource string
@@ -54,6 +55,9 @@ type Recovery struct {
 	outbox   *OutboxRepository
 	versions RecoveryVersionStateLoader
 	logger   *zap.Logger
+	now      func() time.Time
+
+	replayRetention time.Duration
 }
 
 func NewRecovery(
@@ -71,11 +75,20 @@ func NewRecovery(
 		js: js, windows: windows, store: store, snapshot: snapshot,
 		matcher: matcher, rollups: NewRollupOutboxRepository(windows.pool),
 		outbox: NewOutboxRepository(windows.pool), logger: logger,
+		now:             func() time.Time { return time.Now().UTC() },
+		replayRetention: 45 * 24 * time.Hour,
 	}
 	if snapshot != nil {
 		recovery.versions, _ = snapshot.loader.(RecoveryVersionStateLoader)
 	}
 	return recovery
+}
+
+func (r *Recovery) SetReplayRetention(retention time.Duration) *Recovery {
+	if retention > 0 {
+		r.replayRetention = retention
+	}
+	return r
 }
 
 func (r *Recovery) RestoreActiveWindows(ctx context.Context) error {
@@ -91,7 +104,7 @@ func (r *Recovery) RestoreActiveWindows(ctx context.Context) error {
 	current := r.snapshot.Current()
 	var restoreErrors []error
 	var cursor *WindowKey
-	missing := make(map[recoverySource][]WindowKey)
+	missing := make(map[recoverySource][]WindowRecord)
 	terminalRemaining := recoveryTerminalBatchLimit
 	// 大数据升级恢复时活跃窗口以十万计，本扫描 = 每页一条查询、可能持续数十分钟。
 	// 每 progressEveryPages 页打一次进度；收尾摘要仅在实际耗时超过阈值时输出
@@ -154,7 +167,7 @@ func (r *Recovery) RestoreActiveWindows(ctx context.Context) error {
 				_ = r.windows.MarkFailed(ctx, record.Key, sourceErr)
 				continue
 			}
-			missing[source] = append(missing[source], record.Key)
+			missing[source] = append(missing[source], record)
 		}
 		for terminal, records := range terminals {
 			updated, terminalErr := r.windows.MarkRecoveryTerminalBatch(
@@ -182,8 +195,8 @@ func (r *Recovery) RestoreActiveWindows(ctx context.Context) error {
 	}
 	if elapsed := time.Since(restoreStart); elapsed > restoreSummaryLogThreshold {
 		missingTotal := 0
-		for _, keys := range missing {
-			missingTotal += len(keys)
+		for _, records := range missing {
+			missingTotal += len(records)
 		}
 		r.logger.Info("PM aggregation active-window restore scan completed",
 			zap.Int("pages", pages),
@@ -191,31 +204,141 @@ func (r *Recovery) RestoreActiveWindows(ctx context.Context) error {
 			zap.Int("missing_windows", missingTotal),
 			zap.Duration("duration", elapsed))
 	}
-	for source, keys := range missing {
+	for source, records := range missing {
+		keys := recoveryRecordKeys(records)
 		matched, replayErr := r.replayWindowBatch(ctx, source, keys)
 		if replayErr != nil {
 			restoreErrors = append(restoreErrors, replayErr)
 		}
-		for _, key := range keys {
-			if _, ok := matched[windowRecoveryID(key)]; ok {
+		outcome := r.classifyMissingRecoveryRecords(source, records, matched, replayErr)
+		if len(outcome.abandoned) > 0 {
+			terminal, _ := r.recoveryTerminalForMissingSource(outcome.abandoned[0].Key, source, nil)
+			var updated int64
+			var terminalErr error
+			for _, batch := range chunkRecoveryRecords(outcome.abandoned, recoveryTerminalBatchLimit) {
+				var batchUpdated int64
+				batchUpdated, terminalErr = r.windows.MarkRecoveryTerminalBatch(
+					ctx, batch, terminal.status, terminal.reason,
+				)
+				updated += batchUpdated
+				if terminalErr != nil {
+					break
+				}
+			}
+			if terminalErr != nil {
+				restoreErrors = append(restoreErrors, terminalErr)
 				continue
 			}
-			missingErr := fmt.Errorf(
-				"no retained %s PM events matched active %s window %s",
-				source, key.Granularity, key.EntityKey,
-			)
-			if replayErr != nil {
-				missingErr = fmt.Errorf("%w: %v", missingErr, replayErr)
+			r.logger.Warn("PM aggregation recovery abandoned unrecoverable windows",
+				zap.String("source", string(source)),
+				zap.String("reason", terminal.reason),
+				zap.Int("windows", len(outcome.abandoned)),
+				zap.Int64("updated_windows", updated))
+		}
+		for _, deferred := range outcome.deferred {
+			if err := r.windows.MarkFailedAfter(ctx, deferred.key, deferred.err, recoveryMissingSourceRetry); err != nil {
+				restoreErrors = append(restoreErrors, err)
 			}
-			_ = r.windows.MarkFailed(ctx, key, missingErr)
-			r.logger.Error("restore PM aggregation window",
-				zap.String("task_version_id", key.TaskVersionID.String()),
-				zap.String("entity_key", key.EntityKey),
-				zap.Time("window_start", key.Start),
-				zap.Error(missingErr))
+		}
+		if len(outcome.deferred) > 0 {
+			r.logger.Warn("PM aggregation recovery deferred missing-source windows",
+				zap.String("source", string(source)),
+				zap.Int("windows", len(outcome.deferred)),
+				zap.Duration("retry_after", recoveryMissingSourceRetry),
+				zap.Error(outcome.deferred[0].err))
 		}
 	}
 	return errors.Join(restoreErrors...)
+}
+
+type missingRecoveryOutcome struct {
+	abandoned []WindowRecord
+	deferred  []missingRecoveryFailure
+}
+
+type missingRecoveryFailure struct {
+	key WindowKey
+	err error
+}
+
+func (r *Recovery) classifyMissingRecoveryRecords(
+	source recoverySource,
+	records []WindowRecord,
+	matched map[string]struct{},
+	replayErr error,
+) missingRecoveryOutcome {
+	outcome := missingRecoveryOutcome{}
+	for _, record := range records {
+		key := record.Key
+		if _, ok := matched[windowRecoveryID(key)]; ok {
+			continue
+		}
+		missingErr := fmt.Errorf(
+			"no retained %s PM events matched active %s window %s",
+			source, key.Granularity, key.EntityKey,
+		)
+		if replayErr != nil {
+			missingErr = fmt.Errorf("%w: %w", missingErr, replayErr)
+		}
+		if _, ok := r.recoveryTerminalForMissingSource(key, source, replayErr); ok {
+			outcome.abandoned = append(outcome.abandoned, record)
+			continue
+		}
+		outcome.deferred = append(outcome.deferred, missingRecoveryFailure{key: key, err: missingErr})
+	}
+	return outcome
+}
+
+func chunkRecoveryRecords(records []WindowRecord, size int) [][]WindowRecord {
+	if size <= 0 {
+		size = len(records)
+	}
+	chunks := make([][]WindowRecord, 0, (len(records)+size-1)/size)
+	for start := 0; start < len(records); start += size {
+		end := start + size
+		if end > len(records) {
+			end = len(records)
+		}
+		chunks = append(chunks, records[start:end])
+	}
+	return chunks
+}
+
+func recoveryRecordKeys(records []WindowRecord) []WindowKey {
+	keys := make([]WindowKey, 0, len(records))
+	for _, record := range records {
+		keys = append(keys, record.Key)
+	}
+	return keys
+}
+
+func (r *Recovery) recoveryTerminalForMissingSource(
+	key WindowKey,
+	source recoverySource,
+	replayErr error,
+) (recoveryTerminal, bool) {
+	if replayErr != nil || source != recoveryRaw15m {
+		return recoveryTerminal{}, false
+	}
+	retention := r.replayRetention
+	if retention <= 0 {
+		return recoveryTerminal{}, false
+	}
+	cutoff := r.recoveryNow().Add(-retention)
+	if key.End.After(cutoff) {
+		return recoveryTerminal{}, false
+	}
+	return recoveryTerminal{
+		status: "abandoned",
+		reason: "raw_15m source events are no longer retained for recovery",
+	}, true
+}
+
+func (r *Recovery) recoveryNow() time.Time {
+	if r != nil && r.now != nil {
+		return r.now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 func recoveryTerminalFor(

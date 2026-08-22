@@ -967,11 +967,21 @@ func (r *WindowRepository) ListActiveAfter(
 	after *WindowKey,
 	limit uint64,
 ) ([]WindowRecord, error) {
+	builder := listActiveAfterSelect(after, limit)
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list active PM aggregation windows SQL: %w", err)
+	}
+	return r.queryWindows(ctx, query, args...)
+}
+
+func listActiveAfterSelect(after *WindowKey, limit uint64) sq.SelectBuilder {
 	builder := storage.Psql.Select(
 		"task_id", "task_version_id", "entity_key", "granularity", "window_start", "window_end",
 		"status", "expected_slots", "received_slots", "finalize_attempts",
 	).From("pm_aggregation_windows").
 		Where(sq.Eq{"status": []string{"open", "failed", "finalizing"}}).
+		Where(sq.Expr("(status <> 'failed' OR finalize_next_attempt_at <= CURRENT_TIMESTAMP)")).
 		OrderBy("window_start", "task_version_id", "entity_key", "granularity").
 		Limit(limit).
 		PlaceholderFormat(sq.Dollar)
@@ -981,11 +991,7 @@ func (r *WindowRepository) ListActiveAfter(
 			after.Start, after.TaskVersionID, after.EntityKey, string(after.Granularity),
 		))
 	}
-	query, args, err := builder.ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("build list active PM aggregation windows SQL: %w", err)
-	}
-	return r.queryWindows(ctx, query, args...)
+	return builder
 }
 
 func (r *WindowRepository) MarkRecoveryTerminalBatch(
@@ -997,7 +1003,7 @@ func (r *WindowRepository) MarkRecoveryTerminalBatch(
 	if len(records) == 0 {
 		return 0, nil
 	}
-	if status != "orphaned" && status != "retired" {
+	if !validRecoveryTerminalStatus(status) {
 		return 0, fmt.Errorf("unsupported PM aggregation recovery terminal status %q", status)
 	}
 	predicates := make(sq.Or, 0, len(records))
@@ -1026,6 +1032,10 @@ func (r *WindowRepository) MarkRecoveryTerminalBatch(
 		return 0, fmt.Errorf("mark PM aggregation recovery terminal: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+func validRecoveryTerminalStatus(status string) bool {
+	return status == "orphaned" || status == "retired" || status == "abandoned"
 }
 
 func (r *WindowRepository) ListRecoveryRuntimeCleanupPending(
@@ -1106,13 +1116,19 @@ func scanWindowRows(rows pgx.Rows) ([]WindowRecord, error) {
 }
 
 func (r *WindowRepository) MarkFailed(ctx context.Context, key WindowKey, cause error) error {
-	query, args, err := storage.Psql.Update("pm_aggregation_windows").
-		Set("status", "failed").
-		Set("last_error", cause.Error()).
-		Set("updated_at", time.Now().UTC()).
-		Where(windowKeyPredicate(key)).
-		Where(sq.NotEq{"status": "published"}).
-		ToSql()
+	return r.MarkFailedAfter(ctx, key, cause, 0)
+}
+
+func (r *WindowRepository) MarkFailedAfter(
+	ctx context.Context,
+	key WindowKey,
+	cause error,
+	retryAfter time.Duration,
+) error {
+	if r == nil || r.pool == nil {
+		return errors.New("PM aggregation window repository is not configured")
+	}
+	query, args, err := markFailedUpdate(key, cause, retryAfter).ToSql()
 	if err != nil {
 		return fmt.Errorf("build mark PM aggregation window failed SQL: %w", err)
 	}
@@ -1120,6 +1136,30 @@ func (r *WindowRepository) MarkFailed(ctx context.Context, key WindowKey, cause 
 		return fmt.Errorf("mark PM aggregation window failed: %w", err)
 	}
 	return nil
+}
+
+func markFailedUpdate(
+	key WindowKey,
+	cause error,
+	retryAfter time.Duration,
+) sq.UpdateBuilder {
+	if retryAfter < 0 {
+		retryAfter = 0
+	}
+	lastError := ""
+	if cause != nil {
+		lastError = cause.Error()
+	}
+	return storage.Psql.Update("pm_aggregation_windows").
+		Set("status", "failed").
+		Set("last_error", lastError).
+		Set("finalize_next_attempt_at", sq.Expr(
+			"CURRENT_TIMESTAMP + (? * INTERVAL '1 microsecond')",
+			retryAfter.Microseconds(),
+		)).
+		Set("updated_at", time.Now().UTC()).
+		Where(windowKeyPredicate(key)).
+		Where(sq.NotEq{"status": "published"})
 }
 
 func windowKeyPredicate(key WindowKey) sq.Eq {
