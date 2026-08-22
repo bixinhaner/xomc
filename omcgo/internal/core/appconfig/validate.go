@@ -364,6 +364,12 @@ func (c ParamSyncConfig) validate() error {
 	if c.ResultConsumerMaxAckPending < 0 {
 		return fmt.Errorf("param_sync.result_consumer_max_ack_pending must not be negative, got %d", c.ResultConsumerMaxAckPending)
 	}
+	if c.StartupSyncMaxSubmissions < 0 {
+		return fmt.Errorf("param_sync.startup_sync_max_submissions must not be negative, got %d", c.StartupSyncMaxSubmissions)
+	}
+	if c.StartupSyncSubmitInterval < 0 {
+		return fmt.Errorf("param_sync.startup_sync_submit_interval must not be negative, got %s", c.StartupSyncSubmitInterval)
+	}
 	if c.RecoveryRunLimit < 0 {
 		return fmt.Errorf("param_sync.recovery_run_limit must not be negative, got %d", c.RecoveryRunLimit)
 	}

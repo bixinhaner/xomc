@@ -61,12 +61,14 @@ pm_redis:
 # Durable parameter-sync data plane runtime tuning. The data plane is always active.
 param_sync:
   manual_offline_mode: reject
-  result_consumer_shard_count: 16
-  result_consumer_queue_depth: 64
-  result_consumer_pull_batch_size: 64
-  result_consumer_pull_concurrency: 64
+  result_consumer_shard_count: 2
+  result_consumer_queue_depth: 16
+  result_consumer_pull_batch_size: 8
+  result_consumer_pull_concurrency: 2
   result_consumer_ack_wait: 2m
-  result_consumer_max_ack_pending: 512
+  result_consumer_max_ack_pending: 32
+  startup_sync_max_submissions: 500
+  startup_sync_submit_interval: 50ms
   recovery_run_limit: 200
   recovery_task_limit_per_run: 200
   recovery_task_budget: 200

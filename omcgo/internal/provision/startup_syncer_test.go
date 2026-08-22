@@ -39,9 +39,10 @@ func (l *startupPageLister) ListOnlineDevices(_ context.Context, afterID uuid.UU
 }
 
 type startupSubmitter struct {
-	calls []string
-	keys  []string
-	errs  []error
+	calls   []string
+	keys    []string
+	errs    []error
+	results []*DeviceOnlineFullSyncResult
 }
 
 func (s *startupSubmitter) SubmitStartupDeviceOnlineFullSync(_ context.Context, dev *model.Device, key, _ string) (*DeviceOnlineFullSyncResult, error) {
@@ -53,6 +54,11 @@ func (s *startupSubmitter) SubmitStartupDeviceOnlineFullSync(_ context.Context, 
 		if err != nil {
 			return nil, err
 		}
+	}
+	if len(s.results) > 0 {
+		result := s.results[0]
+		s.results = s.results[1:]
+		return result, nil
 	}
 	return &DeviceOnlineFullSyncResult{RequestID: uuid.New(), Status: "accepted"}, nil
 }
@@ -78,6 +84,55 @@ func TestStartupSyncerPagesThroughAllOnlineDevices(t *testing.T) {
 	for _, key := range submitter.keys {
 		require.True(t, strings.HasPrefix(key, "omc-redeploy:"))
 	}
+}
+
+func TestStartupSyncerStopsAtSubmissionBudget(t *testing.T) {
+	lister := &startupPageLister{pages: [][]*model.Device{startupDevices(2), startupDevices(2), startupDevices(1)}}
+	submitter := &startupSubmitter{}
+	s := NewStartupSyncer(lister, submitter, nil, 2, zap.NewNop()).
+		WithSubmissionBudget(3, 0)
+
+	require.NoError(t, s.Run(context.Background()))
+	require.Len(t, lister.calls, 2)
+	require.Len(t, submitter.calls, 3)
+}
+
+func TestStartupSyncerCountsPendingAgainstSubmissionBudget(t *testing.T) {
+	lister := &startupPageLister{pages: [][]*model.Device{startupDevices(2), startupDevices(2), startupDevices(1)}}
+	submitter := &startupSubmitter{results: []*DeviceOnlineFullSyncResult{nil, nil, nil, nil, nil, nil}}
+	s := NewStartupSyncer(lister, submitter, nil, 2, zap.NewNop()).
+		WithSubmissionBudget(3, 0)
+	s.retryWait = func(context.Context, time.Duration) error { return nil }
+
+	require.NoError(t, s.Run(context.Background()))
+	require.Len(t, lister.calls, 2)
+	require.Len(t, submitter.calls, 3)
+}
+
+func TestStartupSyncerLimitsPendingRetryRounds(t *testing.T) {
+	lister := &startupPageLister{pages: [][]*model.Device{startupDevices(1)}}
+	submitter := &startupSubmitter{results: []*DeviceOnlineFullSyncResult{nil, nil, nil}}
+	s := NewStartupSyncer(lister, submitter, nil, 2, zap.NewNop()).
+		WithSubmissionBudget(10, 0)
+	s.retryWait = func(context.Context, time.Duration) error { return nil }
+
+	require.NoError(t, s.Run(context.Background()))
+	require.Len(t, submitter.calls, 2)
+}
+
+func TestStartupSyncerWaitsBetweenBudgetedSubmissions(t *testing.T) {
+	lister := &startupPageLister{pages: [][]*model.Device{startupDevices(2)}}
+	submitter := &startupSubmitter{}
+	s := NewStartupSyncer(lister, submitter, nil, 2, zap.NewNop()).
+		WithSubmissionBudget(2, time.Second)
+	var waits []time.Duration
+	s.retryWait = func(_ context.Context, delay time.Duration) error {
+		waits = append(waits, delay)
+		return nil
+	}
+
+	require.NoError(t, s.Run(context.Background()))
+	require.Equal(t, []time.Duration{time.Second}, waits)
 }
 
 func TestStartupSyncerLogsOMCRedeployLifecycle(t *testing.T) {

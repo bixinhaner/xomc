@@ -299,6 +299,8 @@ type ParamSyncConfig struct {
 	ResultConsumerPullConcurrency int           `mapstructure:"result_consumer_pull_concurrency"`
 	ResultConsumerAckWait         time.Duration `mapstructure:"result_consumer_ack_wait"`
 	ResultConsumerMaxAckPending   int           `mapstructure:"result_consumer_max_ack_pending"`
+	StartupSyncMaxSubmissions     int           `mapstructure:"startup_sync_max_submissions"`
+	StartupSyncSubmitInterval     time.Duration `mapstructure:"startup_sync_submit_interval"`
 	RecoveryRunLimit              int           `mapstructure:"recovery_run_limit"`
 	RecoveryTaskLimitPerRun       int           `mapstructure:"recovery_task_limit_per_run"`
 	RecoveryTaskBudget            int           `mapstructure:"recovery_task_budget"`

@@ -13,6 +13,40 @@ import (
 	"github.com/omcgo/omcgo/internal/task"
 )
 
+type terminalBridgeSubscriptionBus struct {
+	event.EventBus
+	queueSubjects []string
+	pullSubjects  []string
+}
+
+func (b *terminalBridgeSubscriptionBus) QueueSubscribe(subject string, _ string, _ event.EventHandler) (event.Subscription, error) {
+	b.queueSubjects = append(b.queueSubjects, subject)
+	return noopSubscription{}, nil
+}
+
+func (b *terminalBridgeSubscriptionBus) PullSubscribe(subject string, _ string, _ event.EventHandler) (event.Subscription, error) {
+	b.pullSubjects = append(b.pullSubjects, subject)
+	return noopSubscription{}, nil
+}
+
+type noopSubscription struct{}
+
+func (noopSubscription) Unsubscribe() error { return nil }
+
+func TestTaskTerminalBridgeUsesPullSubscriptions(t *testing.T) {
+	bus := &terminalBridgeSubscriptionBus{}
+	bridge := NewTaskTerminalBridge(bus)
+
+	require.NoError(t, bridge.Start())
+
+	assert.Empty(t, bus.queueSubjects)
+	assert.ElementsMatch(t, []string{
+		event.SubjectTaskCompleted,
+		event.SubjectTaskFailed,
+		event.SubjectTaskCancelled,
+	}, bus.pullSubjects)
+}
+
 func TestTaskTerminalBridgePublishesExpiredResultWithoutRawPayload(t *testing.T) {
 	bus := event.NewChannelEventBus(8, zap.NewNop())
 	bridge := NewTaskTerminalBridge(bus)

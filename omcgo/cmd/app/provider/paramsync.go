@@ -29,13 +29,19 @@ const (
 	paramSyncQueuedWorkers           = 2
 	paramSyncQueuedBatchLimit        = 25
 	paramSyncAdmissionReconcileLimit = 100
-	paramSyncResultPullBatchSize     = 16
-	paramSyncResultPullConcurrency   = 4
-	paramSyncResultMaxAckPending     = 64
+	paramSyncResultPullBatchSize     = 8
+	paramSyncResultPullConcurrency   = 2
+	paramSyncResultMaxAckPending     = 32
 	paramSyncResultAckWait           = 2 * time.Minute
-	paramSyncResultConsumerShards    = 4
-	paramSyncResultConsumerQueue     = 32
-	paramSyncResultConsumerQueueMax  = 64
+	paramSyncResultConsumerShards    = 2
+	paramSyncResultConsumerQueue     = 16
+	paramSyncResultConsumerQueueMax  = 32
+	paramSyncTerminalPullBatchSize   = 8
+	paramSyncTerminalPullConcurrency = 2
+	paramSyncTerminalMaxAckPending   = 32
+	paramSyncTerminalAckWait         = 2 * time.Minute
+	paramSyncStartupMaxSubmissions   = 500
+	paramSyncStartupSubmitInterval   = 50 * time.Millisecond
 )
 
 // paramSyncCompletionHandled is registered with CompletionRouter because the
@@ -137,6 +143,33 @@ func paramSyncResultAckWaitFromApp(value time.Duration) time.Duration {
 		return paramSyncResultAckWait
 	}
 	return value
+}
+
+func paramSyncStartupSubmitIntervalFromApp(value time.Duration) time.Duration {
+	if value <= 0 {
+		return paramSyncStartupSubmitInterval
+	}
+	return value
+}
+
+func paramSyncTerminalPullTuning() event.PullTuning {
+	return event.PullTuning{
+		BatchSize:     paramSyncTerminalPullBatchSize,
+		Concurrency:   paramSyncTerminalPullConcurrency,
+		AckWait:       paramSyncTerminalAckWait,
+		MaxAckPending: paramSyncTerminalMaxAckPending,
+	}
+}
+
+func applyParamSyncPullTunings(setter pullTuningSetter, cfg appconfig.ParamSyncConfig) {
+	if setter == nil {
+		return
+	}
+	setter.SetPullTuning(event.SubjectParamSyncTaskResult, paramSyncPullTuningFromApp(cfg))
+	terminalTuning := paramSyncTerminalPullTuning()
+	for _, subject := range []string{event.SubjectTaskCompleted, event.SubjectTaskFailed, event.SubjectTaskCancelled} {
+		setter.SetPullTuning(subject, terminalTuning)
+	}
 }
 
 func boundedPositiveInt(value, defaultValue, maxValue int) int {
@@ -653,7 +686,7 @@ func initParamSyncModule(c *Container) error {
 	metrics := paramsync.NewMetrics(c.MetricsReg)
 	maintenanceCfg := paramSyncMaintenanceConfigFromApp(c.Cfg.ParamSync)
 	if setter, ok := c.EventBus.(pullTuningSetter); ok {
-		setter.SetPullTuning(event.SubjectParamSyncTaskResult, paramSyncPullTuningFromApp(c.Cfg.ParamSync))
+		applyParamSyncPullTunings(setter, c.Cfg.ParamSync)
 	}
 	service := paramsync.NewService(repo, planner).WithMetrics(metrics).WithDispatcher(paramsync.NewPGTaskDispatcher(c.PgPool))
 	outbox := paramsync.NewOutboxDispatcher(c.PgPool, c.TaskSvc, 20).WithEventBus(c.EventBus)
