@@ -338,7 +338,7 @@ func (inf *Infra) startMetrics() {
 	// /readyz  — readiness：聚合 HealthChecker 中已注册的依赖检查，任一失败 503。
 	// 两者职责严格分离，与 Kubernetes 探针语义对齐，避免错误重启正在恢复的实例。
 	metricsMux.Handle("/healthz", healthpkg.LivenessHandler())
-	metricsMux.Handle("/readyz", healthpkg.ReadinessHandler(5*time.Second, inf.readinessCheckers()...))
+	metricsMux.Handle("/readyz", healthpkg.DynamicReadinessHandler(5*time.Second, inf.readinessCheckers))
 
 	// net/http/pprof —— 仅在 OMCGO_PPROF 为真时挂到内网 metrics 端口（与 /metrics 同信任
 	// 边界，不暴露在对外业务 API 端口）。默认关闭：商用部署保持干净，排查 CPU/内存时按需

@@ -30,9 +30,9 @@ type Checker interface {
 // Result 表示单个依赖的检查结果，序列化到 JSON 响应。
 type Result struct {
 	Name    string `json:"name"`
-	Status  string `json:"status"`            // "healthy" | "unhealthy"
-	Latency string `json:"latency"`           // 形如 "1.2ms"
-	Error   string `json:"error,omitempty"`   // 仅 unhealthy 时有值
+	Status  string `json:"status"`          // "healthy" | "unhealthy"
+	Latency string `json:"latency"`         // 形如 "1.2ms"
+	Error   string `json:"error,omitempty"` // 仅 unhealthy 时有值
 }
 
 // Response 是 /readyz 的整体响应结构。
@@ -58,6 +58,15 @@ func LivenessHandler() http.HandlerFunc {
 // timeout 限制单次探测的总时长（外层封口），传 0 时使用默认 5s。
 // 当 checkers 为空时退化为 liveness 行为（恒 200）。
 func ReadinessHandler(timeout time.Duration, checkers ...Checker) http.HandlerFunc {
+	return DynamicReadinessHandler(timeout, func() []Checker {
+		return checkers
+	})
+}
+
+// DynamicReadinessHandler 返回 /readyz 处理器，并在每次请求时重新获取 Checker。
+// 适用于 metrics/health 端口需要早于业务模块初始化启动的进程：后续模块继续
+// Register 健康检查时，/readyz 不会停留在启动时的旧快照。
+func DynamicReadinessHandler(timeout time.Duration, checkerProvider func() []Checker) http.HandlerFunc {
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
@@ -65,6 +74,10 @@ func ReadinessHandler(timeout time.Duration, checkers ...Checker) http.HandlerFu
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
 
+		var checkers []Checker
+		if checkerProvider != nil {
+			checkers = checkerProvider()
+		}
 		results := runCheckers(ctx, checkers)
 		status := http.StatusOK
 		overall := "ok"
@@ -129,8 +142,8 @@ type fnChecker struct {
 	fn   func(ctx context.Context) error
 }
 
-func (f *fnChecker) Name() string                       { return f.name }
-func (f *fnChecker) Check(ctx context.Context) error    { return f.fn(ctx) }
+func (f *fnChecker) Name() string                    { return f.name }
+func (f *fnChecker) Check(ctx context.Context) error { return f.fn(ctx) }
 
 // NewChecker 用闭包构造 Checker。
 // 适用于 Ping 这类一行就能实现的检查，避免每个依赖都声明一个新类型。

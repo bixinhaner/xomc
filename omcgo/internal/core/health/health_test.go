@@ -102,6 +102,43 @@ func TestReadinessHandler_NoCheckers(t *testing.T) {
 	assert.Empty(t, body.Components)
 }
 
+// TestDynamicReadinessHandler_RefreshesCheckers 验证 handler 创建后新增的检查项
+// 会被后续 /readyz 请求看到。app 会提前启动 metrics 端口，模块健康检查在
+// provider.Setup 期间陆续注册；这里防止提前启动导致 readyz 永久停留在旧快照。
+func TestDynamicReadinessHandler_RefreshesCheckers(t *testing.T) {
+	checkers := []Checker{
+		NewChecker("postgres", func(ctx context.Context) error { return nil }),
+	}
+	handler := DynamicReadinessHandler(time.Second, func() []Checker {
+		return checkers
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, req)
+	require.Equal(t, http.StatusOK, first.Code)
+
+	var firstBody Response
+	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &firstBody))
+	require.Len(t, firstBody.Components, 1)
+	assert.Equal(t, "postgres", firstBody.Components[0].Name)
+
+	checkers = append(checkers, NewChecker("dictload", func(ctx context.Context) error {
+		return errors.New("warming up")
+	}))
+
+	second := httptest.NewRecorder()
+	handler.ServeHTTP(second, req)
+	require.Equal(t, http.StatusServiceUnavailable, second.Code)
+
+	var secondBody Response
+	require.NoError(t, json.Unmarshal(second.Body.Bytes(), &secondBody))
+	require.Len(t, secondBody.Components, 2)
+	assert.Equal(t, "dictload", secondBody.Components[1].Name)
+	assert.Equal(t, "unhealthy", secondBody.Components[1].Status)
+	assert.Equal(t, "warming up", secondBody.Components[1].Error)
+}
+
 // TestReadinessHandler_Timeout 超时后 Checker 收到取消信号；通过返回 ctx.Err() 表示故障。
 func TestReadinessHandler_Timeout(t *testing.T) {
 	slowChecker := NewChecker("slow", func(ctx context.Context) error {
