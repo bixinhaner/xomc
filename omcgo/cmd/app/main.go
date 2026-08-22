@@ -70,6 +70,10 @@ func runApp(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer app.Logger.Sync()
+	// provider.Setup may run heavyweight one-shot dictionary/model reconciliation
+	// before the main HTTP server is ready. Expose liveness/metrics first so
+	// deploy health gates and monitoring do not see a long blind startup window.
+	app.StartMetrics()
 	app.Logger.Info("omcgo-app starting", zap.String("config", cfgPath))
 
 	// Setup Gin engine
