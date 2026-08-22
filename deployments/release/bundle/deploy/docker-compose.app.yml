@@ -347,12 +347,13 @@ services:
           - acs-primary
 
   # ── ACS 发布接力实例 ────────────────────────────────────────────────────
-  # 与正式 acs 同时常驻，并共享 Docker DNS 别名 `acs`。Nginx 的动态 upstream
-  # 因而始终至少看到一个可用实例：升级时先把本实例更新并等 /readyz，通过后
-  # 才替换正式 acs，消除单实例 stop→start 期间的南向请求超时。
+  # 与正式 acs 同时常驻，但不共享正式 Docker DNS 别名 `acs`，也不进入 web
+  # 的正式 upstream。Nginx 的 ACS upstream 固定指向 `acs-primary`，避免正式
+  # HTTPS 入口随机或备援打到 candidate。升级时仍先把本实例更新并等 /readyz，
+  # 通过后才替换正式 acs；candidate 继续用于独立 ready/metrics。
   #
-  # 候选实例不发布任何宿主端口（ACS_CANDIDATE_INTERNAL_ONLY），只接收 web
-  # 容器经 omcgo-net 转发的请求；7547/7557/9095 仍由正式实例持有，避免端口冲突。
+  # 候选实例不发布任何宿主端口（ACS_CANDIDATE_INTERNAL_ONLY）；7547/7557/9095
+  # 仍由正式实例持有，避免端口冲突。
   acs-candidate:
     <<: *acs-service
     ports: []
@@ -363,7 +364,7 @@ services:
     networks:
       omcgo-net:
         aliases:
-          - acs
+          - acs-candidate
 
   # ── 业务进程：worker（异步任务消费者）──────────────────────────────────
   worker:

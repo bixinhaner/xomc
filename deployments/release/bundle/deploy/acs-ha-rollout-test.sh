@@ -24,18 +24,38 @@ contains() {
     fail=$((fail + 1))
   fi
 }
+contains_line() {
+  local description="$1" pattern="$2" file="$3"
+  if grep -Fxq -- "$pattern" "$file"; then
+    pass=$((pass + 1))
+  else
+    echo "FAIL: $description: $file 未包含整行 [$pattern]" >&2
+    fail=$((fail + 1))
+  fi
+}
+not_contains_line() {
+  local description="$1" pattern="$2" file="$3"
+  if grep -Fxq -- "$pattern" "$file"; then
+    echo "FAIL: $description: $file 不应包含整行 [$pattern]" >&2
+    fail=$((fail + 1))
+  else
+    pass=$((pass + 1))
+  fi
+}
 
 echo "── ACS 双实例发布契约 ──"
 contains "候选 ACS 服务存在" "acs-candidate:" "$APP_COMPOSE"
-contains "候选 ACS 共享正式 DNS 别名" "- acs" "$APP_COMPOSE"
+contains_line "正式 ACS 有稳定 DNS 别名" "          - acs-primary" "$APP_COMPOSE"
+contains_line "候选 ACS 使用独立 DNS 别名" "          - acs-candidate" "$APP_COMPOSE"
+not_contains_line "候选 ACS 不共享正式 DNS 别名" "          - acs" "$APP_COMPOSE"
 contains "候选 ACS 不发布宿主业务端口" "ACS_CANDIDATE_INTERNAL_ONLY" "$APP_COMPOSE"
 contains "候选 ACS 使用独立日志目录" "/opt/omc/run/logs/acs-candidate:/run/logs/acs" "$APP_COMPOSE"
 contains "安装创建候选 ACS 日志目录" '"$OMC_ROOT/run/logs/acs-candidate"' "$INSTALL"
 contains "安装先预热候选 ACS" "acs_ha_prepare_candidate" "$INSTALL"
-contains "首轮升级先校验旧 web 动态 upstream" "web_acs_dynamic_upstream_loaded" "$INSTALL"
-contains "动态 ACS server 校验失败必须阻断" "grep -Fq 'server acs:7557 resolve;' || return 1" "$INSTALL"
-contains "动态 ACS zone 校验失败必须阻断" "grep -Fq 'zone acs_backend' || return 1" "$INSTALL"
-contains "旧 web 不支持动态 upstream 时先刷新入口" "先刷新 web 动态 ACS upstream" "$INSTALL"
+contains "首轮升级先校验旧 web 稳定正式 upstream" "web_acs_primary_upstream_loaded" "$INSTALL"
+contains "稳定正式 ACS server 校验失败必须阻断" "grep -Fq 'server acs-primary:7557 resolve;' || return 1" "$INSTALL"
+contains "稳定正式 ACS zone 校验失败必须阻断" "grep -Fq 'zone acs_backend' || return 1" "$INSTALL"
+contains "旧 web 不支持稳定正式 upstream 时先刷新入口" "先刷新 web ACS upstream" "$INSTALL"
 contains "候选 ACS 就绪后才允许替换正式实例" "acs_ha_wait_ready acs-candidate" "$INSTALL"
 contains "ACS readiness 超时输出容器诊断" "acs_ha_report_not_ready acs-candidate" "$INSTALL"
 contains "ACS readiness 诊断包含 OOM 状态" "OOMKilled" "$INSTALL"
@@ -43,7 +63,7 @@ contains "存量发布单独替换正式 ACS" '"${DC[@]}" up --pull never -d --n
 contains "正式 ACS 就绪后才更新其余服务" "acs_ha_wait_ready acs" "$INSTALL"
 contains "存量发布的其余服务显式排除 ACS 依赖" '"${DC[@]}" up --pull never -d --no-deps "${remaining_services[@]}"' "$INSTALL"
 contains "存量发布覆盖全部监控 exporter" "nats-exporter nginx-exporter node-exporter cadvisor" "$INSTALL"
-contains "等待 Nginx 动态 DNS 纳入候选实例" "sleep 12" "$INSTALL"
+contains "等待 Nginx DNS 刷新后复查候选实例" "sleep 12" "$INSTALL"
 contains "候选探针直达容器 IP 的 CWMP 业务端口" '"http://${service_ip}:7557/readyz"' "$INSTALL"
 if [ "$(grep -Fc 'acs_ha_wait_ready acs-candidate' "$INSTALL")" -ge 2 ]; then
   pass=$((pass + 1))
@@ -52,6 +72,7 @@ else
   fail=$((fail + 1))
 fi
 contains "存量 --skip-web 升级被显式拒绝" "--skip-web 不支持存量 ACS 无损升级" "$INSTALL"
+contains "健康检查校验稳定正式 ACS upstream" "server acs-primary:7557 resolve;" "$HEALTHCHECK"
 contains "健康检查覆盖候选 ACS" 'check "acs-candidate 容器 running"' "$HEALTHCHECK"
 contains "健康检查验证候选 ACS readiness" 'acs_service_ready acs-candidate' "$HEALTHCHECK"
 contains "Prometheus 独立抓取候选 ACS" '"acs-candidate:9090"' "$PROMETHEUS"

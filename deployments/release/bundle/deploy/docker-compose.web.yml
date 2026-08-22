@@ -6,8 +6,8 @@
 #
 # 镜像内已 COPY nginx.conf / default.conf；本 compose 仍把同目录两个 conf 文件
 # 以 bind mount 方式覆盖进容器，便于运维就地改 server_name / TLS / 自定义路由
-# 而不重打镜像。upstream 名（app / acs）依赖与 docker-compose.app.yml 同 project
-# 共享 docker network 内 service 名。
+# 而不重打镜像。upstream 名（app / acs-primary）依赖与 docker-compose.app.yml
+# 同 project 共享 docker network 内 service 名；acs-candidate 仅用于独立预检和监控。
 
 networks:
   omcgo-net:
