@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -98,6 +99,73 @@ func TestFailFinalizeClaimPersistsRetryAndFencesByClaimToken(t *testing.T) {
 	for _, want := range []any{"failed", "permanent formula error", token, (2 * time.Minute).Microseconds()} {
 		if !containsSQLArg(args, want) {
 			t.Fatalf("failed finalize claim args %v missing %v", args, want)
+		}
+	}
+}
+
+func TestListActiveAfterSkipsFailedWindowsInBackoff(t *testing.T) {
+	query, _, err := listActiveAfterSelect(nil, 100).ToSql()
+	if err != nil {
+		t.Fatalf("build active recovery SQL: %v", err)
+	}
+	for _, fragment := range []string{
+		"status IN",
+		"status <> 'failed' OR finalize_next_attempt_at <= CURRENT_TIMESTAMP",
+		"ORDER BY window_start, task_version_id, entity_key, granularity",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("active recovery SQL %q missing %q", query, fragment)
+		}
+	}
+}
+
+func TestMarkFailedAfterPersistsRecoveryBackoff(t *testing.T) {
+	key := WindowKey{
+		TaskVersionID: uuid.MustParse("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),
+		EntityKey:     "missing-raw",
+		Granularity:   GranularityHourly,
+		Start:         time.Date(2026, 7, 30, 8, 0, 0, 0, time.UTC),
+	}
+	query, args, err := markFailedUpdate(
+		key, errors.New("raw source missing"), 6*time.Hour,
+	).ToSql()
+	if err != nil {
+		t.Fatalf("build mark failed SQL: %v", err)
+	}
+	for _, fragment := range []string{
+		"status = $",
+		"last_error = $",
+		"finalize_next_attempt_at = CURRENT_TIMESTAMP + ($",
+		"status <> $",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("mark failed SQL %q missing %q", query, fragment)
+		}
+	}
+	for _, want := range []any{"failed", "raw source missing", (6 * time.Hour).Microseconds()} {
+		if !containsSQLArg(args, want) {
+			t.Fatalf("mark failed args %v missing %v", args, want)
+		}
+	}
+}
+
+func TestMarkFailedAfterReturnsRepositoryErrors(t *testing.T) {
+	repo := &WindowRepository{}
+	err := repo.MarkFailedAfter(context.Background(), WindowKey{}, errors.New("raw source missing"), time.Hour)
+	if err == nil || !strings.Contains(err.Error(), "repository is not configured") {
+		t.Fatalf("MarkFailedAfter error = %v, want repository configuration failure", err)
+	}
+}
+
+func TestRecoveryTerminalStatusAllowsAbandonedRaw15mWindows(t *testing.T) {
+	for _, status := range []string{"orphaned", "retired", "abandoned"} {
+		if !validRecoveryTerminalStatus(status) {
+			t.Fatalf("recovery terminal status %q must be supported", status)
+		}
+	}
+	for _, status := range []string{"failed", "published", "rebuilding"} {
+		if validRecoveryTerminalStatus(status) {
+			t.Fatalf("recovery terminal status %q must not be accepted", status)
 		}
 	}
 }

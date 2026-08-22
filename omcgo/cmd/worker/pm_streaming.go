@@ -154,7 +154,8 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 		SetSnapshot(snapshot).
 		SetLocationProvider(locationProvider).
 		SetMetrics(streamMetrics)
-	recovery := pmstream.NewRecovery(w.NATS.JS, windowRepo, store, snapshot, matcher, logger)
+	recovery := pmstream.NewRecovery(w.NATS.JS, windowRepo, store, snapshot, matcher, logger).
+		SetReplayRetention(cfg.ReplayRetention)
 	restoreStart := time.Now()
 	if err := recovery.RestoreActiveWindows(ctx); err != nil {
 		logger.Error("restore active PM aggregation windows",
