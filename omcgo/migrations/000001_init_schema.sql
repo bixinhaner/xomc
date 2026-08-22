@@ -12941,14 +12941,14 @@ CREATE INDEX devices_cmcc_ip_address_idx ON public.devices_cmcc USING btree (ip_
 -- Name: idx_devices_is_online; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_is_online ON ONLY public.devices USING btree (is_online) WHERE (is_online = true);
+CREATE INDEX idx_devices_is_online ON ONLY public.devices USING btree (is_online) INCLUDE (product_id) WHERE ((is_online = true) AND (deleted_at IS NULL));
 
 
 --
 -- Name: devices_cmcc_is_online_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX devices_cmcc_is_online_idx ON public.devices_cmcc USING btree (is_online) WHERE (is_online = true);
+CREATE INDEX devices_cmcc_is_online_idx ON public.devices_cmcc USING btree (is_online) INCLUDE (product_id) WHERE ((is_online = true) AND (deleted_at IS NULL));
 
 
 --
@@ -13081,7 +13081,7 @@ CREATE INDEX devices_ctcc_ip_address_idx ON public.devices_ctcc USING btree (ip_
 -- Name: devices_ctcc_is_online_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX devices_ctcc_is_online_idx ON public.devices_ctcc USING btree (is_online) WHERE (is_online = true);
+CREATE INDEX devices_ctcc_is_online_idx ON public.devices_ctcc USING btree (is_online) INCLUDE (product_id) WHERE ((is_online = true) AND (deleted_at IS NULL));
 
 
 --
@@ -13172,7 +13172,7 @@ CREATE INDEX devices_cucc_ip_address_idx ON public.devices_cucc USING btree (ip_
 -- Name: devices_cucc_is_online_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX devices_cucc_is_online_idx ON public.devices_cucc USING btree (is_online) WHERE (is_online = true);
+CREATE INDEX devices_cucc_is_online_idx ON public.devices_cucc USING btree (is_online) INCLUDE (product_id) WHERE ((is_online = true) AND (deleted_at IS NULL));
 
 
 --
@@ -13263,7 +13263,7 @@ CREATE INDEX devices_other_ip_address_idx ON public.devices_other USING btree (i
 -- Name: devices_other_is_online_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX devices_other_is_online_idx ON public.devices_other USING btree (is_online) WHERE (is_online = true);
+CREATE INDEX devices_other_is_online_idx ON public.devices_other USING btree (is_online) INCLUDE (product_id) WHERE ((is_online = true) AND (deleted_at IS NULL));
 
 
 --
@@ -14276,7 +14276,7 @@ CREATE INDEX idx_devices_other_deleted_at ON public.devices_other USING btree (d
 -- Name: idx_devices_other_is_online; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_other_is_online ON public.devices_other USING btree (is_online) WHERE (is_online = true);
+CREATE INDEX idx_devices_other_is_online ON public.devices_other USING btree (is_online) INCLUDE (product_id) WHERE ((is_online = true) AND (deleted_at IS NULL));
 
 
 --
