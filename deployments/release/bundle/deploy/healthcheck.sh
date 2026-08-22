@@ -221,7 +221,8 @@ web_nginx_config() {
 
 web_acs_upstream_pool_loaded() {
   web_nginx_config || return 1
-  printf '%s\n' "$WEB_NGINX_CONFIG" | grep -Fq 'server acs:7557 resolve;'
+  printf '%s\n' "$WEB_NGINX_CONFIG" | grep -Fq 'server acs-primary:7557 resolve;'
+  ! printf '%s\n' "$WEB_NGINX_CONFIG" | grep -Fq 'server acs-candidate:7557'
   printf '%s\n' "$WEB_NGINX_CONFIG" | grep -Fq 'keepalive 4096;'
   printf '%s\n' "$WEB_NGINX_CONFIG" | grep -Fq 'proxy_pass http://acs_backend;'
 }

@@ -1461,10 +1461,10 @@ stop_existing_worker() {
     die "现有 Worker 停止失败；为避免 App 启动期数据库争抢，已中止升级" "Could not stop the existing Worker; upgrade aborted to avoid database contention during App startup" 2
 }
 
-web_acs_dynamic_upstream_loaded() {
+web_acs_primary_upstream_loaded() {
   local web_cid="$1" rendered
   rendered="$(docker exec "$web_cid" nginx -T 2>&1)" || return 1
-  printf '%s\n' "$rendered" | grep -Fq 'server acs:7557 resolve;' || return 1
+  printf '%s\n' "$rendered" | grep -Fq 'server acs-primary:7557 resolve;' || return 1
   printf '%s\n' "$rendered" | grep -Fq 'zone acs_backend' || return 1
 }
 
@@ -1487,54 +1487,54 @@ acs_ha_prepare_candidate() {
   fi
   [ -n "$old_web" ] || die "存量 ACS 正在运行但 web 网关不存在，无法执行无损发布" "An existing ACS is running but the web gateway is missing; zero-downtime release cannot proceed" 2
 
-  # 兼容首轮从旧拓扑升级：旧 web 若尚未使用动态 DNS upstream，候选实例即使
-  # 就绪也不会被纳入路由。先在旧 ACS 仍服务时只刷新 web，再继续接力。
-  if ! web_acs_dynamic_upstream_loaded "$old_web"; then
-    log "旧 web 尚未加载动态 ACS upstream，先刷新 web 动态 ACS upstream ..." "The existing web has no dynamic ACS upstream; refreshing web first ..."
+  # 兼容首轮从旧拓扑升级：旧 web 若尚未使用稳定正式 ACS upstream，先在旧 ACS
+  # 仍服务时刷新 web，避免继续使用会轮询到 candidate 的共享 `acs` DNS alias。
+  if ! web_acs_primary_upstream_loaded "$old_web"; then
+    log "旧 web 尚未加载稳定正式 ACS upstream，先刷新 web ACS upstream ..." "The existing web has no stable primary ACS upstream; refreshing web first ..."
     "${DC[@]}" up --pull never -d --no-deps web
     wait_seconds=0
     while [ "$wait_seconds" -lt 30 ]; do
       old_web="$("${DC[@]}" ps -q web 2>/dev/null | head -n1)"
-      if [ -n "$old_web" ] && web_acs_dynamic_upstream_loaded "$old_web"; then
+      if [ -n "$old_web" ] && web_acs_primary_upstream_loaded "$old_web"; then
         break
       fi
       sleep 2
       wait_seconds=$((wait_seconds + 2))
     done
-    web_acs_dynamic_upstream_loaded "$old_web" ||
-      die "web 30s 内未加载动态 ACS upstream；正式 ACS 未替换，已中止发布" "The web gateway did not load the dynamic ACS upstream within 30s; the primary ACS was not replaced and the release was aborted" 2
+    web_acs_primary_upstream_loaded "$old_web" ||
+      die "web 30s 内未加载稳定正式 ACS upstream；正式 ACS 未替换，已中止发布" "The web gateway did not load the stable primary ACS upstream within 30s; the primary ACS was not replaced and the release was aborted" 2
   fi
 
-  log "先更新 ACS 接力实例，正式 ACS 继续承载现有流量 ..." "Updating the ACS candidate first; the primary ACS continues serving traffic ..."
+  log "先更新 ACS 接力实例做镜像就绪预检，正式 ACS 继续承载现有流量 ..." "Updating the ACS candidate first for image readiness preflight; the primary ACS continues serving traffic ..."
   "${DC[@]}" up --pull never -d --no-deps acs-candidate
   if ! acs_ha_wait_ready acs-candidate; then
     acs_ha_report_not_ready acs-candidate
     die "ACS 接力实例 90s 内未就绪；正式 ACS 未替换，已中止发布" "The ACS candidate was not ready within 90s; the primary ACS was not replaced and the release was aborted" 2
   fi
-  # nginx.conf 的 Docker DNS valid=10s。候选实例刚加入共享别名 `acs` 时，
-  # 必须覆盖完整缓存周期后再停止正式实例，否则旧 worker 仍可能只持有旧 IP。
-  log "ACS 接力实例已就绪，等待 Nginx 动态 DNS 完成一轮刷新 ..." "ACS candidate is ready; waiting for one Nginx dynamic DNS refresh cycle ..."
+  # nginx.conf 的 Docker DNS valid=10s。web upstream 固定指向 acs-primary；
+  # candidate 不进入正式入口，只在刷新周期后复查，确认接力实例自身仍 ready。
+  log "ACS 接力实例已就绪，等待一个 DNS 刷新周期后复查 candidate ready ..." "ACS candidate is ready; waiting one DNS refresh cycle before rechecking candidate readiness ..."
   sleep 12
   if ! acs_ha_wait_ready acs-candidate; then
     acs_ha_report_not_ready acs-candidate
     die "DNS 刷新后 ACS 接力实例已不就绪；正式 ACS 未替换，已中止发布" "The ACS candidate was not ready after the DNS refresh; the primary ACS was not replaced and the release was aborted" 2
   fi
-  log "Nginx 已具备接力上游，允许替换正式 ACS" "Nginx has the failover upstream; primary ACS replacement is allowed"
+  log "web 已使用稳定正式 ACS upstream，candidate 预检通过，允许替换正式 ACS" "The web gateway uses the stable primary ACS upstream and candidate preflight passed; primary ACS replacement is allowed"
 }
 
 acs_ha_prepare_candidate
 
 if [ "$ACS_HA_EXISTING" = 1 ]; then
   # 不再调用无服务范围的 compose up：实测 Compose 会把刚预热的 candidate
-  # 与 primary 同时重建，破坏接力不变量。正式实例必须单独替换、直连业务端口
-  # 验证就绪，再覆盖一轮 Nginx DNS 缓存；其余业务显式 --no-deps 排除两个 ACS。
-  log "接力实例持续承载流量，单独替换正式 ACS ..." "The candidate continues serving traffic; replacing the primary ACS separately ..."
+  # 与 primary 同时重建。正式实例必须单独替换、直连业务端口验证就绪；
+  # candidate 不进入 web upstream，只作为独立 ready/metrics 旁路实例保留。
+  log "单独替换正式 ACS，candidate 保持独立 ready/metrics 旁路 ..." "Replacing the primary ACS separately; the candidate remains an independent ready/metrics sidecar ..."
   "${DC[@]}" up --pull never -d --no-deps acs
   if ! acs_ha_wait_ready acs; then
     acs_ha_report_not_ready acs
-    die "正式 ACS 90s 内未就绪；接力实例仍在服务，已中止其余业务更新" "The primary ACS was not ready within 90s; the candidate remains in service and the remaining business update was aborted" 2
+    die "正式 ACS 90s 内未就绪；candidate 仍保持旁路可诊断，已中止其余业务更新" "The primary ACS was not ready within 90s; the candidate remains available as a diagnostic sidecar and the remaining business update was aborted" 2
   fi
-  log "正式 ACS 已就绪，等待 Nginx 动态 DNS 完成一轮刷新 ..." "Primary ACS is ready; waiting for one Nginx dynamic DNS refresh cycle ..."
+  log "正式 ACS 已就绪，等待 Nginx 对 acs-primary 完成一轮 DNS 刷新 ..." "Primary ACS is ready; waiting for one Nginx DNS refresh cycle for acs-primary ..."
   sleep 12
   if ! acs_ha_wait_ready acs || ! acs_ha_wait_ready acs-candidate; then
     acs_ha_report_not_ready acs
