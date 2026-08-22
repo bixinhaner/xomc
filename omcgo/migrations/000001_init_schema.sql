@@ -21319,6 +21319,22 @@ CREATE INDEX IF NOT EXISTS idx_device_tasks_active_created_id
     ON public.device_tasks (created_at, id)
     WHERE status IN ('pending', 'sent');
 
+CREATE INDEX IF NOT EXISTS idx_device_tasks_open_by_device
+    ON public.device_tasks (device_sn, status, expires_at)
+    WHERE status IN ('pending', 'sent');
+
+CREATE INDEX IF NOT EXISTS idx_device_tasks_sent_by_device_sent_at
+    ON public.device_tasks (device_sn, sent_at)
+    WHERE status = 'sent' AND sent_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_device_tasks_expired_pending
+    ON public.device_tasks (expires_at)
+    WHERE status = 'pending' AND expires_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_device_tasks_expired_sent
+    ON public.device_tasks (expires_at, sent_at)
+    WHERE status = 'sent' AND expires_at IS NOT NULL;
+
 -- Consolidated from pre-release storage protection migrations. Policies are
 -- keyed by physical host filesystem mount targets; logical components map to
 -- the mount containing their protected write path.
