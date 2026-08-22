@@ -266,11 +266,11 @@ func reconcileMainBaselineSchema(db *sql.DB, migrationDir string) error {
 		return nil
 	}
 	rootDir := mainBaselineRootDir(migrationDir)
-	schemaSQL, err := readMainReconcileSQL(filepath.Join(rootDir, "000001_init_schema.sql"))
+	schemaSections, err := readMainReconcileSections(filepath.Join(rootDir, "000001_init_schema.sql"))
 	if err != nil {
 		return fmt.Errorf("read schema reconcile sections: %w", err)
 	}
-	if err := applyMainReconcileSQL(db, schemaSQL); err != nil {
+	if err := applyMainReconcileSQL(db, schemaSections...); err != nil {
 		return fmt.Errorf("apply schema reconcile sections: %w", err)
 	}
 	return nil
@@ -278,11 +278,11 @@ func reconcileMainBaselineSchema(db *sql.DB, migrationDir string) error {
 
 func reconcileMainBaselineSeed(db *sql.DB, migrationDir string) error {
 	rootDir := mainBaselineRootDir(migrationDir)
-	seedSQL, err := readMainReconcileSQL(filepath.Join(rootDir, "seed", "000001_init_seed.sql"))
+	seedSections, err := readMainReconcileSections(filepath.Join(rootDir, "seed", "000001_init_seed.sql"))
 	if err != nil {
 		return fmt.Errorf("read seed reconcile sections: %w", err)
 	}
-	if err := applyMainReconcileSQL(db, seedSQL); err != nil {
+	if err := applyMainReconcileSQL(db, seedSections...); err != nil {
 		return fmt.Errorf("apply seed reconcile sections: %w", err)
 	}
 	fmt.Println("Main baseline reconciliation complete.")
@@ -291,46 +291,66 @@ func reconcileMainBaselineSeed(db *sql.DB, migrationDir string) error {
 
 func applyMainReconcileSQL(db *sql.DB, sections ...string) error {
 	ctx := context.Background()
-	tx, err := db.BeginTx(ctx, nil)
+	conn, err := db.Conn(ctx)
 	if err != nil {
-		return fmt.Errorf("begin main baseline reconcile: %w", err)
+		return fmt.Errorf("reserve main baseline reconcile connection: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() { _ = conn.Close() }()
 
-	if _, err := tx.ExecContext(
+	if _, err := conn.ExecContext(
 		ctx,
-		"SELECT pg_advisory_xact_lock(hashtextextended('omcgo-main-baseline-reconcile', 0))",
+		"SELECT pg_advisory_lock(hashtextextended('omcgo-main-baseline-reconcile', 0))",
 	); err != nil {
 		return fmt.Errorf("lock main baseline reconcile: %w", err)
 	}
+	defer func() {
+		_, _ = conn.ExecContext(
+			context.Background(),
+			"SELECT pg_advisory_unlock(hashtextextended('omcgo-main-baseline-reconcile', 0))",
+		)
+	}()
+
 	for i, section := range sections {
+		tx, err := conn.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin main baseline reconcile section %d: %w", i+1, err)
+		}
 		if _, err := tx.ExecContext(ctx, section); err != nil {
+			_ = tx.Rollback()
 			return fmt.Errorf("apply main baseline reconcile section %d: %w", i+1, err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit main baseline reconcile: %w", err)
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit main baseline reconcile section %d: %w", i+1, err)
+		}
 	}
 
 	return nil
 }
 
-func readMainReconcileSQL(path string) (string, error) {
+func readMainReconcileSections(path string) ([]string, error) {
 	contents, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("read %s: %w", path, err)
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	return extractMainReconcileSQL(string(contents))
+	return extractMainReconcileSections(string(contents))
 }
 
 func extractMainReconcileSQL(contents string) (string, error) {
+	sections, err := extractMainReconcileSections(contents)
+	if err != nil {
+		return "", err
+	}
+	return strings.Join(sections, "\n\n"), nil
+}
+
+func extractMainReconcileSections(contents string) ([]string, error) {
 	var sections []string
 	remainder := contents
 	for {
 		begin := strings.Index(remainder, mainReconcileBegin)
 		orphanEnd := strings.Index(remainder, mainReconcileEnd)
 		if orphanEnd >= 0 && (begin < 0 || orphanEnd < begin) {
-			return "", fmt.Errorf("reconcile end marker has no matching begin marker")
+			return nil, fmt.Errorf("reconcile end marker has no matching begin marker")
 		}
 		if begin < 0 {
 			break
@@ -338,19 +358,19 @@ func extractMainReconcileSQL(contents string) (string, error) {
 		remainder = remainder[begin+len(mainReconcileBegin):]
 		end := strings.Index(remainder, mainReconcileEnd)
 		if end < 0 {
-			return "", fmt.Errorf("reconcile section is missing end marker")
+			return nil, fmt.Errorf("reconcile section is missing end marker")
 		}
 		section := strings.TrimSpace(remainder[:end])
 		if section == "" {
-			return "", fmt.Errorf("reconcile section is empty")
+			return nil, fmt.Errorf("reconcile section is empty")
 		}
 		sections = append(sections, section)
 		remainder = remainder[end+len(mainReconcileEnd):]
 	}
 	if len(sections) == 0 {
-		return "", fmt.Errorf("no reconcile sections found")
+		return nil, fmt.Errorf("no reconcile sections found")
 	}
-	return strings.Join(sections, "\n\n"), nil
+	return sections, nil
 }
 
 func runMigrateDown(cmd *cobra.Command, args []string) error {
