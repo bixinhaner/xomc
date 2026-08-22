@@ -324,214 +324,17 @@ func deviceListCountSelect() sq.SelectBuilder {
 	return storage.Psql.Select("COUNT(DISTINCT d.id)")
 }
 
-func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter DeviceFilter) (*model.ListResponse[DeviceWithInfo], error) {
-	selectCols := deviceWithInfoSelectColumns()
-	builder := storage.Psql.Select(selectCols...).
+func deviceListFilterBaseSelect(selectCols ...string) sq.SelectBuilder {
+	return storage.Psql.Select(selectCols...).
 		From("devices d").
 		LeftJoin(radioDeviceInfoJoinSQL).
 		LeftJoin(upsDeviceInfoJoinSQL).
-		LeftJoin("device_location_observations dlo ON dlo.device_id = d.id").
-		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
-		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
-		LeftJoin(alarmsActiveAggJoin). // #361: 告警级别/告警数实时聚合
-		Where(sq.Eq{"d.deleted_at": nil})
-	countBuilder := deviceListCountSelect().
-		From("devices d").
-		LeftJoin(radioDeviceInfoJoinSQL).
-		LeftJoin(upsDeviceInfoJoinSQL).
-		LeftJoin("device_location_observations dlo ON dlo.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		Where(sq.Eq{"d.deleted_at": nil})
+}
 
-	// Data permission filter: grant-based visibility is authoritative.
-	// Legacy VisibleGroups fallback is retained for callers not yet switched.
-	if filter.VisibleDeviceGrants != nil {
-		builder = authz.ApplyDeviceVisibilityGrantsFilter(builder, "d.id", "d.technology", filter.VisibleDeviceGrants)
-		countBuilder = authz.ApplyDeviceVisibilityGrantsFilter(countBuilder, "d.id", "d.technology", filter.VisibleDeviceGrants)
-	} else {
-		//   nil          → superadmin (v1.0：source='builtIn'，由 PermissionService 上游决定)，no filtering (see all devices)
-		//   []uuid.UUID{} → no permissions, return empty result
-		//   [id1, id2]   → filter to devices in these groups
-		// Note: dgm (device_group_members) is already joined via LeftJoin at line 167
-		// 注：filter.Carrier 是**设备**的 carrier (devices.carrier，物理属性)，不是用户的 carrier；users.carrier 在 v1.0 已删除。
-		realVisibleGroups, includeUngrouped := authz.SplitVisibleGroups(filter.VisibleGroups)
-		if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
-			// User has no group permissions — short-circuit to empty result.
-			builder = builder.Where("FALSE")
-			countBuilder = countBuilder.Where("FALSE")
-		} else if filter.GroupID != nil || len(filter.GroupIDs) > 0 || len(realVisibleGroups) > 0 || includeUngrouped {
-			// dgm is already joined, just add WHERE conditions
-			if filter.GroupID != nil || len(filter.GroupIDs) > 0 {
-				builder = applyDeviceGroupFilter(builder, filter)
-				countBuilder = applyDeviceGroupFilter(countBuilder, filter)
-			}
-			if len(realVisibleGroups) > 0 && includeUngrouped {
-				builder = builder.Where(sq.Or{
-					sq.Eq{"dgm.group_id": realVisibleGroups},
-					sq.Expr(ungroupedDevicesWhere),
-				})
-				countBuilder = countBuilder.Where(sq.Or{
-					sq.Eq{"dgm.group_id": realVisibleGroups},
-					sq.Expr(ungroupedDevicesWhere),
-				})
-			} else if includeUngrouped {
-				builder = builder.Where(sq.Expr(ungroupedDevicesWhere))
-				countBuilder = countBuilder.Where(sq.Expr(ungroupedDevicesWhere))
-			} else if len(realVisibleGroups) > 0 {
-				builder = builder.Where(sq.Eq{"dgm.group_id": realVisibleGroups})
-				countBuilder = countBuilder.Where(sq.Eq{"dgm.group_id": realVisibleGroups})
-			}
-		}
-	}
-
-	// Apply filters from devices table
-	if filter.Carrier != nil {
-		builder = builder.Where(sq.Eq{"d.carrier": *filter.Carrier})
-		countBuilder = countBuilder.Where(sq.Eq{"d.carrier": *filter.Carrier})
-	}
-	if filter.Technology != nil {
-		builder = builder.Where(sq.Eq{"d.technology": *filter.Technology})
-		countBuilder = countBuilder.Where(sq.Eq{"d.technology": *filter.Technology})
-	}
-	if len(filter.Technologies) > 0 {
-		builder = builder.Where(sq.Eq{"d.technology": filter.Technologies})
-		countBuilder = countBuilder.Where(sq.Eq{"d.technology": filter.Technologies})
-	}
-	builder = applyDeviceListDeviceTypeFilter(builder, filter.DeviceType)
-	countBuilder = applyDeviceListDeviceTypeFilter(countBuilder, filter.DeviceType)
-	// T-0162: filter.Status 老字段过渡兼容——翻译为 lifecycle_state + is_online
-	if filter.Status != nil {
-		lifecycle, isOnline := DeriveLifecycleFromStatus(*filter.Status)
-		builder = builder.Where(sq.Eq{"d.lifecycle_state": lifecycle})
-		countBuilder = countBuilder.Where(sq.Eq{"d.lifecycle_state": lifecycle})
-		if *filter.Status == model.DeviceActive || *filter.Status == model.DeviceOffline {
-			builder = builder.Where(sq.Eq{"d.is_online": isOnline})
-			countBuilder = countBuilder.Where(sq.Eq{"d.is_online": isOnline})
-		}
-	}
-	// T-0162: 新筛选维度
-	if len(filter.LifecycleState) > 0 {
-		builder = builder.Where(sq.Eq{"d.lifecycle_state": filter.LifecycleState})
-		countBuilder = countBuilder.Where(sq.Eq{"d.lifecycle_state": filter.LifecycleState})
-	}
-	if filter.IsOnline != nil {
-		builder = builder.Where(sq.Eq{"d.is_online": *filter.IsOnline})
-		countBuilder = countBuilder.Where(sq.Eq{"d.is_online": *filter.IsOnline})
-	}
-	// T-0162: 4 个 device list multi-select 筛选字段（model_name /
-	// firmware_version / software_version / product_class）支持 CSV 多值。
-	// SplitCSV 单值场景返单元素切片，sq.Eq{slice} 自动展开为 IN (...)，行为与
-	// 原 sq.Eq{string} 完全等价；多值场景才走真正的 IN 多值过滤。
-	if filter.ModelName != nil && *filter.ModelName != "" {
-		vs := SplitCSV(*filter.ModelName)
-		builder = builder.Where(sq.Eq{"d.model_name": vs})
-		countBuilder = countBuilder.Where(sq.Eq{"d.model_name": vs})
-	}
-	if filter.FirmwareVersion != nil && *filter.FirmwareVersion != "" {
-		vs := SplitCSV(*filter.FirmwareVersion)
-		builder = builder.Where(sq.Eq{"d.firmware_version": vs})
-		countBuilder = countBuilder.Where(sq.Eq{"d.firmware_version": vs})
-	}
-	// T-0162: software_version 走 device_parameters TR-069 标准路径，不在
-	// device_info 表（与 seed/000137 device_parameters 灌入 distinct 一致）。
-	if filter.SoftwareVersion != nil && *filter.SoftwareVersion != "" {
-		sub := softwareVersionDeviceIDSubquery(SplitCSV(*filter.SoftwareVersion))
-		builder = builder.Where(sq.Expr("d.id IN (?)", sub))
-		countBuilder = countBuilder.Where(sq.Expr("d.id IN (?)", sub))
-	}
-	if filter.OUI != nil {
-		builder = builder.Where(sq.Eq{"d.oui": *filter.OUI})
-		countBuilder = countBuilder.Where(sq.Eq{"d.oui": *filter.OUI})
-	}
-	if filter.SN != nil && *filter.SN != "" {
-		builder = builder.Where(sq.Eq{"d.serial_number": *filter.SN})
-		countBuilder = countBuilder.Where(sq.Eq{"d.serial_number": *filter.SN})
-	}
-	// 批量输入：SN 列表精确过滤（serial_number IN (...)）。主列表 inline 路径之前漏了此条件，
-	// 导致 ?sn_list= 在 /devices 列表静默失效（同 product_id 问题）。
-	if len(filter.SNList) > 0 {
-		builder = builder.Where(sq.Eq{"d.serial_number": filter.SNList})
-		countBuilder = countBuilder.Where(sq.Eq{"d.serial_number": filter.SNList})
-	}
-
-	// Apply filters from device_info table
-	if filter.Manufacturer != nil && *filter.Manufacturer != "" {
-		builder = builder.Where(sq.Eq{"d.manufacturer": *filter.Manufacturer})
-		countBuilder = countBuilder.Where(sq.Eq{"d.manufacturer": *filter.Manufacturer})
-	}
-	if filter.ProductClass != nil && *filter.ProductClass != "" {
-		vs := SplitCSV(*filter.ProductClass)
-		builder = builder.Where(sq.Eq{"d.product_class": vs})
-		countBuilder = countBuilder.Where(sq.Eq{"d.product_class": vs})
-	}
-	// 产品装配件 UUID 过滤（下拉来自 /products）。主列表 builder/countBuilder 之前漏了此条件
-	// （只在 applyDeviceFilters 子查询里有），导致 ?product_id= 在 /devices 列表静默失效。
-	if filter.ProductID != nil {
-		builder = builder.Where(sq.Eq{"d.product_id": *filter.ProductID})
-		countBuilder = countBuilder.Where(sq.Eq{"d.product_id": *filter.ProductID})
-	}
-	if len(filter.ProductIDs) > 0 {
-		builder = builder.Where(sq.Eq{"d.product_id": filter.ProductIDs})
-		countBuilder = countBuilder.Where(sq.Eq{"d.product_id": filter.ProductIDs})
-	}
-	if filter.RFStatus != nil && *filter.RFStatus != "" {
-		builder = builder.Where(sq.Eq{"di.rf_status": *filter.RFStatus})
-		countBuilder = countBuilder.Where(sq.Eq{"di.rf_status": *filter.RFStatus})
-	}
-	if filter.CellStatus != nil && *filter.CellStatus != "" {
-		builder = builder.Where(sq.Eq{"di.cell_status": *filter.CellStatus})
-		countBuilder = countBuilder.Where(sq.Eq{"di.cell_status": *filter.CellStatus})
-	}
-	if filter.ProjectStatus != nil && *filter.ProjectStatus != "" {
-		builder = builder.Where(sq.Eq{"di.project_status": *filter.ProjectStatus})
-		countBuilder = countBuilder.Where(sq.Eq{"di.project_status": *filter.ProjectStatus})
-	}
-	if filter.GPSStatus != nil && *filter.GPSStatus != "" {
-		builder = builder.Where(sq.Eq{"di.gps_status": *filter.GPSStatus})
-		countBuilder = countBuilder.Where(sq.Eq{"di.gps_status": *filter.GPSStatus})
-	}
-	if filter.AlarmSeverity != nil && *filter.AlarmSeverity != "" {
-		// #361: 告警级别筛选随显示口径切到 alarms_active 实时聚合（不再用无人维护的
-		// di.alarm_severity 冗余列）。用相关子查询匹配「该设备未 cleared 活动告警的
-		// 最严重级别(MIN severity) = 请求级别」，与列表展示的告警级别一致。
-		if cond := alarmSeverityFilterCond(*filter.AlarmSeverity); cond != nil {
-			builder = builder.Where(cond)
-			countBuilder = countBuilder.Where(cond)
-		}
-	}
-	if filter.LicenseStatus != nil && *filter.LicenseStatus != "" {
-		builder = builder.Where(sq.Eq{"di.license_status": *filter.LicenseStatus})
-		countBuilder = countBuilder.Where(sq.Eq{"di.license_status": *filter.LicenseStatus})
-	}
-	if filter.OpState != nil {
-		if cond := opStateFilterCond(*filter.OpState); cond != nil {
-			builder = builder.Where(cond)
-			countBuilder = countBuilder.Where(cond)
-		}
-	}
-	if cond := currentDeviceControlFilterCondition(filter); cond != nil {
-		builder = builder.Where(cond)
-		countBuilder = countBuilder.Where(cond)
-	}
-
-	// Multi-field fuzzy search (G07) — 升级为多关键字（英文逗号分隔，最多 50）。
-	// 任一关键字命中任一字段即匹配（设备级 OR）。单值场景与老行为完全等价。
-	// caller 端 UX：前端搜索框 placeholder "SN/名称/IP/MAC/PCI"；主列表与共用过滤
-	// 逻辑保持同一字段集，避免列表与子查询口径漂移。
-	if filter.Search != nil {
-		if cond := BuildSearchOR(*filter.Search, deviceListSearchFields()); cond != nil {
-			builder = builder.Where(cond)
-			countBuilder = countBuilder.Where(cond)
-		}
-	}
-
-	// Count total
-	countQuery, countArgs, _ := countBuilder.ToSql()
-	var total int64
-	r.pool.QueryRow(ctx, countQuery, countArgs...).Scan(&total)
-
-	// Sorting with table-qualified column names
-	sortCol := "d.created_at"
+func deviceListSort(filter DeviceFilter) (sortCol string, orderClause string) {
+	sortCol = "d.created_at"
 	if filter.SortBy != "" {
 		if col, ok := allowedSortColumnsWithInfo[filter.SortBy]; ok {
 			sortCol = col
@@ -541,15 +344,57 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 	if filter.SortDir == "asc" {
 		sortDir = "ASC"
 	}
-	orderClause := sortCol + " " + sortDir
+	orderClause = sortCol + " " + sortDir
 	// #361: 告警级别按聚合派生值排序时，无告警(NULL)设备恒排末尾（与「无」语义一致）。
 	if sortCol == "aa.top_sev" {
 		orderClause += " NULLS LAST"
 	}
-	builder = builder.
-		OrderBy(orderClause).
+	return sortCol, orderClause
+}
+
+func deviceListPageIDsSelect(filter DeviceFilter) sq.SelectBuilder {
+	sortCol, orderClause := deviceListSort(filter)
+	builder := deviceListFilterBaseSelect(
+		"d.id",
+		"ROW_NUMBER() OVER (ORDER BY "+orderClause+", d.id ASC) AS page_order",
+	)
+	if sortCol == "aa.top_sev" {
+		builder = builder.LeftJoin(alarmsActiveAggJoin)
+	}
+	return applyDeviceFilters(builder, filter).
+		OrderBy(orderClause, "d.id ASC").
 		Limit(uint64(filter.Limit())).
 		Offset(uint64(filter.Offset()))
+}
+
+func deviceListDetailSelect(pageIDs sq.SelectBuilder) sq.SelectBuilder {
+	return storage.Psql.Select(deviceWithInfoSelectColumns()...).
+		From("devices d").
+		JoinClause(pageIDs.Prefix("JOIN (").Suffix(") page_ids ON page_ids.id = d.id")).
+		LeftJoin(radioDeviceInfoJoinSQL).
+		LeftJoin(upsDeviceInfoJoinSQL).
+		LeftJoin("device_location_observations dlo ON dlo.device_id = d.id").
+		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
+		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
+		LeftJoin(alarmsActivePageJoin).
+		Where(sq.Eq{"d.deleted_at": nil}).
+		OrderBy("page_ids.page_order ASC")
+}
+
+func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter DeviceFilter) (*model.ListResponse[DeviceWithInfo], error) {
+	countBuilder := applyDeviceFilters(deviceListFilterBaseSelect("COUNT(DISTINCT d.id)"), filter)
+
+	// Count total
+	countQuery, countArgs, err := countBuilder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build count devices with info query: %w", err)
+	}
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count devices with info: %w", err)
+	}
+
+	builder := deviceListDetailSelect(deviceListPageIDsSelect(filter))
 
 	query, args, err := builder.ToSql()
 	if err != nil {
@@ -620,10 +465,16 @@ const deviceListStatsCurrentUECountExpr = `CASE
 END AS current_ue_count`
 
 func deviceListStatsGroupQuery(subQ string) string {
-	return "SELECT lifecycle_state, is_online, COUNT(*), " +
-		"COALESCE(SUM(active_alarm_count), 0), " +
-		"COALESCE(SUM(current_ue_count), 0) FROM (" + subQ +
-		") s GROUP BY lifecycle_state, is_online"
+	return "WITH filtered_devices AS (" + subQ + "), active_alarm_counts AS (" +
+		"SELECT aa.device_id, COUNT(*) AS active_alarm_count " +
+		"FROM alarms_active aa JOIN filtered_devices fd ON fd.id = aa.device_id " +
+		"WHERE aa.status <> 'cleared' GROUP BY aa.device_id" +
+		") SELECT fd.lifecycle_state, fd.is_online, COUNT(*), " +
+		"COALESCE(SUM(COALESCE(aac.active_alarm_count, 0)), 0), " +
+		"COALESCE(SUM(fd.current_ue_count), 0) " +
+		"FROM filtered_devices fd " +
+		"LEFT JOIN active_alarm_counts aac ON aac.device_id = fd.id " +
+		"GROUP BY fd.lifecycle_state, fd.is_online"
 }
 
 // ComputeListStats 在 ListDevicesWithInfo 同样筛选条件下跑 group-by 聚合，
@@ -635,18 +486,10 @@ func deviceListStatsGroupQuery(subQ string) string {
 func (r *PgDeviceInfoRepository) ComputeListStats(ctx context.Context, filter DeviceFilter) (*DeviceListStats, error) {
 	// 用子查询去重再聚合：先按筛选条件取所有命中设备的 (id, lifecycle, is_online)，
 	// 再 GROUP BY。避免 dgm/dg LEFT JOIN 引起的设备重复计数。
-	// #361: 当前告警统计取活动告警条数，而不是"有告警的设备数"。
-	// 放进 DISTINCT 子查询的 SELECT 列里，外层 SUM 后得到与列表行内告警数量相同的口径。
-	const activeAlarmCountExpr = `(
-		SELECT COUNT(*)
-		FROM alarms_active aa
-		WHERE aa.device_id = d.id AND aa.status <> 'cleared'
-	) AS active_alarm_count`
 	subBuilder := storage.Psql.Select(
 		"DISTINCT d.id",
 		"d.lifecycle_state",
 		"d.is_online",
-		activeAlarmCountExpr,
 		deviceListStatsCurrentUECountExpr,
 	).
 		From("devices d").
@@ -766,6 +609,29 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 	}
 	if filter.ProductClass != nil && *filter.ProductClass != "" {
 		b = b.Where(sq.Eq{"d.product_class": SplitCSV(*filter.ProductClass)})
+	}
+	if filter.RFStatus != nil && *filter.RFStatus != "" {
+		b = b.Where(sq.Eq{"di.rf_status": *filter.RFStatus})
+	}
+	if filter.CellStatus != nil && *filter.CellStatus != "" {
+		b = b.Where(sq.Eq{"di.cell_status": *filter.CellStatus})
+	}
+	if filter.ProjectStatus != nil && *filter.ProjectStatus != "" {
+		b = b.Where(sq.Eq{"di.project_status": *filter.ProjectStatus})
+	}
+	if filter.GPSStatus != nil && *filter.GPSStatus != "" {
+		b = b.Where(sq.Eq{"di.gps_status": *filter.GPSStatus})
+	}
+	if filter.AlarmSeverity != nil && *filter.AlarmSeverity != "" {
+		// #361: 告警级别筛选随显示口径切到 alarms_active 实时聚合（不再用无人维护的
+		// di.alarm_severity 冗余列）。用相关子查询匹配「该设备未 cleared 活动告警的
+		// 最严重级别(MIN severity) = 请求级别」，与列表展示的告警级别一致。
+		if cond := alarmSeverityFilterCond(*filter.AlarmSeverity); cond != nil {
+			b = b.Where(cond)
+		}
+	}
+	if filter.LicenseStatus != nil && *filter.LicenseStatus != "" {
+		b = b.Where(sq.Eq{"di.license_status": *filter.LicenseStatus})
 	}
 	if filter.GroupID != nil || len(filter.GroupIDs) > 0 {
 		b = applyDeviceGroupFilter(b, filter)
@@ -1032,6 +898,13 @@ const alarmsActiveAggJoin = `(
 	WHERE status <> 'cleared'
 	GROUP BY device_id
 ) aa ON aa.device_id = d.id`
+
+const alarmsActivePageJoin = `LATERAL (
+	SELECT MIN(severity) AS top_sev,
+	       COUNT(*)      AS active_alarm_count
+	FROM alarms_active aa_page
+	WHERE aa_page.device_id = d.id AND aa_page.status <> 'cleared'
+) aa ON TRUE`
 
 // alarmSeverityTextToCodes 把前端 AlarmSeverity 文本映成 alarms_active.severity。
 // 兼容历史 1..4 与现行 31001..31004 两套编码。未知文本返回空切片（跳过过滤）。
