@@ -21288,6 +21288,7 @@ CREATE INDEX IF NOT EXISTS idx_provisioning_tasks_policy
 
 -- Consolidated from pre-release baseline-only migrations: main schema 000002-000005
 
+-- +omcgo MainReconcileBegin
 ALTER TABLE public.pm_tasks
     ADD COLUMN IF NOT EXISTS planned_end_at timestamp with time zone;
 
@@ -21334,6 +21335,7 @@ CREATE INDEX IF NOT EXISTS idx_device_tasks_expired_pending
 CREATE INDEX IF NOT EXISTS idx_device_tasks_expired_sent
     ON public.device_tasks (expires_at, sent_at)
     WHERE status = 'sent' AND expires_at IS NOT NULL;
+-- +omcgo MainReconcileEnd
 
 -- Consolidated from pre-release storage protection migrations. Policies are
 -- keyed by physical host filesystem mount targets; logical components map to

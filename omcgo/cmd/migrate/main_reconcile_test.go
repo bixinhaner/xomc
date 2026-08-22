@@ -97,6 +97,11 @@ func TestMainBaselineReconcileSectionsAreAdditiveAndIdempotent(t *testing.T) {
 		"CREATE TABLE IF NOT EXISTS public.device_task_locations",
 		"CREATE OR REPLACE FUNCTION public.sync_device_task_location",
 		"trg_device_tasks_location_sync",
+		"idx_device_tasks_active_created_id",
+		"idx_device_tasks_open_by_device",
+		"idx_device_tasks_sent_by_device_sent_at",
+		"idx_device_tasks_expired_pending",
+		"idx_device_tasks_expired_sent",
 	} {
 		require.Contains(t, schemaSQL, contract)
 	}
