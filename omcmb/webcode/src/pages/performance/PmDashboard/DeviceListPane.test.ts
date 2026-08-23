@@ -190,12 +190,35 @@ describe('buildDeviceViewAggregatedParams', () => {
 });
 
 describe('buildDeviceViewRequestedObjectLdns', () => {
-  it('全选对象也显式传递已发现 LDN，避免后端重复发现对象', () => {
+  it('15min 全选对象也显式传递已发现 LDN，避免后端重复发现对象', () => {
     const ldns = buildDeviceViewRequestedObjectLdns({}, {
       ENB00001: [{ objectLdn: 'Cellid=1' }, { objectLdn: 'Cellid=2' }],
-    });
+    }, '15min');
 
     expect(ldns).toEqual(['Cellid=1', 'Cellid=2']);
+  });
+
+  it.each(['hourly', 'daily', 'weekly', 'monthly'] as const)(
+    '%s 全选对象保持不过滤，避免改变旧聚合结果口径',
+    (granularity) => {
+      const ldns = buildDeviceViewRequestedObjectLdns({}, {
+        ENB00001: [{ objectLdn: 'Cellid=1' }, { objectLdn: 'Cellid=2' }],
+      }, granularity);
+
+      expect(ldns).toEqual([]);
+    },
+  );
+
+  it('聚合粒度保持 5G 推荐对象默认下推的旧行为', () => {
+    const ldns = buildDeviceViewRequestedObjectLdns({}, {
+      GNB00001: [
+        { objectLdn: 'Type=gNB,gNBID=1' },
+        { objectLdn: 'Type=Cell,CellID=1,PLMNID=46000' },
+        { objectLdn: 'Type=Slice,SNSSAI=1' },
+      ],
+    }, 'hourly');
+
+    expect(ldns).toEqual(['Type=gNB,gNBID=1', 'Type=Cell,CellID=1,PLMNID=46000']);
   });
 
   it('手动选择子集时只传递子集，跨设备去重', () => {
