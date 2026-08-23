@@ -44,7 +44,7 @@ import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import { usePmPageStateStore } from '@core/store/pmPageStateStore';
 import type { CreateKpiExportInput } from '@core/types/kpiExport';
-import type { Granularity } from '@core/types/pmDashboard';
+import type { AggregatedQueryParams, Granularity } from '@core/types/pmDashboard';
 import type { TechnologyType } from '@core/types/technology';
 import { technologyToDeviceType, useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
@@ -53,7 +53,10 @@ import MetricPickerModal from '@/components/MetricPickerModal';
 import ChartCard from './ChartCard';
 import { buildDeviceMetricCharts, filterRowsByObjectLdns } from './deviceListUtils';
 import CellDrilldownSelector from './CellDrilldownSelector';
-import { getEffectiveLdnsWithNrRecommendedDefault, type CellSelection } from './cellDrilldownUtils';
+import {
+  getNrRecommendedDefaultSelectedObjectLdns,
+  type CellSelection,
+} from './cellDrilldownUtils';
 import DashboardFilterBar, { type DashboardFilterValue } from './DashboardFilterBar';
 import {
   ALL_HOURS,
@@ -124,6 +127,13 @@ export function buildSubmittedDeviceViewExportSelection(
   };
 }
 
+export function isDeviceViewQueryTimeoutError(error: unknown): boolean {
+  const err = error as { code?: unknown; message?: unknown };
+  const code = typeof err?.code === 'string' ? err.code.toLowerCase() : '';
+  const message = typeof err?.message === 'string' ? err.message.toLowerCase() : '';
+  return code === 'econnaborted' || message.includes('timeout') || message.includes('timed out');
+}
+
 // 粒度选项语料键（label 走 i18n，value 不变）。
 const GRANULARITY_MSG_IDS: { id: string; value: Granularity }[] = [
   { id: 'perf.dashboard.granular15min', value: '15min' },
@@ -139,6 +149,50 @@ export function isDeviceViewDeviceSelectionOverLimit(deviceSns: string[]): boole
 
 export function isDeviceViewMetricSelectionOverLimit(metricPaths: string[]): boolean {
   return metricPaths.length > PM_QUERY_SELECTION_LIMIT;
+}
+
+export function buildDeviceViewAggregatedParams(
+  submitted: DeviceViewSubmittedQuery | null,
+  overrideWindow?: { startTime: string; endTime: string },
+): Omit<AggregatedQueryParams, 'deviceSn'> | null {
+  if (!submitted) return null;
+  return {
+    granularity: submitted.granularity,
+    technology: submitted.tech,
+    metricPaths: submitted.metricPaths,
+    startTime: overrideWindow?.startTime ?? submitted.startTime,
+    endTime: overrideWindow?.endTime ?? submitted.endTime,
+    limit: 5000,
+    countMode: 'n_plus_one',
+    pageBy: 'pivot_row',
+    fillEmpty: true,
+    // #241：设备性能查看默认推荐对象同样下推到后端查询；空 = 不过滤，手动全选查全部 job。
+    objectLdns: submitted.allowedLdns.length > 0 ? submitted.allowedLdns : undefined,
+    // #599：星期/小时段后端过滤（全选不传 = 不过滤，向后兼容）。
+    weekdays: submitted.weekdays.length < 7 ? submitted.weekdays : undefined,
+    hours: submitted.hours.length < 24 ? submitted.hours : undefined,
+  };
+}
+
+export function buildDeviceViewRequestedObjectLdns(
+  value: CellSelection,
+  objectsByDevice: Record<string, { objectLdn: string }[]>,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  Object.entries(objectsByDevice).forEach(([sn, objects]) => {
+    const allLdns = objects.map((o) => o.objectLdn).filter(Boolean);
+    if (allLdns.length === 0) return;
+    const selected = value[sn] ?? getNrRecommendedDefaultSelectedObjectLdns(objects);
+    const requested = selected.length === 0 || selected.length >= allLdns.length ? allLdns : selected;
+    requested.forEach((ldn) => {
+      if (!seen.has(ldn)) {
+        seen.add(ldn);
+        out.push(ldn);
+      }
+    });
+  });
+  return out;
 }
 
 export default function DeviceListPane() {
@@ -270,25 +324,15 @@ export default function DeviceListPane() {
   }, [cellSel, deviceSns, filter, granularity, metricPaths, metricsTouched, rangeTouched, refreshed, submitted, tech]);
 
   // 下钻选择器与有效白名单计算共用的「按设备小区清单」（react-query 与选择器内部同 key 去重，无额外请求）。
-  const { byDevice: objectsByDevice, isLoading: objectsLoading } = useMetricObjectsByDevices(deviceSns, tech);
+  const {
+    byDevice: objectsByDevice,
+    isLoading: objectsLoading,
+    isFetching: objectsFetching,
+  } = useMetricObjectsByDevices(deviceSns, tech);
+  const objectsPending = objectsLoading || objectsFetching;
 
   const baseParams = useMemo(() => {
-    if (!submitted) return null;
-    return {
-      granularity: submitted.granularity,
-      technology: submitted.tech,
-      metricPaths: submitted.metricPaths,
-      startTime: submitted.startTime,
-      endTime: submitted.endTime,
-      limit: 5000,
-      countMode: 'n_plus_one' as const,
-      fillEmpty: true,
-      // #241：设备性能查看默认推荐对象同样下推到后端查询；空 = 不过滤，手动全选查全部 job。
-      objectLdns: submitted.allowedLdns.length > 0 ? submitted.allowedLdns : undefined,
-      // #599：星期/小时段后端过滤（全选不传 = 不过滤，向后兼容）。
-      weekdays: submitted.weekdays.length < 7 ? submitted.weekdays : undefined,
-      hours: submitted.hours.length < 24 ? submitted.hours : undefined,
-    };
+    return buildDeviceViewAggregatedParams(submitted);
   }, [submitted]);
 
   const {
@@ -310,25 +354,14 @@ export default function DeviceListPane() {
   const prevParams = useMemo(() => {
     if (!submitted || !submitted.compare) return null;
     const actualPrevRange = actualRange ? previousWindow(actualRange) : null;
-    return {
-      granularity: submitted.granularity,
-      technology: submitted.tech,
-      metricPaths: submitted.metricPaths,
+    return buildDeviceViewAggregatedParams(submitted, {
       startTime: actualPrevRange
         ? toDeviceViewRequestRFC3339(actualPrevRange[0], systemTimezone)
         : submitted.prevStartTime,
       endTime: actualPrevRange
         ? toDeviceViewRequestRFC3339(actualPrevRange[1], systemTimezone)
         : submitted.prevEndTime,
-      limit: 5000,
-      countMode: 'n_plus_one' as const,
-      fillEmpty: true,
-      // 周期对比与主查询保持相同 object_ldn 口径。
-      objectLdns: submitted.allowedLdns.length > 0 ? submitted.allowedLdns : undefined,
-      // #599：周期对比同口径传 weekdays/hours。
-      weekdays: submitted.weekdays.length < 7 ? submitted.weekdays : undefined,
-      hours: submitted.hours.length < 24 ? submitted.hours : undefined,
-    };
+    });
   }, [actualRange, submitted, systemTimezone]);
 
   const {
@@ -339,22 +372,22 @@ export default function DeviceListPane() {
     prevParams ? (submitted?.deviceSns ?? []) : [],
     Boolean(prevParams) && resultsQueryReady,
   );
+  const queryError = errors[0];
+  const queryTimedOut = isDeviceViewQueryTimeoutError(queryError);
+  const queryErrorMessage = queryError instanceof Error && queryError.message
+    ? queryError.message
+    : intl.formatMessage({ id: 'perf.dashboard.queryUnknownError' });
 
   useEffect(() => {
     if (errors.length > 0) {
-      const first = errors[0] as Error;
       message.error(
         intl.formatMessage(
           { id: 'perf.dashboard.queryFailed' },
-          {
-            msg:
-              first?.message ??
-              intl.formatMessage({ id: 'perf.dashboard.queryUnknownError' }),
-          },
+          { msg: queryErrorMessage },
         ),
       );
     }
-  }, [errors, message, intl]);
+  }, [errors, message, intl, queryErrorMessage]);
 
   // 星期/小时段已由后端过滤（#599），前端只需按小区/PLMN 白名单即席过滤 + 转置分线。
   const charts = useMemo(() => {
@@ -460,7 +493,7 @@ export default function DeviceListPane() {
       message.warning(intl.formatMessage({ id: 'perf.dashboard.selectAtLeastOneMetric' }));
       return;
     }
-    if (objectsLoading) {
+    if (objectsPending) {
       message.warning(intl.formatMessage({ id: 'perf.drilldown.loadingObjects' }));
       return;
     }
@@ -479,8 +512,8 @@ export default function DeviceListPane() {
       metricPaths,
       granularity,
       filter,
-      // 定格当前下钻白名单（空=全选不过滤）。
-      allowedLdns: getEffectiveLdnsWithNrRecommendedDefault(cellSel, objectsByDevice),
+      // 定格当前下钻白名单；全选也显式传递已发现对象，避免后端重复做对象发现。
+      allowedLdns: buildDeviceViewRequestedObjectLdns(cellSel, objectsByDevice),
       systemTimezone,
     }));
   };
@@ -629,7 +662,7 @@ export default function DeviceListPane() {
                 type="primary"
                 icon={<LineChartOutlined />}
                 loading={isFetching}
-                disabled={!hasAvailableTechOptions || objectsLoading}
+                disabled={!hasAvailableTechOptions || objectsPending}
                 onClick={handleQuery}
               >
                 {intl.formatMessage({ id: 'perf.dashboard.btnPlot' })}
@@ -672,6 +705,26 @@ export default function DeviceListPane() {
       ) : isLoading || isFetching || prevFetching ? (
         <Card>
           <LoadingSpinner tip={intl.formatMessage({ id: 'common.loading' })} />
+        </Card>
+      ) : errors.length > 0 ? (
+        <Card>
+          <Alert
+            type="error"
+            showIcon
+            message={intl.formatMessage({
+              id: queryTimedOut
+                ? 'perf.dashboard.queryTimeout'
+                : 'perf.dashboard.queryFailedShort',
+            })}
+            description={intl.formatMessage(
+              {
+                id: queryTimedOut
+                  ? 'perf.dashboard.queryTimeoutDesc'
+                  : 'perf.dashboard.queryFailedDesc',
+              },
+              { msg: queryErrorMessage },
+            )}
+          />
         </Card>
       ) : charts.length === 0 ? (
         <Card>

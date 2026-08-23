@@ -123,6 +123,7 @@ func Test_buildObjectsQuery_DeviceOnly(t *testing.T) {
 	assert.Contains(t, q, "SELECT DISTINCT object_ldn")
 	assert.Contains(t, q, "FROM pm_measurement_anchors")
 	assert.Contains(t, q, "d.serial_number = ANY($1)")
+	assert.Contains(t, q, "a.granularity = '15min'")
 	assert.Contains(t, q, "a.object_ldn <> ''")
 	assert.NotContains(t, q, "FROM device_dim WHERE technology")
 	assert.Contains(t, q, "ORDER BY object_ldn")
@@ -134,6 +135,7 @@ func Test_buildObjectsQuery_WithTechnology(t *testing.T) {
 	q, args := buildObjectsQuery([]string{"SN-1"}, []string{"lte"})
 
 	assert.Contains(t, q, "d.serial_number = ANY($1)")
+	assert.Contains(t, q, "a.granularity = '15min'")
 	assert.Contains(t, q, "d.technology = ANY($2)")
 	assert.Len(t, args, 2)
 	assert.Equal(t, []string{"SN-1"}, args[0])

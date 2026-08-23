@@ -88,6 +88,7 @@ func FillEmptyBuckets(rows []Row, req QueryRequest) []Row {
 				ObjectLDN:   g.rep.ObjectLDN,
 				Filled:      true,
 			})
+			realByKeyMetric[key][mp] = struct{}{}
 		}
 	}
 

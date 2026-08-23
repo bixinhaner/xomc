@@ -232,6 +232,15 @@ CREATE INDEX idx_pm_anchors_object_time ON public.pm_measurement_anchors (object
 CREATE INDEX idx_pm_anchors_15min_device_time_default
     ON public.pm_measurement_anchors (device_dim_id, "time" DESC, anchor_id)
     WHERE granularity = '15min';
+CREATE INDEX IF NOT EXISTS idx_pm_anchors_15min_device_time_object
+    ON public.pm_measurement_anchors (device_dim_id, "time" DESC, object_ldn)
+    WHERE granularity = '15min';
+CREATE INDEX IF NOT EXISTS idx_pm_anchors_15min_device_object
+    ON public.pm_measurement_anchors (device_dim_id, object_ldn)
+    WHERE granularity = '15min';
+CREATE INDEX IF NOT EXISTS idx_pm_anchors_15min_device_object_time
+    ON public.pm_measurement_anchors (device_dim_id, object_ldn, "time" DESC)
+    WHERE granularity = '15min';
 
 CREATE TABLE public.pm_metric_values (
     "time" timestamptz NOT NULL,
@@ -1163,6 +1172,17 @@ CREATE INDEX idx_pm_aggregation_results_dimension_time
     ON public.pm_aggregation_results (dimension, dimension_key, window_start DESC);
 CREATE INDEX idx_pm_aggregation_results_metric_time
     ON public.pm_aggregation_results (metric_id, window_start DESC);
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_results_device_view
+    ON public.pm_aggregation_results (
+        granularity,
+        dimension_key,
+        window_start DESC,
+        object_ldn,
+        metric_path,
+        task_version_id,
+        revision
+    )
+    WHERE dimension = 'device';
 
 ALTER TABLE public.pm_aggregation_results SET (
     timescaledb.compress,

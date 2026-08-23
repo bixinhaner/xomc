@@ -201,6 +201,7 @@ func Test_DiscoverObjectLDNs_IgnoresRequestedMetricPath(t *testing.T) {
 	assert.Contains(t, gotSQL, "SELECT DISTINCT object_ldn")
 	assert.Contains(t, gotSQL, "FROM pm_measurement_anchors a")
 	assert.Contains(t, gotSQL, "JOIN device_dim dev ON dev.id = a.device_dim_id")
+	assert.Contains(t, gotSQL, "a.device_dim_id IN (SELECT id FROM device_dim")
 	assert.Contains(t, gotSQL, "object_ldn <> ''")
 	assert.Contains(t, gotSQL, "device_sn")
 	assert.Contains(t, gotSQL, "technology")

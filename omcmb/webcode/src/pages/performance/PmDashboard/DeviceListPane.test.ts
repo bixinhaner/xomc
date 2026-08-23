@@ -3,8 +3,11 @@ import dayjs from 'dayjs';
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import type { DashboardExportSelection } from '@core/utils/kpiExportParams';
 import {
+  buildDeviceViewAggregatedParams,
   buildDeviceViewExportInput,
+  buildDeviceViewRequestedObjectLdns,
   buildSubmittedDeviceViewExportSelection,
+  isDeviceViewQueryTimeoutError,
   isDeviceViewDeviceSelectionOverLimit,
   isDeviceViewMetricSelectionOverLimit,
 } from './DeviceListPane';
@@ -120,6 +123,102 @@ describe('isDeviceViewMetricSelectionOverLimit', () => {
   });
 });
 
+describe('buildDeviceViewAggregatedParams', () => {
+  it('设备性能查看使用透视行分页保护大窗口查询', () => {
+    const submitted = buildDeviceViewSubmittedQuery({
+      tech: 'lte',
+      deviceSns: ['ENB00001'],
+      metricPaths: ['K001', 'K002'],
+      granularity: '15min',
+      filter: {
+        range: [dayjs('2026-08-22T00:00:00Z'), dayjs('2026-08-23T00:00:00Z')] as [dayjs.Dayjs, dayjs.Dayjs],
+        weekdays: [0, 1, 2, 3, 4, 5, 6],
+        hours: [0, 1, 2],
+        compare: false,
+      },
+      allowedLdns: [],
+      systemTimezone: 'UTC',
+    });
+
+    const params = buildDeviceViewAggregatedParams(submitted);
+
+    expect(params).toMatchObject({
+      granularity: '15min',
+      technology: 'lte',
+      metricPaths: ['K001', 'K002'],
+      limit: 5000,
+      countMode: 'n_plus_one',
+      pageBy: 'pivot_row',
+      fillEmpty: true,
+      hours: [0, 1, 2],
+    });
+    expect(params?.objectLdns).toBeUndefined();
+    expect(params?.weekdays).toBeUndefined();
+  });
+
+  it('周期对比复用同一查询口径，只替换时间窗口', () => {
+    const submitted = buildDeviceViewSubmittedQuery({
+      tech: 'nr',
+      deviceSns: ['GNB00001'],
+      metricPaths: ['K001'],
+      granularity: 'hourly',
+      filter: {
+        range: [dayjs('2026-08-22T00:00:00Z'), dayjs('2026-08-23T00:00:00Z')] as [dayjs.Dayjs, dayjs.Dayjs],
+        weekdays: [1, 2],
+        hours: Array.from({ length: 24 }, (_, hour) => hour),
+        compare: true,
+      },
+      allowedLdns: ['Cellid=1,PLMN=46000'],
+      systemTimezone: 'UTC',
+    });
+
+    const params = buildDeviceViewAggregatedParams(submitted, {
+      startTime: '2026-08-21T00:00:00Z',
+      endTime: '2026-08-22T00:00:00Z',
+    });
+
+    expect(params).toMatchObject({
+      startTime: '2026-08-21T00:00:00Z',
+      endTime: '2026-08-22T00:00:00Z',
+      pageBy: 'pivot_row',
+      fillEmpty: true,
+      objectLdns: ['Cellid=1,PLMN=46000'],
+      weekdays: [1, 2],
+    });
+    expect(params?.hours).toBeUndefined();
+  });
+});
+
+describe('buildDeviceViewRequestedObjectLdns', () => {
+  it('全选对象也显式传递已发现 LDN，避免后端重复发现对象', () => {
+    const ldns = buildDeviceViewRequestedObjectLdns({}, {
+      ENB00001: [{ objectLdn: 'Cellid=1' }, { objectLdn: 'Cellid=2' }],
+    });
+
+    expect(ldns).toEqual(['Cellid=1', 'Cellid=2']);
+  });
+
+  it('手动选择子集时只传递子集，跨设备去重', () => {
+    const ldns = buildDeviceViewRequestedObjectLdns({
+      ENB00001: ['Cellid=1'],
+      ENB00002: ['Cellid=1', 'Cellid=3'],
+    }, {
+      ENB00001: [{ objectLdn: 'Cellid=1' }, { objectLdn: 'Cellid=2' }],
+      ENB00002: [{ objectLdn: 'Cellid=1' }, { objectLdn: 'Cellid=3' }],
+    });
+
+    expect(ldns).toEqual(['Cellid=1', 'Cellid=3']);
+  });
+});
+
+describe('isDeviceViewQueryTimeoutError', () => {
+  it('识别 Axios 超时和普通 timeout 文本', () => {
+    expect(isDeviceViewQueryTimeoutError({ code: 'ECONNABORTED', message: 'timeout of 30000ms exceeded' })).toBe(true);
+    expect(isDeviceViewQueryTimeoutError(new Error('request timed out'))).toBe(true);
+    expect(isDeviceViewQueryTimeoutError(new Error('server returned 500'))).toBe(false);
+  });
+});
+
 describe('device view page state snapshot', () => {
   it('恢复设备、指标、粒度、时间范围、星期、小时段、小区对象、周期对比和已提交条件', () => {
     const filter = {
@@ -194,6 +293,49 @@ describe('device view page state snapshot', () => {
         rangeTouched: true,
         filter,
         submitted: null,
+        refreshed: false,
+      }),
+      savedAt: '2026-07-02T00:00:00.000Z',
+    };
+
+    const restored = restoreDeviceViewState(snapshot, 'UTC');
+
+    expect(restored.deviceSns).toEqual(['ENB00001']);
+    expect(restored.metricPaths).toEqual(['K001']);
+    expect(restored.submitted).toBeNull();
+    expect(restored.shouldRestoreQuery).toBe(false);
+  });
+
+  it('旧版本保存的空对象白名单不自动恢复查询，避免进页面触发慢查询', () => {
+    const filter = {
+      range: [dayjs('2026-07-01T00:00:00Z'), dayjs('2026-07-02T00:00:00Z')] as [dayjs.Dayjs, dayjs.Dayjs],
+      weekdays: [0, 1, 2, 3, 4, 5, 6],
+      hours: Array.from({ length: 24 }, (_, i) => i),
+      compare: false,
+    };
+    const snapshot = {
+      ...buildDeviceViewStateSnapshot({
+        tech: 'lte',
+        deviceSns: ['ENB00001'],
+        cellSel: {},
+        metricPaths: ['K001'],
+        metricsTouched: true,
+        granularity: '15min',
+        rangeTouched: true,
+        filter,
+        submitted: {
+          tech: 'lte',
+          deviceSns: ['ENB00001'],
+          metricPaths: ['K001'],
+          granularity: '15min',
+          startTime: '2026-07-01T00:00:00Z',
+          endTime: '2026-07-02T00:00:00Z',
+          weekdays: [0, 1, 2, 3, 4, 5, 6],
+          hours: Array.from({ length: 24 }, (_, i) => i),
+          compare: false,
+          offsetMs: 86_400_000,
+          allowedLdns: [],
+        },
         refreshed: false,
       }),
       savedAt: '2026-07-02T00:00:00.000Z',

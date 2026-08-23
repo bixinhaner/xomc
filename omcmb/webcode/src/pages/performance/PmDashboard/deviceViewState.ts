@@ -225,7 +225,10 @@ export function restoreDeviceViewState(
   const savedSubmitted = snapshot?.lastAction.submittedQuery && filters.submitted && typeof filters.submitted === 'object'
     ? (filters.submitted as unknown as DeviceViewSubmittedQuery)
     : null;
-  const submitted = savedSubmitted
+  const canRestoreSubmitted = savedSubmitted
+    ? savedSubmitted.deviceSns.length === 0 || savedSubmitted.allowedLdns.length > 0
+    : false;
+  const submitted = savedSubmitted && canRestoreSubmitted
     ? rangeTouched
       ? { ...savedSubmitted, tech: savedSubmitted.tech ?? normalizeTech(filters.tech) }
       : buildDeviceViewSubmittedQuery({
