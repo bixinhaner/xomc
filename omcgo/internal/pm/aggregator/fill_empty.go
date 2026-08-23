@@ -194,8 +194,7 @@ func CanAutoDiscoverObjectSkeletonRequest(req QueryRequest) bool {
 }
 
 func isDeviceObjectSkeletonBaseRequest(req QueryRequest) bool {
-	return req.Dimension != DimensionDeviceGroup &&
-		req.Dimension != DimensionAggregateGroup &&
+	return (req.Dimension == "" || req.Dimension == DimensionDevice) &&
 		len(req.DeviceSNs) == 1 &&
 		len(req.MetricPaths) > 0 &&
 		req.Granularity != "" &&

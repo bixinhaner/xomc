@@ -35,6 +35,24 @@ func TestPMTSDBConnectionBudgetCoversIngestAndHourlyFinalization(t *testing.T) {
 		"untrusted environment concurrency must saturate instead of wrapping negative")
 }
 
+func TestEffectivePMConsumerConcurrencyEnvOverride(t *testing.T) {
+	t.Setenv("PM_CONSUMER_CONCURRENCY", "1")
+
+	assert.Equal(t, 1, effectivePMConsumerConcurrency(4))
+}
+
+func TestEffectivePMConsumerConcurrencyIgnoresInvalidEnvOverride(t *testing.T) {
+	t.Setenv("PM_CONSUMER_CONCURRENCY", "invalid")
+
+	assert.Equal(t, 4, effectivePMConsumerConcurrency(4))
+}
+
+func TestEffectivePMConsumerConcurrencyCapsEnvOverride(t *testing.T) {
+	t.Setenv("PM_CONSUMER_CONCURRENCY", "99")
+
+	assert.Equal(t, 32, effectivePMConsumerConcurrency(4))
+}
+
 func TestWorkerTSDBPoolsCoverOverlappingPMWorkloads(t *testing.T) {
 	tests := []struct {
 		name                string

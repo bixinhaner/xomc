@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -957,6 +958,11 @@ const pmMaxAggregationConcurrency = 256
 const pmMaxTSDBConnectionBudget = int64(1<<31 - 1)
 
 func effectivePMConsumerConcurrency(configured int) int {
+	if raw := strings.TrimSpace(os.Getenv("PM_CONSUMER_CONCURRENCY")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			configured = parsed
+		}
+	}
 	if configured <= 0 {
 		configured = runtime.GOMAXPROCS(0)
 	}

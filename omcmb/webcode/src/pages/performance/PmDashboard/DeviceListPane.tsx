@@ -54,6 +54,7 @@ import ChartCard from './ChartCard';
 import { buildDeviceMetricCharts, filterRowsByObjectLdns } from './deviceListUtils';
 import CellDrilldownSelector from './CellDrilldownSelector';
 import {
+  getEffectiveLdnsWithNrRecommendedDefault,
   getNrRecommendedDefaultSelectedObjectLdns,
   type CellSelection,
 } from './cellDrilldownUtils';
@@ -177,7 +178,11 @@ export function buildDeviceViewAggregatedParams(
 export function buildDeviceViewRequestedObjectLdns(
   value: CellSelection,
   objectsByDevice: Record<string, { objectLdn: string }[]>,
+  granularity: Granularity = '15min',
 ): string[] {
+  if (granularity !== '15min') {
+    return getEffectiveLdnsWithNrRecommendedDefault(value, objectsByDevice);
+  }
   const out: string[] = [];
   const seen = new Set<string>();
   Object.entries(objectsByDevice).forEach(([sn, objects]) => {
@@ -512,8 +517,9 @@ export default function DeviceListPane() {
       metricPaths,
       granularity,
       filter,
-      // 定格当前下钻白名单；全选也显式传递已发现对象，避免后端重复做对象发现。
-      allowedLdns: buildDeviceViewRequestedObjectLdns(cellSel, objectsByDevice),
+      // 15min 原始查询需要显式传递已发现对象，避免后端重复做对象发现；
+      // 聚合粒度保持旧的“全选不过滤”语义，避免影响既有聚合结果口径。
+      allowedLdns: buildDeviceViewRequestedObjectLdns(cellSel, objectsByDevice, granularity),
       systemTimezone,
     }));
   };

@@ -146,6 +146,7 @@ contains "worker 默认 8 核" 'cpus: "${WORKER_CPUS:-8}"' "$RELEASE_APP_COMPOSE
 
 echo "── PM 流式聚合生产旋钮 ──"
 contains "release worker 启用流式聚合" 'PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"' "$RELEASE_APP_COMPOSE"
+contains "release worker 透传 PM 入库并发覆盖" 'PM_CONSUMER_CONCURRENCY: "${PM_CONSUMER_CONCURRENCY:-}"' "$RELEASE_APP_COMPOSE"
 contains "release worker 聚合并发满足两万设备十二分钟关闭" 'PM_AGGREGATION_CONSUMER_CONCURRENCY: "${PM_AGGREGATION_CONSUMER_CONCURRENCY:-16}"' "$RELEASE_APP_COMPOSE"
 contains "release worker 收口并发与生产默认预算一致" 'PM_AGGREGATION_FINALIZE_CONCURRENCY: "${PM_AGGREGATION_FINALIZE_CONCURRENCY:-32}"' "$RELEASE_APP_COMPOSE"
 contains "release worker 透传窗口状态 TTL" 'PM_AGGREGATION_WINDOW_TTL: "${PM_AGGREGATION_WINDOW_TTL:-1080h}"' "$RELEASE_APP_COMPOSE"
