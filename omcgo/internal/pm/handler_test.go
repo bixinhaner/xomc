@@ -17,6 +17,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
+	"github.com/omcgo/omcgo/internal/pm/calendarfilter"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
@@ -151,6 +152,57 @@ func pmHSetupRouterWithAggregator(aggr *aggregator.Aggregator) *gin.Engine {
 	return r
 }
 
+func pmHSetupRouterWithAggregatedBackend(backend aggregatedMetricsBackend) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewHandler(&pmHCounterRepo{}, &pmHKPIRepo{}, pmHNewEngine(), &pmHTaskRepo{}, nil, nil, "pm-files", nil, nil, zap.NewNop())
+	h.withAggregatedMetricsBackend(backend)
+	h.RegisterRoutes(r.Group(""))
+	return r
+}
+
+type pmHAggregatedBackend struct {
+	queryRows     []aggregator.Row
+	discoverLDNs  []string
+	pivotRowKeys  []aggregator.PivotRowKey
+	queryReqs     []aggregator.QueryRequest
+	countReqs     []aggregator.QueryRequest
+	discoverReqs  []aggregator.QueryRequest
+	pivotKeyReqs  []aggregator.QueryRequest
+	backfillCalls int
+}
+
+func (m *pmHAggregatedBackend) Query(_ context.Context, req aggregator.QueryRequest) ([]aggregator.Row, error) {
+	m.queryReqs = append(m.queryReqs, req)
+	return m.queryRows, nil
+}
+
+func (m *pmHAggregatedBackend) Count(_ context.Context, req aggregator.QueryRequest) (int, error) {
+	m.countReqs = append(m.countReqs, req)
+	return len(m.queryRows), nil
+}
+
+func (m *pmHAggregatedBackend) DiscoverObjectLDNs(_ context.Context, req aggregator.QueryRequest) ([]string, error) {
+	m.discoverReqs = append(m.discoverReqs, req)
+	return m.discoverLDNs, nil
+}
+
+func (m *pmHAggregatedBackend) DevicePivotRowKeys(_ context.Context, req aggregator.QueryRequest) ([]aggregator.PivotRowKey, error) {
+	m.pivotKeyReqs = append(m.pivotKeyReqs, req)
+	return m.pivotRowKeys, nil
+}
+
+func (m *pmHAggregatedBackend) BackfillDisplayNames(_ context.Context, rows []aggregator.Row) {
+	m.backfillCalls++
+	for i := range rows {
+		if rows[i].DisplayName == "" {
+			rows[i].DisplayName = rows[i].MetricPath
+		}
+	}
+}
+
+func (m *pmHAggregatedBackend) SetTimezoneProvider(calendarfilter.TimezoneProvider) {}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -281,6 +333,84 @@ func TestHandler_ListAggregatedMetrics_RejectsTooManyMetricPaths(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandler_ListAggregatedMetrics_FillEmptyAutoDiscoverUsesSingleObjectDiscovery(t *testing.T) {
+	bucket := time.Date(2026, 8, 23, 1, 0, 0, 0, time.UTC)
+	objectLDN := "Cellid=66"
+	backend := &pmHAggregatedBackend{
+		discoverLDNs: []string{objectLDN},
+		pivotRowKeys: []aggregator.PivotRowKey{{
+			DeviceOUI:   "48BF74",
+			DeviceSN:    "SN-1",
+			ObjectLDN:   objectLDN,
+			Granularity: metrics.Granularity15Min,
+			Time:        bucket,
+		}},
+		queryRows: []aggregator.Row{{
+			DeviceOUI:   "48BF74",
+			DeviceSN:    "SN-1",
+			MetricPath:  "K1",
+			MetricType:  metrics.MetricTypeKPI,
+			MetricValue: 1,
+			Granularity: metrics.Granularity15Min,
+			Time:        bucket,
+			StartTime:   bucket,
+			EndTime:     bucket.Add(15 * time.Minute),
+			ObjectLDN:   &objectLDN,
+		}},
+	}
+	router := pmHSetupRouterWithAggregatedBackend(backend)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(
+		http.MethodGet,
+		"/pm/metrics/aggregated?granularity=15min&device_sn=SN-1&metric_paths=K1,K2&start_time=2026-08-23T01:00:00Z&end_time=2026-08-23T01:15:00Z&page_by=pivot_row&count_mode=n_plus_one&fill_empty=true&limit=5000",
+		nil,
+	)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, backend.discoverReqs, 1)
+	require.Len(t, backend.pivotKeyReqs, 1)
+	require.Len(t, backend.queryReqs, 1)
+	assert.Empty(t, backend.countReqs, "count_mode=n_plus_one must avoid exact Count")
+	assert.Equal(t, []string{objectLDN}, backend.pivotKeyReqs[0].ObjectLDNs)
+	assert.Equal(t, []string{objectLDN}, backend.queryReqs[0].ObjectLDNs)
+	assert.Len(t, backend.queryReqs[0].PivotRowKeys, 1)
+	assert.Equal(t, 1, backend.backfillCalls)
+
+	var body struct {
+		Items     []aggregator.Row `json:"items"`
+		Total     int              `json:"total"`
+		Truncated bool             `json:"truncated"`
+	}
+	response.DecodeData(t, w.Body, &body)
+	require.Len(t, body.Items, 2)
+	assert.Equal(t, 2, body.Total)
+	assert.False(t, body.Truncated)
+	assert.True(t, body.Items[1].Filled)
+	assert.Equal(t, "K2", body.Items[1].MetricPath)
+}
+
+func TestHandler_ListAggregatedMetrics_EmptyAutoDiscoverDoesNotRepeatDiscovery(t *testing.T) {
+	backend := &pmHAggregatedBackend{}
+	router := pmHSetupRouterWithAggregatedBackend(backend)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(
+		http.MethodGet,
+		"/pm/metrics/aggregated?granularity=15min&device_sn=SN-1&metric_paths=K1,K2&start_time=2026-08-23T01:00:00Z&end_time=2026-08-23T01:15:00Z&page_by=pivot_row&count_mode=n_plus_one&fill_empty=true&limit=5000",
+		nil,
+	)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, backend.discoverReqs, 1)
+	assert.Empty(t, backend.pivotKeyReqs)
+	require.Len(t, backend.queryReqs, 1)
+	assert.Empty(t, backend.countReqs, "count_mode=n_plus_one must avoid exact Count")
+	assert.Equal(t, 1, backend.backfillCalls)
 }
 
 func TestTruncateAggregatedRows_NPlusOnePlainRows(t *testing.T) {

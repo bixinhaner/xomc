@@ -56,12 +56,13 @@ func TestPMStreamingAggregationMigrationContract(t *testing.T) {
 		"CREATE INDEX idx_pm_windows_due_claim",
 		"CREATE INDEX idx_pm_windows_oldest_due",
 		"CREATE INDEX idx_pm_windows_version_audit",
-		"granularity, window_end, entity_key, task_version_id, window_start",
+		"granularity, window_end, task_version_id, entity_key, window_start",
 		"ADD COLUMN device_id uuid",
 		"CREATE INDEX idx_pm_aggregation_outbox_device_period_replay",
 		"device_id, event_window_start, event_id",
 		"CREATE INDEX idx_pm_replay_sources_device_period",
-		"timescaledb.compress_segmentby = 'device_id'",
+		"timescaledb.compress_segmentby",
+		"'device_id'",
 	} {
 		require.Contains(t, tsdbSQL, fragment)
 	}
@@ -70,6 +71,24 @@ func TestPMStreamingAggregationMigrationContract(t *testing.T) {
 	require.NotContains(t, strings.ToUpper(tsdbSQL), "INSERT INTO PUBLIC.PM_AGGREGATION_RESULTS SELECT")
 	require.Contains(t, composeSQL, `"--reconcile", "/etc/omcgo/tsdb-schema-reconcile.sql"`)
 	require.Contains(t, dockerfile, "COPY deployments/release/bundle/deploy/tsdb-schema-reconcile.sql")
+}
+
+func TestPMDeviceViewQueryIndexesMigrationContract(t *testing.T) {
+	tsdbSQL := readMigration(t, filepath.Join("..", "..", "migrations", "tsdb", "000001_tsdb_schema.sql"))
+	reconcileSQL := readMigration(t, filepath.Join("..", "..", "..", "deployments", "release", "bundle", "deploy", "tsdb-schema-reconcile.sql"))
+
+	for _, sql := range []string{tsdbSQL, reconcileSQL} {
+		require.Contains(t, sql, "idx_pm_anchors_15min_device_time_object")
+		require.Contains(t, sql, "ON public.pm_measurement_anchors (device_dim_id, \"time\" DESC, object_ldn)")
+		require.Contains(t, sql, "WHERE granularity = '15min'")
+		require.Contains(t, sql, "idx_pm_anchors_15min_device_object")
+		require.Contains(t, sql, "ON public.pm_measurement_anchors (device_dim_id, object_ldn)")
+		require.Contains(t, sql, "idx_pm_anchors_15min_device_object_time")
+		require.Contains(t, sql, "ON public.pm_measurement_anchors (device_dim_id, object_ldn, \"time\" DESC)")
+		require.Contains(t, sql, "idx_pm_aggregation_results_device_view")
+		require.Contains(t, sql, "granularity,\n        dimension_key,\n        window_start DESC,\n        object_ldn,\n        metric_path,\n        task_version_id,\n        revision")
+		require.Contains(t, sql, "WHERE dimension = 'device'")
+	}
 }
 
 func TestPMWindowVersionMetadataBackfillPendingIndexMigrationContract(t *testing.T) {

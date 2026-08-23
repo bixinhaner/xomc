@@ -126,6 +126,7 @@ func buildObjectsQuery(deviceSNs, technologies []string) (string, []any) {
 FROM pm_measurement_anchors a
 JOIN device_dim d ON d.id=a.device_dim_id
 WHERE d.serial_number = ANY($1)
+  AND a.granularity = '15min'
   AND a.object_ldn <> ''`
 	args := []any{deviceSNs}
 	if len(technologies) > 0 {

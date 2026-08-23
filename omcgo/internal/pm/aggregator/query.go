@@ -367,7 +367,7 @@ func buildObjectLDNDiscoverySQL(q QueryRequest) (string, []any, error) {
 func newDeviceObjectSource(builder sq.StatementBuilderType, q QueryRequest) sq.SelectBuilder {
 	switch q.Granularity {
 	case metrics.Granularity15Min:
-		return builder.Select(
+		source := builder.Select(
 			"a.object_ldn AS object_ldn",
 			"dev.oui AS device_oui",
 			"dev.serial_number AS device_sn",
@@ -378,6 +378,10 @@ func newDeviceObjectSource(builder sq.StatementBuilderType, q QueryRequest) sq.S
 		).
 			From("pm_measurement_anchors a").
 			Join("device_dim dev ON dev.id = a.device_dim_id")
+		if frag, args, ok := deviceDimIDPrefilter("a.device_dim_id", "id", q); ok {
+			source = source.Where(frag, args...)
+		}
+		return source
 	default:
 		source := builder.Select(
 			"r.object_ldn AS object_ldn",
@@ -798,6 +802,9 @@ func buildDeviceTableSQL(table string, q QueryRequest) (string, []any, error) {
 }
 
 func buildDevicePivotRowPageSQL(table string, q QueryRequest) (string, []any, error) {
+	if len(q.PivotRowKeys) > 0 {
+		return buildDevicePivotRowsForKeysSQL(table, q)
+	}
 	builder := sq.StatementBuilder.PlaceholderFormat(sq.Question)
 	inner := newRawAwareDeviceSelect(builder, table, q, deviceTableColumns...).
 		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
@@ -871,6 +878,175 @@ ORDER BY d."time" DESC, d.device_sn ASC, COALESCE(d.object_ldn, '') ASC, d.metri
 	return sqlStr, args, nil
 }
 
+func buildDevicePivotRowsForKeysSQL(table string, q QueryRequest) (string, []any, error) {
+	if table == "pm_metrics" {
+		return buildRawDevicePivotRowsForKeysSQL(q)
+	}
+	builder := sq.StatementBuilder.PlaceholderFormat(sq.Question)
+	inner := newRawAwareDeviceSelect(builder, table, q, deviceTableColumns...).
+		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+	inner = applyDeviceFilters(inner, q)
+	inner = inner.OrderBy(
+		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+	)
+	innerSQL, innerArgs, err := inner.ToSql()
+	if err != nil {
+		return "", nil, err
+	}
+
+	valueRows := make([]string, 0, len(q.PivotRowKeys))
+	args := make([]any, 0, len(q.PivotRowKeys)*5+len(innerArgs))
+	for _, key := range q.PivotRowKeys {
+		valueRows = append(valueRows, "(?::text,?::text,?::text,?::text,?::timestamptz)")
+		args = append(args, key.DeviceOUI, key.DeviceSN, key.ObjectLDN, string(key.Granularity), key.Time)
+	}
+	args = append(args, innerArgs...)
+
+	sqlStr := fmt.Sprintf(`
+WITH requested_keys(device_oui, device_sn, object_ldn, granularity, "time") AS (
+  VALUES %s
+),
+dedup AS (
+  %s
+)
+SELECT %s
+FROM dedup d
+JOIN requested_keys pk
+  ON pk.device_oui = d.device_oui
+ AND pk.device_sn = d.device_sn
+ AND pk.object_ldn = COALESCE(d.object_ldn, '')
+ AND pk.granularity = d.granularity
+ AND pk."time" = d."time"
+ORDER BY d."time" DESC, d.device_sn ASC, COALESCE(d.object_ldn, '') ASC, d.metric_path ASC`,
+		strings.Join(valueRows, ", "), innerSQL, prefixedColumns("d", deviceTableColumns))
+	sqlStr, err = sq.Dollar.ReplacePlaceholders(sqlStr)
+	if err != nil {
+		return "", nil, err
+	}
+	return sqlStr, args, nil
+}
+
+func buildRawDevicePivotRowsForKeysSQL(q QueryRequest) (string, []any, error) {
+	builder := sq.StatementBuilder.PlaceholderFormat(sq.Question)
+	valueRows := make([]string, 0, len(q.PivotRowKeys))
+	args := make([]any, 0, len(q.PivotRowKeys)*5+len(q.MetricPaths)*2+3)
+	for _, key := range q.PivotRowKeys {
+		valueRows = append(valueRows, "(?::text,?::text,?::text,?::text,?::timestamptz)")
+		args = append(args, key.DeviceOUI, key.DeviceSN, key.ObjectLDN, string(key.Granularity), key.Time)
+	}
+
+	valueJoin := `pm_metric_values v ON v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`
+	valueJoinArgs := make([]any, 0, 2)
+	if !q.StartTime.IsZero() {
+		valueJoin += ` AND v."time" >= ?`
+		valueJoinArgs = append(valueJoinArgs, q.StartTime)
+	}
+	if !q.EndTime.IsZero() {
+		valueJoin += ` AND v."time" < ?`
+		valueJoinArgs = append(valueJoinArgs, q.EndTime)
+	}
+
+	targeted := builder.Select(
+		"COALESCE(dev.oui,'')::text AS device_oui",
+		"COALESCE(dev.serial_number,'')::text AS device_sn",
+		"d.metric_path",
+		"d.metric_type",
+		"v.metric_value",
+		"d.statis_type",
+		"a.granularity",
+		`a."time"`,
+		"a.start_time",
+		"a.end_time",
+		"a.end_time AS ingest_time",
+		"a.object_ldn",
+		"a.anchor_id AS ingest_sequence",
+		`jsonb_strip_nulls(jsonb_build_object(
+			'device_id',a.device_dim_id::text,'counter_group',a.counter_group,
+			'carrier',dev.carrier,
+			'technology',dev.technology)) AS extra`,
+	).
+		From("requested_keys pk").
+		Join("device_dim dev ON dev.oui = pk.device_oui AND dev.serial_number = pk.device_sn").
+		Join(`pm_measurement_anchors a
+  ON a.device_dim_id = dev.id
+ AND a.object_ldn = pk.object_ldn
+ AND a.granularity = pk.granularity
+ AND a."time" = pk."time"`).
+		Join("pm_metric_sets s ON s.metric_set_id=a.metric_set_id").
+		Join("pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)").
+		LeftJoin(valueJoin, valueJoinArgs...)
+	targeted = applyMetricDictionaryFilters(targeted, q)
+	if len(q.DeviceSNs) > 0 {
+		targeted = targeted.Where(sq.Eq{"dev.serial_number": q.DeviceSNs})
+	}
+	if len(q.DeviceOUIs) > 0 {
+		targeted = targeted.Where(sq.Eq{"dev.oui": q.DeviceOUIs})
+	}
+	if len(q.Technologies) > 0 {
+		targeted = targeted.Where(sq.Eq{"dev.technology": q.Technologies})
+	}
+	targeted = authz.ApplyDeviceSNVisibilityFilter(targeted, "dev.serial_number", q.VisibleGroups)
+
+	targetedSQL, targetedArgs, err := targeted.ToSql()
+	if err != nil {
+		return "", nil, err
+	}
+	args = append(args, targetedArgs...)
+
+	sqlStr := fmt.Sprintf(`
+WITH requested_keys(device_oui, device_sn, object_ldn, granularity, "time") AS (
+  VALUES %s
+),
+dedup AS (
+  SELECT DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)
+    %s
+  FROM (
+    %s
+  ) pm_metrics
+  ORDER BY device_oui, device_sn, metric_path, granularity, "time", object_ldn, ingest_sequence DESC
+)
+SELECT %s
+FROM dedup d
+ORDER BY d."time" DESC, d.device_sn ASC, COALESCE(d.object_ldn, '') ASC, d.metric_path ASC`,
+		strings.Join(valueRows, ", "), strings.Join(deviceTableColumns, ", "), targetedSQL, prefixedColumns("d", deviceTableColumns))
+	sqlStr, err = sq.Dollar.ReplacePlaceholders(sqlStr)
+	if err != nil {
+		return "", nil, err
+	}
+	return sqlStr, args, nil
+}
+
+func applyMetricDictionaryFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
+	if len(q.MetricPaths) > 0 {
+		if q.MetricType == nil {
+			or := sq.Or{}
+			for _, raw := range q.MetricPaths {
+				path := strings.TrimSpace(raw)
+				if path == "" {
+					continue
+				}
+				if mt, ok := metricTypeFromIndicatorPath(path); ok {
+					or = append(or, sq.And{
+						sq.Eq{"d.metric_path": path},
+						sq.Eq{"d.metric_type": string(mt)},
+					})
+				} else {
+					or = append(or, sq.Eq{"d.metric_path": path})
+				}
+			}
+			if len(or) > 0 {
+				qb = qb.Where(or)
+			}
+		} else {
+			qb = qb.Where(sq.Eq{"d.metric_path": q.MetricPaths})
+		}
+	}
+	if q.MetricType != nil {
+		qb = qb.Where(sq.Eq{"d.metric_type": string(*q.MetricType)})
+	}
+	return qb
+}
+
 func (a *Aggregator) DevicePivotRowKeys(ctx context.Context, q QueryRequest) ([]PivotRowKey, error) {
 	q = a.withCalendarTimezone(ctx, q)
 	if q.Dimension == "" {
@@ -904,6 +1080,9 @@ func (a *Aggregator) DevicePivotRowKeys(ctx context.Context, q QueryRequest) ([]
 }
 
 func buildDevicePivotRowKeysSQL(table string, q QueryRequest) (string, []any, error) {
+	if table == "pm_metrics" && IsExplicitObjectSkeletonRequest(q) {
+		return buildRawDevicePivotRowKeysSQL(q)
+	}
 	builder := sq.StatementBuilder.PlaceholderFormat(sq.Question)
 	pageReq := q
 	if IsExplicitObjectSkeletonRequest(q) {
@@ -945,6 +1124,54 @@ ORDER BY "time" DESC, device_sn ASC, object_ldn ASC%s%s`, innerSQL, limitSQL, of
 		return "", nil, err
 	}
 	return sqlStr, args, nil
+}
+
+func buildRawDevicePivotRowKeysSQL(q QueryRequest) (string, []any, error) {
+	qb := storage.Psql.Select(
+		"dev.oui AS device_oui",
+		"dev.serial_number AS device_sn",
+		"COALESCE(a.object_ldn, '') AS object_ldn",
+		"a.granularity",
+		`a."time"`,
+	).
+		Distinct().
+		From("pm_measurement_anchors a").
+		Join("device_dim dev ON dev.id = a.device_dim_id")
+	if frag, args, ok := deviceDimIDPrefilter("a.device_dim_id", "id", q); ok {
+		qb = qb.Where(frag, args...)
+	}
+	if len(q.Technologies) > 0 {
+		qb = qb.Where(sq.Eq{"dev.technology": q.Technologies})
+	}
+	if q.Granularity != "" {
+		qb = qb.Where(sq.Eq{"a.granularity": string(q.Granularity)})
+	}
+	if !q.StartTime.IsZero() {
+		qb = qb.Where(sq.GtOrEq{`a."time"`: q.StartTime})
+	}
+	if !q.EndTime.IsZero() {
+		qb = qb.Where(sq.Lt{`a."time"`: q.EndTime})
+	}
+	if len(q.ObjectLDNs) > 0 {
+		qb = qb.Where(sq.Eq{"a.object_ldn": q.ObjectLDNs})
+	}
+	if len(q.Weekdays) > 0 && len(q.Weekdays) < 7 {
+		qb = qb.Where(calendarfilter.ExtractDOWPredicate("a.start_time"),
+			calendarfilter.NormalizeName(q.CalendarTimezone), q.Weekdays)
+	}
+	if len(q.Hours) > 0 && len(q.Hours) < 24 {
+		qb = qb.Where(calendarfilter.ExtractHourPredicate("a.start_time"),
+			calendarfilter.NormalizeName(q.CalendarTimezone), q.Hours)
+	}
+	qb = authz.ApplyDeviceSNVisibilityFilter(qb, "dev.serial_number", q.VisibleGroups)
+	qb = qb.OrderBy(`a."time" DESC`, "dev.serial_number ASC", "COALESCE(a.object_ldn, '') ASC")
+	if q.Limit > 0 {
+		qb = qb.Limit(uint64(q.Limit))
+	}
+	if q.Offset > 0 {
+		qb = qb.Offset(uint64(q.Offset))
+	}
+	return qb.ToSql()
 }
 
 func prefixedColumns(prefix string, cols []string) string {

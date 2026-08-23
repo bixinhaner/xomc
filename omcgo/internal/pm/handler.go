@@ -47,13 +47,22 @@ type Handler struct {
 	// 读 pm_metrics，现统一经 DeviceQueryService（handler → service → repository）。
 	deviceQuery     DeviceQueryService
 	indicatorRepo   indicator.IndicatorRepository // T-0164-P1：/pm/kpi/definitions 数据源（替代旧 carrier KPIDefinitions 列表）
-	aggr            *aggregator.Aggregator        // T-0164-P5 / G5：按粒度路由聚合表查询（hourly/daily/weekly/monthly + device_group）
+	aggr            aggregatedMetricsBackend      // T-0164-P5 / G5：按粒度路由聚合表查询（hourly/daily/weekly/monthly + device_group）
 	asyncJobRepo    asyncjob.Repository           // T-0164 收尾 G5-Gap-2：手动重算入口入队 async_jobs
 	resolver        *authz.Resolver               // #64 设备组数据权限：PM 读链路按调用者可见分组过滤
 	productResolver ProductPatternResolver        // #602; nil-safe (product_id 过滤参数被忽略)
 	metrics         *PMMetrics
 	timezone        calendarfilter.TimezoneProvider
 	logger          *zap.Logger
+}
+
+type aggregatedMetricsBackend interface {
+	Query(context.Context, aggregator.QueryRequest) ([]aggregator.Row, error)
+	Count(context.Context, aggregator.QueryRequest) (int, error)
+	DiscoverObjectLDNs(context.Context, aggregator.QueryRequest) ([]string, error)
+	DevicePivotRowKeys(context.Context, aggregator.QueryRequest) ([]aggregator.PivotRowKey, error)
+	BackfillDisplayNames(context.Context, []aggregator.Row)
+	SetTimezoneProvider(calendarfilter.TimezoneProvider)
 }
 
 // ProductPatternResolver 把 product_id 解析为该产品的 product_class 模式字面量集合。
@@ -147,7 +156,19 @@ func groupInVisible(groupID uuid.UUID, visibleGroups []uuid.UUID) bool {
 //
 // 调用方：cmd/app/provider/router.go 在初始化 pm.Handler 后调用。
 func (h *Handler) WithAggregator(aggr *aggregator.Aggregator) *Handler {
+	if aggr == nil {
+		h.aggr = nil
+		return h
+	}
 	h.aggr = aggr
+	if h.timezone != nil {
+		aggr.SetTimezoneProvider(h.timezone)
+	}
+	return h
+}
+
+func (h *Handler) withAggregatedMetricsBackend(backend aggregatedMetricsBackend) *Handler {
+	h.aggr = backend
 	if h.aggr != nil && h.timezone != nil {
 		h.aggr.SetTimezoneProvider(h.timezone)
 	}
@@ -173,6 +194,9 @@ func (h *Handler) WithTimezoneProvider(provider calendarfilter.TimezoneProvider)
 // pool 仅用于构造 DeviceQueryService（#18 收敛后 Handler 不直接持有连接池）；
 // 测试可传 nil（不触达 devices / pm_metrics 端点时无需真实池）。
 func NewHandler(counterRepo counter.CounterRepository, kpiRepo kpi.KPIRepository, kpiEngine *kpi.KPIEngine, taskRepo TaskRepository, fileStore PMFileStore, minioClient *minio.Client, pmBucket string, pool *pgxpool.Pool, indicatorRepo indicator.IndicatorRepository, logger *zap.Logger) *Handler {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	return &Handler{
 		counterRepo:   counterRepo,
 		kpiRepo:       kpiRepo,
@@ -487,13 +511,24 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		}
 	}
 
+	timing := aggregatedMetricsTiming{startedAt: time.Now()}
+	defer func() {
+		h.logAggregatedMetricsTiming(c, req, &timing)
+	}()
+
 	// fill_empty=true：数据驱动补齐占位行（T-0192d）。只对"已存在真实记录组"里所查
 	// 但缺失的指标补一行占位，让透视表能区分"该时段有采样但此指标无值"与"此指标有值"。
 	// 没有任何真实行的时间桶/object 永不出现（空时段不凭空造桶）。
 	// 仅 device 维度（单 OUI+SN）+ metric_paths 非空时启用。
 	fillEmpty := c.Query("fill_empty") == "true"
+	objectLDNsDiscovered := false
 	if fillEmpty && req.PageByPivotRow && aggregator.CanAutoDiscoverObjectSkeletonRequest(req) {
+		stageStarted := time.Now()
 		objectLDNs, err := h.aggr.DiscoverObjectLDNs(c.Request.Context(), req)
+		timing.discoverObjectLDNs = time.Since(stageStarted)
+		timing.discoverObjectLDNRuns++
+		timing.discoveredObjects = len(objectLDNs)
+		objectLDNsDiscovered = true
 		if err != nil {
 			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 			return
@@ -501,7 +536,10 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		req.ObjectLDNs = objectLDNs
 	}
 	if fillEmpty && req.PageByPivotRow && aggregator.IsExplicitObjectSkeletonRequest(req) {
+		stageStarted := time.Now()
 		pivotKeys, err := h.aggr.DevicePivotRowKeys(c.Request.Context(), req)
+		timing.devicePivotRowKeys = time.Since(stageStarted)
+		timing.pivotKeys = len(pivotKeys)
 		if err != nil {
 			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 			return
@@ -509,7 +547,10 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		req.PivotRowKeys = pivotKeys
 	}
 
+	stageStarted := time.Now()
 	rows, err := h.aggr.Query(c.Request.Context(), req)
+	timing.query = time.Since(stageStarted)
+	timing.queryRows = len(rows)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
@@ -523,19 +564,29 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		}
 	}
 	if fillEmpty {
-		if aggregator.CanAutoDiscoverObjectSkeletonRequest(req) {
+		if !objectLDNsDiscovered && aggregator.CanAutoDiscoverObjectSkeletonRequest(req) {
+			stageStarted := time.Now()
 			objectLDNs, err := h.aggr.DiscoverObjectLDNs(c.Request.Context(), req)
+			timing.discoverObjectLDNs += time.Since(stageStarted)
+			timing.discoverObjectLDNRuns++
+			timing.discoveredObjects = len(objectLDNs)
+			objectLDNsDiscovered = true
 			if err != nil {
 				commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 				return
 			}
 			req.ObjectLDNs = objectLDNs
 		}
+		stageStarted := time.Now()
 		rows = fillEmptyBuckets(rows, req)
+		timing.fillEmpty = time.Since(stageStarted)
+		timing.filledRows = len(rows)
 		// 占位行可能因「该指标本次无任何真实行」而 DisplayName 为空（fillEmptyBuckets 的 nameByPath
 		// 只从真实行收集）；整体按指标库再回填一次，使占位行与真实行同口径取名，避免透视表列头
 		// 退化成裸编号（查不到名的合成计数器仍回退编号本身，行为不变）。
+		stageStarted = time.Now()
 		h.aggr.BackfillDisplayNames(c.Request.Context(), rows)
+		timing.backfillDisplayNames = time.Since(stageStarted)
 	}
 	total := len(rows)
 	if !useNPlusOneCount && req.Limit > 0 {
@@ -547,9 +598,11 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 			countReq.MetricPaths = nil
 			countReq.MetricType = nil
 		}
+		stageStarted := time.Now()
 		if n, err := h.aggr.Count(c.Request.Context(), countReq); err == nil {
 			total = n
 		}
+		timing.count = time.Since(stageStarted)
 	}
 	result := gin.H{"items": rows, "total": total, "truncated": truncated}
 	if !req.StartTime.IsZero() && !req.EndTime.IsZero() {
@@ -562,6 +615,59 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		result["timezone"] = win.Timezone
 	}
 	response.OK(c, result)
+}
+
+type aggregatedMetricsTiming struct {
+	startedAt             time.Time
+	discoverObjectLDNs    time.Duration
+	discoverObjectLDNRuns int
+	devicePivotRowKeys    time.Duration
+	query                 time.Duration
+	fillEmpty             time.Duration
+	backfillDisplayNames  time.Duration
+	count                 time.Duration
+	discoveredObjects     int
+	pivotKeys             int
+	queryRows             int
+	filledRows            int
+}
+
+func (h *Handler) logAggregatedMetricsTiming(c *gin.Context, req aggregator.QueryRequest, timing *aggregatedMetricsTiming) {
+	logger := h.logger
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	objectFilter := "none"
+	switch {
+	case len(req.ObjectLDNs) > 0:
+		objectFilter = "explicit"
+	case aggregator.CanAutoDiscoverObjectSkeletonRequest(req):
+		objectFilter = "auto_discover"
+	}
+	logger.Info("pm aggregated metrics query timing",
+		zap.String("granularity", string(req.Granularity)),
+		zap.String("dimension", string(req.Dimension)),
+		zap.Int("device_sn_count", len(req.DeviceSNs)),
+		zap.Int("metric_path_count", len(req.MetricPaths)),
+		zap.String("object_filter", objectFilter),
+		zap.Bool("page_by_pivot_row", req.PageByPivotRow),
+		zap.Bool("fill_empty", c.Query("fill_empty") == "true"),
+		zap.Int("limit", req.Limit),
+		zap.Int("offset", req.Offset),
+		zap.Int("discovered_object_count", timing.discoveredObjects),
+		zap.Int("discover_object_ldns_runs", timing.discoverObjectLDNRuns),
+		zap.Int("pivot_key_count", timing.pivotKeys),
+		zap.Int("query_row_count", timing.queryRows),
+		zap.Int("filled_row_count", timing.filledRows),
+		zap.Duration("discover_object_ldns_duration", timing.discoverObjectLDNs),
+		zap.Duration("device_pivot_row_keys_duration", timing.devicePivotRowKeys),
+		zap.Duration("query_duration", timing.query),
+		zap.Duration("fill_empty_duration", timing.fillEmpty),
+		zap.Duration("backfill_display_names_duration", timing.backfillDisplayNames),
+		zap.Duration("count_duration", timing.count),
+		zap.Duration("total_duration", time.Since(timing.startedAt)),
+		zap.Int("http_status", c.Writer.Status()),
+	)
 }
 
 // fillEmptyBuckets 保留 pm 包内测试入口，真实实现收敛在 aggregator 包，供页面接口和导出共用。

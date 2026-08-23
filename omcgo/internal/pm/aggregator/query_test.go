@@ -372,6 +372,110 @@ func Test_buildDeviceTableSQL_PageByPivotRowSkeletonPagesKeysWithoutMetricFilter
 	assert.Equal(t, 1, args[len(args)-1])
 }
 
+func Test_buildDevicePivotRowKeysSQL_ExplicitObjectUsesRawAnchorPredicates(t *testing.T) {
+	sql, args, err := buildDevicePivotRowKeysSQL("pm_metrics", QueryRequest{
+		Granularity:    metrics.Granularity15Min,
+		DeviceSNs:      []string{"SN-1"},
+		MetricPaths:    []string{"K1"},
+		Technologies:   []string{"lte"},
+		ObjectLDNs:     []string{"Cellid=66"},
+		StartTime:      time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC),
+		EndTime:        time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC),
+		PageByPivotRow: true,
+		Limit:          5000,
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, sql, "FROM pm_measurement_anchors a")
+	assert.Contains(t, sql, "JOIN device_dim dev ON dev.id = a.device_dim_id")
+	assert.Contains(t, sql, "a.device_dim_id IN (SELECT id FROM device_dim WHERE serial_number = ANY(")
+	assert.Contains(t, sql, "a.granularity =")
+	assert.Contains(t, sql, "a.\"time\" >= ")
+	assert.Contains(t, sql, "a.\"time\" < ")
+	assert.Contains(t, sql, "a.object_ldn IN")
+	assert.Contains(t, sql, "ORDER BY a.\"time\" DESC")
+	assert.Contains(t, sql, "LIMIT 5000")
+	assert.NotContains(t, sql, "object_source")
+	assert.NotContains(t, sql, "pm_metric_dictionary")
+	assert.NotContains(t, sql, "pm_metric_values")
+	assert.Contains(t, args, []string{"SN-1"})
+	assert.Contains(t, args, []string{"lte"})
+	assert.Contains(t, args, "15min")
+	assert.Contains(t, args, "Cellid=66")
+}
+
+func Test_buildDeviceTableSQL_PageByPivotRowUsesPrecomputedKeys(t *testing.T) {
+	keyTime := time.Date(2026, 7, 23, 8, 30, 0, 0, time.UTC)
+	sql, args, err := buildDeviceTableSQL("pm_metrics", QueryRequest{
+		Granularity:    metrics.Granularity15Min,
+		DeviceSNs:      []string{"SN-1"},
+		MetricPaths:    []string{"K1", "K2"},
+		PageByPivotRow: true,
+		Limit:          5000,
+		PivotRowKeys: []PivotRowKey{{
+			DeviceOUI:   "0019C0",
+			DeviceSN:    "SN-1",
+			ObjectLDN:   "Cellid=1",
+			Granularity: metrics.Granularity15Min,
+			Time:        keyTime,
+		}},
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, sql, "WITH requested_keys(device_oui, device_sn, object_ldn, granularity, \"time\") AS")
+	assert.Contains(t, sql, "VALUES ($1::text,$2::text,$3::text,$4::text,$5::timestamptz)")
+	assert.Contains(t, sql, "FROM requested_keys pk")
+	assert.Contains(t, sql, "JOIN pm_measurement_anchors a")
+	assert.Contains(t, sql, "AND a.object_ldn = pk.object_ldn")
+	assert.Contains(t, sql, "AND a.\"time\" = pk.\"time\"")
+	assert.Contains(t, sql, "JOIN pm_metric_dictionary d ON d.metric_id=ANY(s.metric_ids)")
+	assert.Contains(t, sql, "LEFT JOIN pm_metric_values v")
+	assert.NotContains(t, sql, "pm_files")
+	assert.NotContains(t, sql, "pm_ingest_batches")
+	assert.Contains(t, sql, "ingest_sequence DESC")
+	assert.Contains(t, sql, "d.metric_path =")
+	assert.Contains(t, sql, "d.metric_type =")
+	assert.NotContains(t, sql, "page_keys AS")
+	assert.NotContains(t, sql, "LIMIT")
+	assert.NotContains(t, sql, "OFFSET")
+	assert.Equal(t, "0019C0", args[0])
+	assert.Equal(t, "SN-1", args[1])
+	assert.Equal(t, "Cellid=1", args[2])
+	assert.Equal(t, "15min", args[3])
+	assert.Equal(t, keyTime, args[4])
+	assert.Equal(t, "K1", args[5])
+	assert.Equal(t, string(metrics.MetricTypeKPI), args[6])
+	assert.Equal(t, "K2", args[7])
+	assert.Equal(t, string(metrics.MetricTypeKPI), args[8])
+}
+
+func Test_buildDeviceTableSQL_PageByPivotRowPrecomputedKeysPrunesMetricValueTime(t *testing.T) {
+	keyTime := time.Date(2026, 7, 23, 8, 30, 0, 0, time.UTC)
+	start := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	sql, args, err := buildDeviceTableSQL("pm_metrics", QueryRequest{
+		Granularity:    metrics.Granularity15Min,
+		DeviceSNs:      []string{"SN-1"},
+		MetricPaths:    []string{"K1"},
+		PageByPivotRow: true,
+		StartTime:      start,
+		EndTime:        end,
+		PivotRowKeys: []PivotRowKey{{
+			DeviceOUI:   "0019C0",
+			DeviceSN:    "SN-1",
+			ObjectLDN:   "Cellid=1",
+			Granularity: metrics.Granularity15Min,
+			Time:        keyTime,
+		}},
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, sql, `LEFT JOIN pm_metric_values v ON v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id AND v."time" >= $`)
+	assert.Contains(t, sql, `AND v."time" < $`)
+	assert.Contains(t, args, start)
+	assert.Contains(t, args, end)
+}
+
 func Test_buildDeviceTableSQL_RolledUpPivotSkeletonReadsAggregationResults(t *testing.T) {
 	sql, _, err := buildDeviceTableSQL("pm_metrics_daily", QueryRequest{
 		Granularity:    metrics.GranularityDaily,
