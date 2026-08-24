@@ -17,7 +17,8 @@
 //     对齐 issue #316 "各网元最大接入设备数必须分别生效"）。大小写不敏感
 //     匹配（license key `eNB`/`gNB` ↔ 设备 ne_type `ENB`/`GNB`）。例外是
 //     容量分组（issue #318）：GSM 网元（2G BSC/BTS）与 eNB 共用容量，
-//     见 capacity_group.go。
+//     见 capacity_group.go；以及容量豁免类型（如 IMSCORE 核心网）完全不
+//     受容量控制，见 capacity_group.go neTypesExemptFromCapacity。
 //   - 过期：`SystemLicense.ExpiryDate` 直接判断（新模型无 grace_period_days
 //     / 无 perpetual 类型；NULL expiry_date 视为永不过期，对应老 perpetual 语义）
 //   - 缓存：5min TTL，Replace（POST /system-license）后由 SystemLicenseService
@@ -52,6 +53,7 @@ type Enforcer interface {
 	// (wrapped, "not authorized") when the license does not authorize the
 	// given deviceType, and ErrLicenseUnavailable when no license is
 	// configured (fail-closed). deviceType=="" rejects (unknown NE type).
+	// 豁免类型（capacity_group.go，如 IMSCORE）恒放行，不看 license。
 	EnforceCapacity(ctx context.Context, deviceType string, additional int) error
 
 	// EnforceExpiry returns ErrLicenseExpired if the current license is past
@@ -272,6 +274,8 @@ func lookupCapacity(ds DevicesSupport, deviceType string) (int, bool) {
 
 // EnforceCapacity rejects (per-type gating) when:
 //   - deviceType=="" → unknown NE type (product not registered): reject;
+//   - 豁免类型（capacity_group.go neTypesExemptFromCapacity，如 IMSCORE）→ 直接
+//     放行，无 license / 未授权 / 超配额都不适用；
 //   - no license configured → fail-closed (ErrLicenseUnavailable);
 //   - license does not authorize deviceType's capacity group (absent from
 //     DevicesSupport or quota<=0) → reject (strict, issue #316);
@@ -292,6 +296,12 @@ func (e *EnforcerImpl) EnforceCapacity(ctx context.Context, deviceType string, a
 			zap.String("audit", "enforcement_capacity"),
 		)
 		return fmt.Errorf("device ne_type is empty (product not registered): %w", commonerrors.ErrLicenseCapacityExceeded)
+	}
+
+	// 容量豁免类型（见 capacity_group.go）：不校验授权/配额，无 license 也放行，
+	// 也不计入任何容量组。放在 ActiveLicense 之前，保证 fail-closed 不波及豁免类型。
+	if IsCapacityExempt(target) {
+		return nil
 	}
 
 	lic, err := e.ActiveLicense(ctx)

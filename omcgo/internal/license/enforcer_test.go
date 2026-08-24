@@ -194,6 +194,23 @@ func TestEnforcer_EnforceCapacity(t *testing.T) {
 			additional: 1,
 			wantErr:    commonerrors.ErrLicenseCapacityExceeded,
 		},
+		{
+			// 容量豁免类型：license 未授权该类型也放行（IMSCORE 不在 license 内）。
+			name:       "exempt type allowed even when not authorized by license",
+			licCurrent: systemLicense("L11", DevicesSupport{"eNB": 100}, 0),
+			usedByType: map[string]int{"ENB": 0, "IMSCORE": 500},
+			deviceType: "IMSCORE",
+			additional: 1,
+			wantErr:    nil,
+		},
+		{
+			// 容量豁免类型：完全无 license（fail-closed 场景）也放行。
+			name:       "exempt type allowed even without any license",
+			licCurrent: nil,
+			deviceType: "imscore",
+			additional: 1,
+			wantErr:    nil,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

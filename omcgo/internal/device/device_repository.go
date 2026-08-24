@@ -16,6 +16,7 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/omcgo/omcgo/internal/license"
 )
 
 // ===== 接口定义 =====
@@ -833,7 +834,13 @@ func (r *PgDeviceRepository) OfflineExcessByTypeCapacity(ctx context.Context, ty
 	UPDATE devices SET is_online = false, updated_at = now()
 	WHERE id IN (SELECT id FROM ranked WHERE rn > $2)
 	RETURNING serial_number`
+	exemptUpper := license.CapacityExemptTypes()
 	for nt, cap := range typeCapacity {
+		if license.IsCapacityExempt(nt) {
+			// 容量豁免类型（license/capacity_group.go）：不受容量控制，降容时
+			// 既不按配额踢线，也不落入下方"未配置类型"分支。
+			continue
+		}
 		configuredUpper = append(configuredUpper, strings.ToUpper(nt))
 		if cap < 0 {
 			cap = 0
@@ -853,15 +860,17 @@ func (r *PgDeviceRepository) OfflineExcessByTypeCapacity(ctx context.Context, ty
 		rows.Close()
 	}
 	// 未配置类型（有在线设备但新 license 未授权）：全部置离线。$1=text[] 已配置
-	// 容量组 key（UPPER；CASE 归一后 GSM 设备归入 ENB 组）。
+	// 容量组 key（UPPER；CASE 归一后 GSM 设备归入 ENB 组）；$2=text[] 容量豁免
+	// 类型（license.CapacityExemptTypes，如 IMSCORE）永不落入"未配置类型"分支。
 	const unconfigured = `UPDATE devices SET is_online = false, updated_at = now()
 		WHERE id IN (
 			SELECT d.id FROM devices d LEFT JOIN products p ON d.product_id = p.id
 			WHERE d.is_online = true AND d.deleted_at IS NULL
 			  AND CASE WHEN UPPER(COALESCE(p.alarm_ne_type,'')) = 'GSM' THEN 'ENB' ELSE UPPER(COALESCE(p.alarm_ne_type,'')) END <> ALL($1::text[])
+			  AND UPPER(COALESCE(p.alarm_ne_type,'')) <> ALL($2::text[])
 		)
 		RETURNING serial_number`
-	rows, err := r.pool.Query(ctx, unconfigured, configuredUpper)
+	rows, err := r.pool.Query(ctx, unconfigured, configuredUpper, exemptUpper)
 	if err != nil {
 		return offlined, fmt.Errorf("offline unconfigured types: %w", err)
 	}
