@@ -1356,7 +1356,7 @@ CREATE TABLE public.device_access_import_batches (
 	CONSTRAINT device_access_import_batches_hash_check CHECK (((content_sha256)::text ~ '^[0-9a-f]{64}$'::text)),
 	CONSTRAINT device_access_import_batches_scope_hash_check CHECK ((scope_sha256 IS NULL OR (scope_sha256)::text ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT device_access_import_batches_count_check CHECK (((total_count >= 0) AND (valid_count >= 0) AND (invalid_count >= 0) AND (changed_count >= 0) AND (valid_count <= total_count) AND (invalid_count <= total_count) AND (changed_count <= total_count))),
-    CONSTRAINT device_access_import_batches_target_check CHECK ((((import_type)::text = 'access_list'::text AND entry_type IS NOT NULL AND target_policy_version_id IS NULL AND target_rule_id IS NULL AND dimension IS NULL) OR ((import_type)::text = 'rule_dimension'::text AND entry_type IS NULL AND target_policy_version_id IS NOT NULL AND target_rule_id IS NOT NULL AND dimension IS NOT NULL)))
+    CONSTRAINT device_access_import_batches_target_check CHECK ((((import_type)::text = 'access_list'::text AND entry_type IS NOT NULL AND target_policy_version_id IS NULL AND target_rule_id IS NULL AND dimension IS NULL) OR ((import_type)::text = 'rule_dimension'::text AND entry_type IS NULL AND dimension IS NOT NULL AND ((target_policy_version_id IS NOT NULL AND target_rule_id IS NOT NULL) OR (target_policy_version_id IS NULL AND target_rule_id IS NULL)))))
 );
 
 
@@ -22522,7 +22522,9 @@ CREATE TABLE IF NOT EXISTS public.device_access_import_batches (
         (import_type = 'access_list' AND entry_type IS NOT NULL
             AND target_policy_version_id IS NULL AND target_rule_id IS NULL AND dimension IS NULL)
         OR (import_type = 'rule_dimension' AND entry_type IS NULL
-            AND target_policy_version_id IS NOT NULL AND target_rule_id IS NOT NULL AND dimension IS NOT NULL)
+            AND dimension IS NOT NULL
+            AND ((target_policy_version_id IS NOT NULL AND target_rule_id IS NOT NULL)
+                OR (target_policy_version_id IS NULL AND target_rule_id IS NULL)))
     )
 );
 
@@ -22549,6 +22551,18 @@ ALTER TABLE public.device_access_import_batches
 ALTER TABLE public.device_access_import_batches
     ADD CONSTRAINT device_access_import_batches_scope_hash_check
         CHECK (scope_sha256 IS NULL OR scope_sha256 ~ '^[0-9a-f]{64}$');
+
+ALTER TABLE public.device_access_import_batches
+    DROP CONSTRAINT IF EXISTS device_access_import_batches_target_check;
+ALTER TABLE public.device_access_import_batches
+    ADD CONSTRAINT device_access_import_batches_target_check CHECK (
+        (import_type = 'access_list' AND entry_type IS NOT NULL
+            AND target_policy_version_id IS NULL AND target_rule_id IS NULL AND dimension IS NULL)
+        OR (import_type = 'rule_dimension' AND entry_type IS NULL
+            AND dimension IS NOT NULL
+            AND ((target_policy_version_id IS NOT NULL AND target_rule_id IS NOT NULL)
+                OR (target_policy_version_id IS NULL AND target_rule_id IS NULL)))
+    );
 
 CREATE TABLE IF NOT EXISTS public.device_access_import_rows (
     id uuid DEFAULT gen_random_uuid() NOT NULL,

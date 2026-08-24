@@ -114,3 +114,61 @@ func TestFindOrCreatePolicySetCreatesTrimmedFamilyName(t *testing.T) {
 	require.Equal(t, "CMCC 接入策略", gotName)
 	require.Len(t, tx.execSQL, 1)
 }
+
+func TestPgPolicyStoreDeleteDraftDetachesImportAuditInTransaction(t *testing.T) {
+	versionID := uuid.New()
+	tx := &repositoryTestTx{}
+	store := NewPgPolicyStore(&repositoryTestDB{tx: tx})
+
+	err := store.DeleteDraft(context.Background(), versionID.String())
+
+	require.NoError(t, err)
+	require.True(t, tx.committed)
+	require.Len(t, tx.execSQL, 2)
+	require.Contains(t, tx.execSQL[0], "UPDATE device_access_import_batches")
+	require.Contains(t, tx.execSQL[0], "detached_target_policy_version_id")
+	require.Contains(t, tx.execSQL[0], "detached_target_rule_id")
+	require.Contains(t, tx.execSQL[0], "detached_target_at")
+	require.NotContains(t, tx.execSQL[0], versionID.String())
+	require.Contains(t, tx.execArgs[0], versionID.String())
+	require.Contains(t, tx.execSQL[1], "DELETE FROM device_access_policy_versions")
+	require.Contains(t, tx.execSQL[1], "status = $2")
+	require.NotContains(t, tx.execSQL[1], versionID.String())
+	require.Equal(t, []any{versionID.String(), PolicyVersionDraft}, tx.execArgs[1])
+}
+
+func TestPgPolicyStoreDeleteDraftRollsBackWhenAuditDetachFails(t *testing.T) {
+	tx := &repositoryTestTx{failAt: 1}
+	store := NewPgPolicyStore(&repositoryTestDB{tx: tx})
+
+	err := store.DeleteDraft(context.Background(), uuid.NewString())
+
+	require.ErrorContains(t, err, "detach policy draft import audit")
+	require.False(t, tx.committed)
+	require.True(t, tx.rolledBack)
+	require.Len(t, tx.execSQL, 1)
+}
+
+func TestPgPolicyStoreDeleteDraftRollsBackWhenVersionDeleteFails(t *testing.T) {
+	tx := &repositoryTestTx{failAt: 2}
+	store := NewPgPolicyStore(&repositoryTestDB{tx: tx})
+
+	err := store.DeleteDraft(context.Background(), uuid.NewString())
+
+	require.ErrorContains(t, err, "delete policy draft row")
+	require.False(t, tx.committed)
+	require.True(t, tx.rolledBack)
+	require.Len(t, tx.execSQL, 2)
+}
+
+func TestPgPolicyStoreDeleteDraftRollsBackAuditDetachForImmutableVersion(t *testing.T) {
+	tx := &repositoryTestTx{zeroRowsAt: 2}
+	store := NewPgPolicyStore(&repositoryTestDB{tx: tx})
+
+	err := store.DeleteDraft(context.Background(), uuid.NewString())
+
+	require.ErrorIs(t, err, ErrPolicyVersionImmutable)
+	require.False(t, tx.committed)
+	require.True(t, tx.rolledBack)
+	require.Len(t, tx.execSQL, 2)
+}
