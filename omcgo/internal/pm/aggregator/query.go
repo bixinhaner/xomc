@@ -1082,16 +1082,25 @@ func buildRawDevicePivotSkeletonRowsForKeysSQL(q QueryRequest) (string, []any, e
 	}
 	args = append(args, requestedMetricsArgs...)
 
-	valueJoin := `pm_metric_values v ON v."time"=a."time" AND v.anchor_id=a.anchor_id AND v.metric_id=d.metric_id`
+	valueJoin := `LATERAL (
+  SELECT v.metric_id, v.metric_value
+  FROM pm_metric_values v
+  WHERE v."time"=a."time"
+    AND v.anchor_id=a.anchor_id`
 	valueJoinArgs := make([]any, 0, 2)
 	if !q.StartTime.IsZero() {
-		valueJoin += ` AND v."time" >= ?`
+		valueJoin += `
+    AND v."time" >= ?`
 		valueJoinArgs = append(valueJoinArgs, q.StartTime)
 	}
 	if !q.EndTime.IsZero() {
-		valueJoin += ` AND v."time" < ?`
+		valueJoin += `
+    AND v."time" < ?`
 		valueJoinArgs = append(valueJoinArgs, q.EndTime)
 	}
+	valueJoin += `
+  ORDER BY v."time", v.anchor_id, v.metric_id
+) v ON v.metric_id=d.metric_id`
 	args = append(args, valueJoinArgs...)
 
 	sqlStr := fmt.Sprintf(`
