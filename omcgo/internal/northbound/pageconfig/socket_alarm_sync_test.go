@@ -117,6 +117,56 @@ func TestSocketAlarmPayloadMatchesNorthboundFields(t *testing.T) {
 	require.Equal(t, "ENB", cuccFields["rNeType"])
 }
 
+func TestSocketAlarmPayloadMapsLegacySeverityCodes(t *testing.T) {
+	cases := []struct {
+		name     string
+		severity model.AlarmSeverity
+		want     string
+	}{
+		{name: "critical", severity: 31001, want: "critical"},
+		{name: "major", severity: 31002, want: "major"},
+		{name: "minor", severity: 31003, want: "minor"},
+		{name: "warning", severity: 31004, want: "warning"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			alarm := model.Alarm{
+				ID:              uuid.New(),
+				DeviceSN:        "ENB_SN001",
+				Severity:        tc.severity,
+				AlarmType:       "communication",
+				AlarmIdentifier: "11184",
+				Description:     "小区不可用告警",
+				Status:          model.AlarmActive,
+				RaisedAt:        time.Date(2026, 8, 21, 17, 35, 40, 0, time.Local),
+			}
+
+			ctcc := socketAlarmCTCCPayload(alarm, event.SubjectAlarmRaised)
+			require.Equal(t, tc.want, ctcc["origSeverity"])
+		})
+	}
+}
+
+func TestSocketAlarmPayloadTreatsClearedAtAsClearedStatus(t *testing.T) {
+	raisedAt := time.Date(2026, 8, 21, 17, 35, 40, 0, time.Local)
+	clearedAt := raisedAt.Add(5 * time.Minute)
+	alarm := model.Alarm{
+		ID:              uuid.New(),
+		DeviceSN:        "ENB_SN007",
+		Severity:        model.AlarmMajor,
+		AlarmType:       "communication",
+		AlarmIdentifier: "7",
+		Description:     "eNB网络断开",
+		Status:          model.AlarmActive,
+		RaisedAt:        raisedAt,
+		ClearedAt:       &clearedAt,
+	}
+
+	ctcc := socketAlarmCTCCPayload(alarm, event.SubjectAlarmRaised)
+	require.Equal(t, "0", ctcc["alarmStatus"])
+	require.Equal(t, "2026-08-21 17:40:40", ctcc["eventTime"])
+}
+
 func TestSocketCTCCSyncFrameUsesSyncMessageType(t *testing.T) {
 	alarm := model.Alarm{
 		ID:              uuid.New(),
