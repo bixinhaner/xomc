@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Badge, Button, Card, Dropdown, Space, Tag, App } from 'antd';
 import {
   CheckOutlined,
@@ -16,14 +16,14 @@ import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { alarmService } from '@core/mock/services/alarmService';
 import { deviceService } from '@core/mock/services/deviceService';
-import { useCurrentAlarms, useAcknowledgeAlarms, useClearAlarms, useAlarmCount, useMarkAlarmRead, useUnacknowledgeAlarms } from '@core/hooks/api/useAlarms';
+import { useCurrentAlarms, useAcknowledgeAlarms, useAlarmById, useClearAlarms, useAlarmCount, useMarkAlarmRead, useUnacknowledgeAlarms } from '@core/hooks/api/useAlarms';
 import { alarmApi } from '@core/services/api/alarmApi';
 import { deviceApi } from '@core/services/api/deviceApi';
 import { createApiSwitch } from '@core/services/apiSwitch';
 import { useT } from '@/hooks/useT';
 import type { Alarm, DealState, EventType } from '@core/types/alarm';
 import type { AlarmFilter } from '@core/types/alarm';
-import { parseDrillDownParams } from '../drillDown';
+import { parseAlarmId, parseDrillDownParams, withoutAlarmId } from '../drillDown';
 import { useSearchParams } from 'react-router-dom';
 import AlarmDetail from '../AlarmDetail';
 import ExportModal from './ExportModal';
@@ -88,15 +88,43 @@ function triggerCsvDownload(content: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+interface AlarmListState {
+  currentPage: number;
+  filterParams: AlarmFilter;
+}
+
+type AlarmListAction =
+  | { type: 'applyDrillDown'; filter: AlarmFilter }
+  | { type: 'search'; filter: AlarmFilter }
+  | { type: 'reset' }
+  | { type: 'page'; page: number };
+
+function alarmListReducer(state: AlarmListState, action: AlarmListAction): AlarmListState {
+  switch (action.type) {
+    case 'applyDrillDown':
+    case 'search':
+      return { ...state, currentPage: 1, filterParams: action.filter };
+    case 'reset':
+      return { ...state, currentPage: 1, filterParams: {} };
+    case 'page':
+      return { ...state, currentPage: action.page };
+    default:
+      return state;
+  }
+}
+
 export default function CurrentAlarms() {
   const t = useT();
   const { modal, message } = App.useApp();
-  const [searchParams] = useSearchParams();
-  const searchKey = searchParams.toString();
-  const drillDown = useMemo(() => parseDrillDownParams(searchParams), [searchKey, searchParams]);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const drillDown = useMemo(() => parseDrillDownParams(searchParams), [searchParams]);
+  const deepLinkAlarmId = useMemo(() => parseAlarmId(searchParams), [searchParams]);
+  const deepLinkNoticeRef = useRef('');
   const [pageSize, setPageSize] = useState(20);
-  const [filterParams, setFilterParams] = useState<AlarmFilter>(() => drillDown.filter);
+  const [{ currentPage, filterParams }, dispatchList] = useReducer(alarmListReducer, drillDown.filter, (filter) => ({
+    currentPage: 1,
+    filterParams: filter,
+  }));
   // 有钻取参数时把表单初始值传给 FilterBar（无则传 undefined，保留 sessionStorage 恢复行为）
   const drillDownInitialValues = useMemo(
     () => (Object.keys(drillDown.formValues).length > 0 ? drillDown.formValues : undefined),
@@ -105,6 +133,9 @@ export default function CurrentAlarms() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [detailAlarm, setDetailAlarm] = useState<Alarm | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const deepLinkAlarm = useAlarmById(deepLinkAlarmId ?? '');
+  const activeDetailAlarm = deepLinkAlarm.data ?? detailAlarm;
+  const activeDetailOpen = detailOpen || Boolean(deepLinkAlarm.data);
 
   // 确认告警弹窗状态
   const [ackModalOpen, setAckModalOpen] = useState(false);
@@ -121,9 +152,26 @@ export default function CurrentAlarms() {
   const [refreshInterval, setRefreshInterval] = useState(30);
 
   useEffect(() => {
-    setFilterParams(drillDown.filter);
-    setCurrentPage(1);
+    dispatchList({ type: 'applyDrillDown', filter: drillDown.filter });
   }, [drillDown]);
+
+  useEffect(() => {
+    if (!deepLinkAlarmId) {
+      deepLinkNoticeRef.current = '';
+      return;
+    }
+    if (deepLinkAlarm.data) return;
+    const noticeKey = `${deepLinkAlarmId}:${deepLinkAlarm.isError ? 'error' : 'missing'}`;
+    if (deepLinkNoticeRef.current === noticeKey) return;
+    if (deepLinkAlarm.isError) {
+      deepLinkNoticeRef.current = noticeKey;
+      const status = (deepLinkAlarm.error as { response?: { status?: number } })?.response?.status;
+      void message.error(t(status === 403 ? 'common.noPermission' : 'alarm.detailLoadFailed'));
+    } else if (deepLinkAlarm.isFetched) {
+      deepLinkNoticeRef.current = noticeKey;
+      void message.warning(t('alarm.noLongerAvailable'));
+    }
+  }, [deepLinkAlarm.data, deepLinkAlarm.error, deepLinkAlarm.isError, deepLinkAlarm.isFetched, deepLinkAlarmId, message, t]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -269,7 +317,7 @@ export default function CurrentAlarms() {
   }), [alarmCount, total]);
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
-    setFilterParams({
+    dispatchList({ type: 'search', filter: {
       deviceSn: values.deviceSn as string,
       severity: values.severity as AlarmFilter['severity'],
       alarmIdentifier: values.alarmIdentifier as string,
@@ -279,13 +327,11 @@ export default function CurrentAlarms() {
       dealState: values.dealState as AlarmFilter['dealState'],
       isUnknown: values.isUnknown as AlarmFilter['isUnknown'],
       timeRange: values.timeRange as [string, string] | undefined,
-    });
-    setCurrentPage(1);
+    } });
   }, []);
 
   const handleReset = useCallback(() => {
-    setFilterParams({});
-    setCurrentPage(1);
+    dispatchList({ type: 'reset' });
   }, []);
 
   const handleAcknowledge = useCallback(
@@ -494,7 +540,10 @@ export default function CurrentAlarms() {
   const handleCloseDetail = useCallback(() => {
     setDetailOpen(false);
     setDetailAlarm(null);
-  }, []);
+    if (deepLinkAlarmId) {
+      setSearchParams(withoutAlarmId(searchParams), { replace: true });
+    }
+  }, [deepLinkAlarmId, searchParams, setSearchParams]);
 
   const alarmRowStyle = useCallback(
      
@@ -775,7 +824,7 @@ export default function CurrentAlarms() {
           pageSize={pageSize}
           currentPage={currentPage}
           onPageChange={(page, size) => {
-            setCurrentPage(page);
+            dispatchList({ type: 'page', page });
             setPageSize(size);
           }}
           batchActions={batchActions}
@@ -791,8 +840,8 @@ export default function CurrentAlarms() {
       </Card>
 
       <AlarmDetail
-        alarm={detailAlarm}
-        open={detailOpen}
+        alarm={activeDetailAlarm}
+        open={activeDetailOpen}
         onClose={handleCloseDetail}
       />
 

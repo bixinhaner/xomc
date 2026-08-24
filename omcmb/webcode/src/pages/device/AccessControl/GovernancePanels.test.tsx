@@ -194,7 +194,16 @@ describe('CandidatePanel', () => {
     vi.mocked(useReviewAccessCandidate).mockReturnValue({ isPending: false, mutateAsync } as never);
 
     const user = userEvent.setup();
-    render(<App><CandidatePanel operatorCode="cmcc" t={t} allowed businessEnabled initialSerialNumber="UNKNOWN-SN" /></App>);
+    render(<App><CandidatePanel
+      operatorCode="cmcc"
+      t={t}
+      allowed
+      businessEnabled
+      initialSerialNumber="UNKNOWN-SN"
+      reviewStatus="pending"
+      onReviewStatusChange={vi.fn()}
+      onCandidateHandled={vi.fn()}
+    /></App>);
 
     expect(vi.mocked(useAccessCandidates).mock.calls.at(-1)?.[0].serialNumber).toBe('UNKNOWN-SN');
     await user.click(screen.getByRole('button', { name: /deviceAccess.review.allow/ }));
@@ -205,5 +214,60 @@ describe('CandidatePanel', () => {
     await user.click(within(dialog).getByRole('button', { name: 'common.confirm' }));
 
     expect(mutateAsync).toHaveBeenCalledWith({ operatorCode: 'cmcc', candidateId: 'candidate-1', outcome: 'allow', reason: 'identity confirmed' });
+  });
+
+  it('queries the exact candidate, highlights it, and clears the target after review', async () => {
+    const candidateId = '892d12c0-ec1a-4fd1-8070-902d3aaf84e9';
+    const reviewCandidate = vi.fn().mockResolvedValue(undefined);
+    const onCandidateHandled = vi.fn();
+    vi.mocked(useAccessCandidates).mockReturnValue({
+      data: {
+        items: [{
+          id: candidateId,
+          carrier: 'cucc',
+          serial_number: 'SN-CANDIDATE',
+          oui: '001122',
+          first_seen_at: '2026-08-24T00:00:00Z',
+          last_seen_at: '2026-08-24T01:00:00Z',
+          inform_count: 2,
+          review_status: 'pending',
+          expires_at: '2026-08-25T00:00:00Z',
+        }],
+        total: 1,
+        page: 1,
+        pageSize: 20,
+      },
+      error: null,
+      isLoading: false,
+      refetch: vi.fn(),
+    } as never);
+    vi.mocked(useReviewAccessCandidate).mockReturnValue({ isPending: false, mutateAsync: reviewCandidate } as never);
+
+    const user = userEvent.setup();
+    const { container } = render(<App><CandidatePanel
+      operatorCode="cucc"
+      t={t}
+      allowed
+      businessEnabled
+      candidateId={candidateId}
+      reviewStatus="pending"
+      onReviewStatusChange={vi.fn()}
+      onCandidateHandled={onCandidateHandled}
+    /></App>);
+
+    expect(useAccessCandidates).toHaveBeenCalledWith(expect.objectContaining({
+      operatorCode: 'cucc', page: 1, pageSize: 20, reviewStatus: 'pending', candidateId,
+    }));
+    expect(container.querySelector('tr[class*="deepLinkedRow"]')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'deviceAccess.review.allow' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByPlaceholderText('deviceAccess.reviewReasonPlaceholder'), 'verified ownership');
+    await user.click(within(dialog).getByRole('button', { name: 'common.confirm' }));
+
+    await waitFor(() => expect(reviewCandidate).toHaveBeenCalledWith({
+      operatorCode: 'cucc', candidateId, outcome: 'allow', reason: 'verified ownership',
+    }));
+    expect(onCandidateHandled).toHaveBeenCalledTimes(1);
   });
 });

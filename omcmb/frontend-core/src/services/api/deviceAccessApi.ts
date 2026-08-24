@@ -739,10 +739,10 @@ export const deviceAccessApi = {
     const { data } = await http.post<AccessListImportBatch>(`/device-access/imports/${encodeURIComponent(input.batchId)}/rollback`, undefined, { headers: headers(input.operatorCode) });
     return data;
   },
-  async listCandidates(params: ListParams & { reviewStatus?: string }): Promise<PageResponse<CandidateItem>> {
-    const { operatorCode, reviewStatus, ...query } = params;
+  async listCandidates(params: ListParams & { reviewStatus?: string; candidateId?: string }): Promise<PageResponse<CandidateItem>> {
+    const { operatorCode, reviewStatus, candidateId, ...query } = params;
     const { data } = await http.get<{ items: CandidateItem[]; total: number; page: number; page_size: number }>(
-      '/device-access/candidates', { params: { ...listQuery(query), review_status: reviewStatus }, headers: headers(operatorCode) },
+      '/device-access/candidates', { params: { ...listQuery(query), review_status: reviewStatus, candidate_id: candidateId }, headers: headers(operatorCode) },
     );
     return page(data);
   },

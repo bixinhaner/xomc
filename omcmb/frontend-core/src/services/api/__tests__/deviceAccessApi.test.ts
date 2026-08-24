@@ -21,6 +21,26 @@ beforeEach(() => {
 });
 
 describe('deviceAccessApi', () => {
+  it('passes an exact candidate id without moving operator scope into query data', async () => {
+    getMock.mockResolvedValue({ data: { items: [], total: 0, page: 1, page_size: 20 } });
+
+    await deviceAccessApi.listCandidates({
+      operatorCode: 'cucc', page: 1, pageSize: 20, reviewStatus: 'pending',
+      candidateId: '892d12c0-ec1a-4fd1-8070-902d3aaf84e9',
+    });
+
+    expect(getMock).toHaveBeenCalledWith('/device-access/candidates', {
+      params: {
+        page: 1,
+        page_size: 20,
+        serial_number: undefined,
+        review_status: 'pending',
+        candidate_id: '892d12c0-ec1a-4fd1-8070-902d3aaf84e9',
+      },
+      headers: { 'X-Operator-Code': 'cucc' },
+    });
+  });
+
   it('updates the operator-scoped business switch without accepting carrier in the body', async () => {
     putMock.mockResolvedValue({ data: { carrier: 'cmcc', enabled: true } });
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import dayjs from 'dayjs';
-import { buildDrillDownSearch, parseDrillDownParams } from './drillDown';
+import { buildDrillDownSearch, parseAlarmId, parseDrillDownParams, withoutAlarmId } from './drillDown';
 
 describe('buildDrillDownSearch (#236 统计页钻取建链)', () => {
   const now = dayjs('2026-06-12T10:30:00.000Z');
@@ -95,5 +95,20 @@ describe('build → parse round-trip', () => {
       now.subtract(29, 'day').startOf('day').toISOString(),
       now.toISOString(),
     ]);
+  });
+});
+
+describe('alarm detail deep links', () => {
+  it('accepts a UUID alarmId and rejects malformed values', () => {
+    expect(parseAlarmId(new URLSearchParams('alarmId=892d12c0-ec1a-4fd1-8070-902d3aaf84e9'))).toBe(
+      '892d12c0-ec1a-4fd1-8070-902d3aaf84e9',
+    );
+    expect(parseAlarmId(new URLSearchParams('alarmId=not-a-uuid'))).toBeUndefined();
+  });
+
+  it('removes alarmId while preserving drill-down filters', () => {
+    expect(withoutAlarmId(new URLSearchParams(
+      'alarmId=892d12c0-ec1a-4fd1-8070-902d3aaf84e9&severity=critical&from=dashboard',
+    )).toString()).toBe('severity=critical&from=dashboard');
   });
 });

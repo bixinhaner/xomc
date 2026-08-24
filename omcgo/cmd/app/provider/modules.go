@@ -19,6 +19,8 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/attention"
+	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/buildinfo"
 	"github.com/omcgo/omcgo/internal/bundle"
@@ -1567,6 +1569,19 @@ func initDashboardModule(c *Container) error {
 
 	c.miscDeps.dashboardHandler = dashboardHandler
 
+	// Issue #291：关注事项独立于重型 Dashboard Summary，按用户权限聚合原业务状态。
+	// 首页只做只读汇总和原模块跳转，不复制业务状态或 mutation 服务。
+	candidateReader := deviceaccess.NewPgManagementStore(c.PgPool, nil)
+	abnormalitySources := []attention.RankedSource{
+		attention.NewAlarmAbnormalitySource(c.AlarmPgStore, model.AlarmCritical),
+		attention.NewAlarmAbnormalitySource(c.AlarmPgStore, model.AlarmMajor),
+	}
+	todoSources := []attention.RankedSource{
+		attention.NewCandidateSource(candidateReader),
+	}
+	attentionService := attention.NewService(abnormalitySources, todoSources, c.RoleRepo, logger)
+	c.miscDeps.attentionHandler = attention.NewHandler(attentionService, authz.NewResolver(c.PermService))
+
 	logger.Info("dashboard module initialized")
 	return nil
 }
@@ -2922,8 +2937,9 @@ type miscDeps struct {
 	licenseParamHandler *device.LicenseParamHandler
 
 	// Ops
-	opsHandler    *ops.Handler
-	opsExtHandler *ops.ExtHandler
+	opsHandler       *ops.Handler
+	opsExtHandler    *ops.ExtHandler
+	attentionHandler *attention.Handler
 
 	// Report
 	reportHandler *report.Handler

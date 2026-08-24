@@ -220,7 +220,7 @@ export function useUpsertAccessEntry() {
   return useMutation({ mutationFn: deviceAccessApi.upsertEntry, onSuccess: () => invalidateDeviceAccessQueries(qc) });
 }
 
-export function useAccessCandidates(params: { operatorCode: string; page: number; pageSize: number; serialNumber?: string; reviewStatus?: string }) {
+export function useAccessCandidates(params: { operatorCode: string; page: number; pageSize: number; serialNumber?: string; reviewStatus?: string; candidateId?: string }) {
   return useQuery({ queryKey: [...rootKey, 'candidates', params], queryFn: () => deviceAccessApi.listCandidates(params), enabled: Boolean(params.operatorCode) });
 }
 

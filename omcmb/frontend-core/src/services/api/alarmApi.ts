@@ -525,8 +525,10 @@ export const alarmApi = {
     try {
       const { data } = await http.get<BackendAlarm>(`/alarms/${id}`);
       return mapBackendAlarm(data);
-    } catch {
-      return null;
+    } catch (error: unknown) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      if (status === 404) return null;
+      throw error;
     }
   },
 

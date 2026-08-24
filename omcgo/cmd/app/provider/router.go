@@ -654,6 +654,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- Dashboard routes → resource "devices" -----
 	md.dashboardHandler.SetPermissionService(c.PermService)
 	md.dashboardHandler.RegisterRoutes(featGroup("devices", "Dashboard"))
+	if md.attentionHandler != nil {
+		md.attentionHandler.RegisterRoutes(featGroup("devices", "Dashboard"))
+	}
 
 	// ----- Syslog routes → resource "devices" -----
 	md.syslogHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))

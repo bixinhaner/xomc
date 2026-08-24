@@ -129,6 +129,8 @@ function generateAlarm(isActive: boolean, index: number, unread: '0' | '1' = '0'
 export const mockActiveAlarms: Alarm[] = Array.from({ length: 150 }, (_, i) =>
   generateAlarm(true, i, i < 20 ? '1' : '0')
 );
+// 与真实后端 UUID 主键保持一致，供 Dashboard 注意事项精准深链回归使用。
+mockActiveAlarms[0].id = '892d12c0-ec1a-4fd1-8070-902d3aaf84e9';
 export const mockHistoricalAlarms: Alarm[] = Array.from({ length: 500 }, (_, i) =>
   generateAlarm(false, i + 150, '0')
 );

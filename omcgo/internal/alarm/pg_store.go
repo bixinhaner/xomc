@@ -194,7 +194,7 @@ func (s *PgAlarmStore) ListActive(ctx context.Context, filter AlarmFilter) (*mod
 		return nil, fmt.Errorf("count alarms_active: %w", err)
 	}
 
-	qb = qb.OrderBy("raised_at DESC").Limit(uint64(filter.Limit())).Offset(uint64(filter.Offset()))
+	qb = qb.OrderBy("raised_at DESC", "alarms_active.id ASC").Limit(uint64(filter.Limit())).Offset(uint64(filter.Offset()))
 	sql, args, _ := qb.ToSql()
 	rows, err := s.pool.Query(ctx, sql, args...)
 	if err != nil {

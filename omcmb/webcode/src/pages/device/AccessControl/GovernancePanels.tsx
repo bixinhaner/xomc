@@ -32,6 +32,12 @@ interface Props { operatorCode: string; t: (key: string) => string }
 interface PermissionProps extends Props { allowed: boolean }
 interface PolicyPermissionProps extends PermissionProps { onDrilldownRule?: (policyVersionId: string, matchedRuleId: string) => void }
 interface RuntimePermissionProps extends PermissionProps { businessEnabled: boolean; initialSerialNumber?: string }
+interface CandidatePanelProps extends RuntimePermissionProps {
+  candidateId?: string;
+  reviewStatus: string;
+  onReviewStatusChange: (status: string) => void;
+  onCandidateHandled: () => void;
+}
 
 export function PolicyPanel({ operatorCode, t, allowed, onDrilldownRule }: PolicyPermissionProps) {
   const { message, modal } = App.useApp();
@@ -504,21 +510,30 @@ function downloadBlob(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-export function CandidatePanel({ operatorCode, t, allowed, businessEnabled, initialSerialNumber }: RuntimePermissionProps) {
+export function CandidatePanel({
+  operatorCode,
+  t,
+  allowed,
+  businessEnabled,
+  initialSerialNumber,
+  candidateId,
+  reviewStatus,
+  onReviewStatusChange,
+  onCandidateHandled,
+}: CandidatePanelProps) {
   const { message } = App.useApp();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [status, setStatus] = useState('pending');
   const [serialInput, setSerialInput] = useState(initialSerialNumber ?? '');
   const [serialNumber, setSerialNumber] = useState<string | undefined>(initialSerialNumber);
   const [selectedCandidate, setSelectedCandidate] = useState<CandidateItem>();
   const [review, setReview] = useState<{ candidate: CandidateItem; outcome: 'allow' | 'deny' }>();
   const [reason, setReason] = useState('');
-  const query = useAccessCandidates({ operatorCode, page, pageSize, serialNumber, reviewStatus: status || undefined });
+  const query = useAccessCandidates({ operatorCode, page, pageSize, serialNumber, reviewStatus: reviewStatus || undefined, candidateId });
   const mutation = useReviewAccessCandidate();
   const submit = async () => {
     if (!review || !reason.trim()) return;
-    try { await mutation.mutateAsync({ operatorCode, candidateId: review.candidate.id, outcome: review.outcome, reason: reason.trim() }); void message.success(t(businessEnabled ? 'deviceAccess.reviewSaved' : 'deviceAccess.reviewSavedWhileDisabled')); setReview(undefined); setReason(''); }
+    try { await mutation.mutateAsync({ operatorCode, candidateId: review.candidate.id, outcome: review.outcome, reason: reason.trim() }); void message.success(t(businessEnabled ? 'deviceAccess.reviewSaved' : 'deviceAccess.reviewSavedWhileDisabled')); setReview(undefined); setReason(''); onCandidateHandled(); }
     catch (error) { void message.error(error instanceof Error ? error.message : t('common.operationFailed')); }
   };
   const columns: ColumnsType<CandidateItem> = [
@@ -552,12 +567,13 @@ export function CandidatePanel({ operatorCode, t, allowed, businessEnabled, init
   return <>
     <Space wrap className={styles.filterBar}>
       <Input allowClear value={serialInput} onChange={(event) => setSerialInput(event.target.value)} onPressEnter={() => { setSerialNumber(serialInput.trim() || undefined); setPage(1); }} placeholder={t('deviceAccess.serialNumber')} style={{ width: 240 }} />
-      <Select value={status} onChange={(v) => { setStatus(v); setPage(1); }} style={{ width: 180 }} options={['pending', 'approved', 'rejected', 'expired'].map((v) => ({ value: v, label: t(`deviceAccess.reviewStatus.${v}`) }))} />
+      <Select value={reviewStatus} onChange={(v) => { onReviewStatusChange(v); setPage(1); }} style={{ width: 180 }} options={['pending', 'approved', 'rejected', 'expired'].map((v) => ({ value: v, label: t(`deviceAccess.reviewStatus.${v}`) }))} />
       <Button type="primary" icon={<SearchOutlined />} onClick={() => { setSerialNumber(serialInput.trim() || undefined); setPage(1); }}>{t('common.search')}</Button>
       <Button icon={<ReloadOutlined />} onClick={() => void query.refetch()}>{t('common.refresh')}</Button>
     </Space>
+    {candidateId && !query.isLoading && !query.error && (query.data?.items.length ?? 0) === 0 && <Alert showIcon type="warning" title={t('deviceAccess.candidateUnavailable')} style={{ marginBottom: 12 }} />}
     <QueryError error={query.error} t={t} />
-    <Table className={styles.dataTable} rowKey="id" columns={columns} dataSource={query.data?.items ?? []} loading={query.isLoading} scroll={{ x: 1100 }} pagination={{ current: page, pageSize, total: query.data?.total ?? 0, showSizeChanger: true, onChange: (p, size) => { setPage(p); setPageSize(size); } }} />
+    <Table className={styles.dataTable} rowKey="id" rowClassName={(row) => row.id === candidateId ? styles.deepLinkedRow : ''} columns={columns} dataSource={query.data?.items ?? []} loading={query.isLoading} scroll={{ x: 1100 }} pagination={{ current: page, pageSize, total: query.data?.total ?? 0, showSizeChanger: true, onChange: (p, size) => { setPage(p); setPageSize(size); } }} />
     <Modal open={Boolean(selectedCandidate)} width={760} title={t('deviceAccess.candidateDetail')} footer={null} onCancel={() => setSelectedCandidate(undefined)}>
       <Descriptions bordered size="small" column={2} items={candidateDescriptionItems(selectedCandidate)} />
     </Modal>

@@ -48,6 +48,7 @@ import {
   useDeviceStatusByType,
 } from '@core/hooks/api/useDashboard';
 import { DashboardKPIModules } from './DashboardKPIModules';
+import AttentionBar from './components/AttentionBar';
 import type { TechnologyType } from './kpi-config';
 import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
 import { useAppStore } from '@core/store/appStore';
@@ -501,6 +502,12 @@ export default function DashboardPage() {
           />
         </Col>
         )}
+      </Row>
+
+      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="1">
+        <Col span={24}>
+          <AttentionBar />
+        </Col>
       </Row>
 
       {/* 制式切换栏 */}
