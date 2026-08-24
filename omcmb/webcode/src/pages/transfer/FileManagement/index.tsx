@@ -8,9 +8,10 @@ import FirmwareUpload from '@/pages/software/FirmwareUpload';
 import MRFilesPage from '@/pages/mr/Files';
 import PMFilesPage from '@/pages/pm/Files';
 import KpiExportLibrary from '@/pages/transfer/KpiExport/KpiExportLibrary';
+import ImsParamLibrary from '@/pages/transfer/ImsParamLibrary';
 import { useT } from '@/hooks/useT';
 
-const VALID_TABS = new Set(['version', 'config', 'license', 'mr', 'pm', 'kpiExport']);
+const VALID_TABS = new Set(['version', 'config', 'license', 'imsParam', 'mr', 'pm', 'kpiExport']);
 
 const PANE_STYLE: React.CSSProperties = { paddingTop: 8 };
 
@@ -88,6 +89,11 @@ export default function FileManagementPage() {
             key: 'license',
             label: t('ufte.fileManagement.tab.license'),
             children: <div style={PANE_STYLE}><DeviceLicenseLibrary /></div>,
+          },
+          {
+            key: 'imsParam',
+            label: t('ufte.fileManagement.tab.imsParam'),
+            children: <div style={PANE_STYLE}><ImsParamLibrary /></div>,
           },
           {
             key: 'mr',

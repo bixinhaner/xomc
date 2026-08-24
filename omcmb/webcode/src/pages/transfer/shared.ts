@@ -54,6 +54,7 @@ const BUILTIN_TYPE_CODES = new Set([
   'CONFIG_BACKUP', 'CONFIG_BACKUP_NV', 'CONFIG_BACKUP_XML',
   'CONFIG_RESTORE',
   'LICENSE_UPGRADE',
+  'IMS_FILE_COLLECT', 'IMS_FILE_DISTRIBUTE', // 核心网文件采集/下发（docs/design/imscore-file-transfer.md）
 ]);
 
 const BUILTIN_CATEGORY_CODES = new Set([
@@ -63,6 +64,7 @@ const BUILTIN_CATEGORY_CODES = new Set([
   'device_upgrade', // qa-614 c6 #368 / UPS：4G/5G/2G/UPS 合并的虚拟『设备升级』分类
   'version_rollback',
   'station_log', 'config_backup', 'config_restore', 'license_upgrade',
+  'ims_core', // 核心网（IMS Core）文件传输
   // F05：MR 测量虚拟分类（不走 UFTE 模板，作为入口聚合按钮跳到 /mr/tasks）
   'mr_measurement',
   // KPI-EXPORT：KPI 导出虚拟分类（不走 UFTE 模板，内联渲染 KpiExportTasksPanel）
@@ -131,6 +133,7 @@ export const DEFAULT_CATEGORY_ORDER = [
   'station_log',
   'config_backup',
   'config_restore',
+  'ims_core', // 核心网（与配置文件等并行的新 tab）
   'mr_measurement', // F05 末位
 ];
 
@@ -176,6 +179,8 @@ export const TASK_NAME_PREFIX_BY_TYPE_I18N: Record<string, { zh: string; en: str
   RUNTIME_LOG_COLLECT: { zh: '运行日志',       en: 'RuntimeLog' },
   FAULT_LOG_COLLECT:   { zh: '故障日志',       en: 'FaultLog' },
   LICENSE_UPGRADE:     { zh: '设备License升级', en: 'LicenseUpgrade' },
+  IMS_FILE_COLLECT:    { zh: '核心网文件采集', en: 'ImsFileCollect' },
+  IMS_FILE_DISTRIBUTE: { zh: '核心网文件下发', en: 'ImsFileDistribute' },
 };
 
 /**

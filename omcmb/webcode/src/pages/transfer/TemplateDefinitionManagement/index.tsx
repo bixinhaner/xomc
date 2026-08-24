@@ -264,8 +264,10 @@ export default function TemplateDefinitionManagement() {
       // 透传 editingType 原值保留（作为 product_scope 为空时的后端回退口径）。
       platformScope: editingType?.platformScope ?? [],
       products: productsToSave,
-      fileType: values.fileType,
-      fileTypeLabel: values.fileType,
+      // ims_core：fileType 是任务反查键（表单里只读展示 fileTypeLabel），提交保留
+      // 原键与原 label，不允许经编辑漂移；其它分类维持"用户输入即 key=label"。
+      fileType: editingType?.category === 'ims_core' && editingType ? editingType.fileType : values.fileType,
+      fileTypeLabel: editingType?.category === 'ims_core' && editingType ? editingType.fileTypeLabel : values.fileType,
       fileTypeEditable: values.fileTypeEditable,
       firmwareFileType: values.firmwareFileType,
       urlTemplate: editingType?.urlTemplate,
@@ -433,7 +435,12 @@ export default function TemplateDefinitionManagement() {
               <Descriptions.Item label={t('ufte.template.businessView')}>{getDisplayCategoryLabel(detailType)}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.typeCode')}>{detailType.typeCode}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.rpcType')}>{detailType.rpcType}</Descriptions.Item>
-              <Descriptions.Item label={t('ufte.template.fileType')}>{detailType.fileType}</Descriptions.Item>
+              {/* ims_core 分类：catalog fileType 是任务反查键（如 IMS_PARAM_DISTRIBUTE），
+                  与报文实际字面值（fileTypeLabel，如 ImsCore Parameters File）不同——
+                  页面展示报文值，避免误导。其它分类两者一致。 */}
+              <Descriptions.Item label={t('ufte.template.fileType')}>
+                {detailType.category === 'ims_core' ? detailType.fileTypeLabel : detailType.fileType}
+              </Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.softLib')}>{getSoftwareLibraryFileTypeLabel(detailType.firmwareFileType, t)}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.permCode')}>{detailType.permissionCode}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.template.fileTypeEditable')}>
@@ -546,9 +553,21 @@ export default function TemplateDefinitionManagement() {
               placeholder={t('ufte.template.products.placeholder')}
             />
           </Form.Item>
-          <Form.Item label={t('ufte.template.fileType')} name="fileType" rules={[{ required: true, message: t('ufte.template.fileType.required') }]}>
+          {editingType?.category === 'ims_core' ? (
+            // ims_core：catalog fileType 是任务反查键（IMS_PARAM_DISTRIBUTE 等），报文
+            // 实际字面值由代码按注册表下发（ImsCore Parameters File 等）。表单展示报文值
+            // （fileTypeLabel）并只读——改 key 会破坏任务反查；提交时保留原键。
+            <Form.Item
+              label={t('ufte.template.fileType')}
+              extra={t('ufte.template.fileType.imsCoreReadOnly')}
+            >
+              <Input value={editingType.fileTypeLabel} disabled />
+            </Form.Item>
+          ) : (
+            <Form.Item label={t('ufte.template.fileType')} name="fileType" rules={[{ required: true, message: t('ufte.template.fileType.required') }]}>
                 <Input placeholder={t('ufte.template.fileType.placeholder')} />
-          </Form.Item>
+            </Form.Item>
+          )}
           <Form.Item label={t('ufte.template.softLib')} name="firmwareFileType" extra={formRpcType === 'DOWNLOAD' ? t('ufte.template.softLib.extraDownload') : t('ufte.template.softLib.extraOther')}>
             <Select
               allowClear
