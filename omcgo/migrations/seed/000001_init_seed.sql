@@ -4911,10 +4911,12 @@ INSERT INTO public.mml_command_groups VALUES
 	('6f7b1780-ba61-462d-aa09-4beb46244c7e', 'chapter:SE', '日志参数管理', 'Log Parameters', 'chapter_SE', 'cmcc-td-lte-v2.3', 4, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "Log Parameters", "zh-CN": "日志参数管理"}', 'standard', true, NULL, 'SE', 0, NULL, NULL, '', ''),
 	('641903c0-7306-4637-87db-46f36da2466f', 'chapter:SF', '小区服务参数管理（总体）', 'Cell Service Parameters (Overall)', 'chapter_SF', 'cmcc-td-lte-v2.3', 5, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "Cell Service Parameters (Overall)", "zh-CN": "小区服务参数管理（总体）"}', 'standard', true, NULL, 'SF', 0, NULL, NULL, '', ''),
 	('7f5df1af-1ef6-4f54-9b26-618849a322f4', 'chapter:SG', 'SCTP参数管理', 'SCTP Parameters', 'chapter_SG', 'cmcc-td-lte-v2.3', 6, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "SCTP Parameters", "zh-CN": "SCTP参数管理"}', 'standard', true, NULL, 'SG', 0, NULL, NULL, '', ''),
+	('9b1d5f7e-3c8a-4d21-9f60-2a7e5c4b8d11', 'chapter:SI_FREQ', '邻频参数管理', 'Neighbor Frequency Parameters', 'chapter_SI_FREQ', 'cmcc-td-lte-v2.3', 8, true, NULL, '2026-08-24 00:00:00+08', '2026-08-24 00:00:00+08', NULL, '{"en-US": "Neighbor Frequency Parameters", "zh-CN": "邻频参数管理"}', 'standard', true, NULL, 'SI_FREQ', 0, NULL, NULL, '', ''),
+	('a2c4e6f8-1b3d-4f5a-8c7e-9d0b2a1c3e4f', 'chapter:SI_INTER_FREQ', '异频参数管理', 'Inter-Frequency Parameters', 'chapter_SI_INTER_FREQ', 'cmcc-td-lte-v2.3', 9, true, NULL, '2026-08-24 00:00:00+08', '2026-08-24 00:00:00+08', NULL, '{"en-US": "Inter-Frequency Parameters", "zh-CN": "异频参数管理"}', 'standard', true, NULL, 'SI_INTER_FREQ', 0, NULL, NULL, '', ''),
 	('d953a1a7-e43e-4115-a0f3-a7c00dcf816c', 'chapter:SK', 'SON参数管理', 'SON Parameters', 'chapter_SK', 'cmcc-td-lte-v2.3', 10, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "SON Parameters", "zh-CN": "SON参数管理"}', 'standard', true, NULL, 'SK', 0, NULL, NULL, '', ''),
 	('341ef841-15ba-4a63-a50d-af9524a7f972', 'chapter:SH', 'RAN协议栈参数', 'RAN Protocol Stack Parameters', 'chapter_SH', 'cmcc-td-lte-v2.3', 7, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "RAN Protocol Stack Parameters", "zh-CN": "RAN协议栈参数"}', 'standard', true, NULL, 'SH', 0, NULL, NULL, '', ''),
-	('ca8d4e1e-63bd-4180-8636-7eeac07c1abc', 'chapter:SI', '邻区参数管理', 'Neighbor Cell Parameters', 'chapter_SI', 'cmcc-td-lte-v2.3', 8, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "Neighbor Cell Parameters", "zh-CN": "邻区参数管理"}', 'standard', true, NULL, 'SI', 0, NULL, NULL, '', ''),
-	('71e6e9f4-7a26-4b40-96fe-a440fc00a69f', 'chapter:SJ', '移动性参数管理', 'Mobility Parameters', 'chapter_SJ', 'cmcc-td-lte-v2.3', 9, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "Mobility Parameters", "zh-CN": "移动性参数管理"}', 'standard', true, NULL, 'SJ', 0, NULL, NULL, '', ''),
+	('ca8d4e1e-63bd-4180-8636-7eeac07c1abc', 'chapter:SI', '邻区参数管理', 'Neighbor Cell Parameters', 'chapter_SI', 'cmcc-td-lte-v2.3', 10, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "Neighbor Cell Parameters", "zh-CN": "邻区参数管理"}', 'standard', true, NULL, 'SI', 0, NULL, NULL, '', ''),
+	('71e6e9f4-7a26-4b40-96fe-a440fc00a69f', 'chapter:SJ', '移动性参数管理', 'Mobility Parameters', 'chapter_SJ', 'cmcc-td-lte-v2.3', 11, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "Mobility Parameters", "zh-CN": "移动性参数管理"}', 'standard', true, NULL, 'SJ', 0, NULL, NULL, '', ''),
 	('b55b33d7-3a77-433d-b13c-46a25d0cb272', 'chapter:SL', 'WAN口配置参数管理', 'WAN Port Configuration Parameters', 'chapter_SL', 'cmcc-td-lte-v2.3', 11, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "WAN Port Configuration Parameters", "zh-CN": "WAN口配置参数管理"}', 'standard', true, NULL, 'SL', 0, NULL, NULL, '', ''),
 	('cb400439-1c3d-4320-994b-d1047ffd8857', 'chapter:SM', 'IPsec参数管理', 'IPsec Parameters', 'chapter_SM', 'cmcc-td-lte-v2.3', 12, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "IPsec Parameters", "zh-CN": "IPsec参数管理"}', 'standard', true, NULL, 'SM', 0, NULL, NULL, '', ''),
 	('32107692-f54e-4391-ab9f-5f0c7b9e4407', 'chapter:SN', '时间服务器参数管理', 'Time Server Parameters', 'chapter_SN', 'cmcc-td-lte-v2.3', 13, true, NULL, '2026-05-31 11:28:48.258248+08', '2026-06-12 18:16:52.492019+08', NULL, '{"en-US": "Time Server Parameters", "zh-CN": "时间服务器参数管理"}', 'standard', true, NULL, 'SN', 0, NULL, NULL, '', ''),
@@ -12473,7 +12475,9 @@ WITH desired(chapter_code, group_code, group_name_zh, group_name_en, display_ord
   VALUES
     ('SG', 'chapter:SG', 'SCTP参数管理', 'SCTP Parameters', 7),
     ('SH', 'chapter:SH', 'RAN协议栈参数', 'RAN Protocol Stack Parameters', 8),
-    ('SI', 'chapter:SI', '邻区参数管理', 'Neighbor Cell Parameters', 9),
+	('SI_FREQ', 'chapter:SI_FREQ', '邻频参数管理', 'Neighbor Frequency Parameters', 9),
+	('SI_INTER_FREQ', 'chapter:SI_INTER_FREQ', '异频参数管理', 'Inter-Frequency Parameters', 10),
+	('SI', 'chapter:SI', '邻区参数管理', 'Neighbor Cell Parameters', 10),
     ('SJ', 'chapter:SJ', '移动性参数管理', 'Mobility Parameters', 10),
     ('SK', 'chapter:SK', 'SON参数管理', 'SON Parameters', 11),
     ('SL', 'chapter:SL', 'WAN口配置参数管理', 'WAN Port Configuration Parameters', 12),
@@ -12791,7 +12795,9 @@ WITH desired_groups(chapter_code, group_code, group_name_zh, group_name_en, disp
   VALUES
     ('SG', 'chapter:SG', 'SCTP参数管理', 'SCTP Parameters', 7),
     ('SH', 'chapter:SH', 'RAN协议栈参数', 'RAN Protocol Stack Parameters', 8),
-    ('SI', 'chapter:SI', '邻区参数管理', 'Neighbor Cell Parameters', 9),
+	('SI_FREQ', 'chapter:SI_FREQ', '邻频参数管理', 'Neighbor Frequency Parameters', 9),
+	('SI_INTER_FREQ', 'chapter:SI_INTER_FREQ', '异频参数管理', 'Inter-Frequency Parameters', 10),
+	('SI', 'chapter:SI', '邻区参数管理', 'Neighbor Cell Parameters', 10),
     ('SJ', 'chapter:SJ', '移动性参数管理', 'Mobility Parameters', 10),
     ('SK', 'chapter:SK', 'SON参数管理', 'SON Parameters', 11),
     ('SL', 'chapter:SL', 'WAN口配置参数管理', 'WAN Port Configuration Parameters', 12),
@@ -14406,26 +14412,26 @@ WITH cmd_defs(command_code, command_name, logical_name, operation_type, group_co
     ('MOD SH_SUB_05', '修改 PDCP参数管理', 'PDCP参数管理', 'MOD', 'chapter:SH', 61),
     ('LST SH_SUB_06', '查询 RLC参数管理', 'RLC参数管理', 'LST', 'chapter:SH', 70),
     ('MOD SH_SUB_06', '修改 RLC参数管理', 'RLC参数管理', 'MOD', 'chapter:SH', 71),
-    ('LST SI_SUB_01', '查询 NR邻区参数管理', 'NR邻区参数管理', 'LST', 'chapter:SI', 80),
-    ('MOD SI_SUB_01', '修改 NR邻区参数管理', 'NR邻区参数管理', 'MOD', 'chapter:SI', 81),
-    ('ADD SI_SUB_01', '新增 NR邻区参数管理', 'NR邻区参数管理', 'ADD', 'chapter:SI', 82),
-    ('RMV SI_SUB_01', '删除 NR邻区参数管理', 'NR邻区参数管理', 'RMV', 'chapter:SI', 83),
-    ('LST SI_SUB_02', '查询 LTE邻区参数管理', 'LTE邻区参数管理', 'LST', 'chapter:SI', 90),
-    ('MOD SI_SUB_02', '修改 LTE邻区参数管理', 'LTE邻区参数管理', 'MOD', 'chapter:SI', 91),
-    ('ADD SI_SUB_02', '新增 LTE邻区参数管理', 'LTE邻区参数管理', 'ADD', 'chapter:SI', 92),
-    ('RMV SI_SUB_02', '删除 LTE邻区参数管理', 'LTE邻区参数管理', 'RMV', 'chapter:SI', 93),
-    ('LST SI_SUB_03', '查询 TD邻区参数管理', 'TD邻区参数管理', 'LST', 'chapter:SI', 100),
-    ('MOD SI_SUB_03', '修改 TD邻区参数管理', 'TD邻区参数管理', 'MOD', 'chapter:SI', 101),
-    ('ADD SI_SUB_03', '新增 TD邻区参数管理', 'TD邻区参数管理', 'ADD', 'chapter:SI', 102),
-    ('RMV SI_SUB_03', '删除 TD邻区参数管理', 'TD邻区参数管理', 'RMV', 'chapter:SI', 103),
-    ('LST SI_SUB_04', '查询 GSM邻区参数管理', 'GSM邻区参数管理', 'LST', 'chapter:SI', 110),
-    ('MOD SI_SUB_04', '修改 GSM邻区参数管理', 'GSM邻区参数管理', 'MOD', 'chapter:SI', 111),
-    ('ADD SI_SUB_04', '新增 GSM邻区参数管理', 'GSM邻区参数管理', 'ADD', 'chapter:SI', 112),
-    ('RMV SI_SUB_04', '删除 GSM邻区参数管理', 'GSM邻区参数管理', 'RMV', 'chapter:SI', 113),
-    ('LST SI_SUB_05', '查询 5G邻区参数管理', '5G邻区参数管理', 'LST', 'chapter:SI', 120),
-    ('MOD SI_SUB_05', '修改 5G邻区参数管理', '5G邻区参数管理', 'MOD', 'chapter:SI', 121),
-    ('ADD SI_SUB_05', '新增 5G邻区参数管理', '5G邻区参数管理', 'ADD', 'chapter:SI', 122),
-    ('RMV SI_SUB_05', '删除 5G邻区参数管理', '5G邻区参数管理', 'RMV', 'chapter:SI', 123),
+	('LST SI_SUB_01', '查询 NR邻区参数管理', 'NR邻区参数管理', 'LST', 'chapter:SI_FREQ', 80),
+	('MOD SI_SUB_01', '修改 NR邻区参数管理', 'NR邻区参数管理', 'MOD', 'chapter:SI_FREQ', 81),
+	('ADD SI_SUB_01', '新增 NR邻区参数管理', 'NR邻区参数管理', 'ADD', 'chapter:SI_FREQ', 82),
+	('RMV SI_SUB_01', '删除 NR邻区参数管理', 'NR邻区参数管理', 'RMV', 'chapter:SI_FREQ', 83),
+	('LST SI_SUB_02', '查询 LTE邻区参数管理', 'LTE邻区参数管理', 'LST', 'chapter:SI_FREQ', 90),
+	('MOD SI_SUB_02', '修改 LTE邻区参数管理', 'LTE邻区参数管理', 'MOD', 'chapter:SI_FREQ', 91),
+	('ADD SI_SUB_02', '新增 LTE邻区参数管理', 'LTE邻区参数管理', 'ADD', 'chapter:SI_FREQ', 92),
+	('RMV SI_SUB_02', '删除 LTE邻区参数管理', 'LTE邻区参数管理', 'RMV', 'chapter:SI_FREQ', 93),
+	('LST SI_SUB_03', '查询 TD邻区参数管理', 'TD邻区参数管理', 'LST', 'chapter:SI_FREQ', 100),
+	('MOD SI_SUB_03', '修改 TD邻区参数管理', 'TD邻区参数管理', 'MOD', 'chapter:SI_FREQ', 101),
+	('ADD SI_SUB_03', '新增 TD邻区参数管理', 'TD邻区参数管理', 'ADD', 'chapter:SI_FREQ', 102),
+	('RMV SI_SUB_03', '删除 TD邻区参数管理', 'TD邻区参数管理', 'RMV', 'chapter:SI_FREQ', 103),
+	('LST SI_SUB_04', '查询 GSM邻区参数管理', 'GSM邻区参数管理', 'LST', 'chapter:SI_FREQ', 110),
+	('MOD SI_SUB_04', '修改 GSM邻区参数管理', 'GSM邻区参数管理', 'MOD', 'chapter:SI_FREQ', 111),
+	('ADD SI_SUB_04', '新增 GSM邻区参数管理', 'GSM邻区参数管理', 'ADD', 'chapter:SI_FREQ', 112),
+	('RMV SI_SUB_04', '删除 GSM邻区参数管理', 'GSM邻区参数管理', 'RMV', 'chapter:SI_FREQ', 113),
+	('LST SI_SUB_05', '查询 5G邻区参数管理', '5G邻区参数管理', 'LST', 'chapter:SI_FREQ', 120),
+	('MOD SI_SUB_05', '修改 5G邻区参数管理', '5G邻区参数管理', 'MOD', 'chapter:SI_FREQ', 121),
+	('ADD SI_SUB_05', '新增 5G邻区参数管理', '5G邻区参数管理', 'ADD', 'chapter:SI_FREQ', 122),
+	('RMV SI_SUB_05', '删除 5G邻区参数管理', '5G邻区参数管理', 'RMV', 'chapter:SI_FREQ', 123),
     ('LST SJ_SUB_01', '查询 切换公共参数', '切换公共参数', 'LST', 'chapter:SJ', 130),
     ('MOD SJ_SUB_01', '修改 切换公共参数', '切换公共参数', 'MOD', 'chapter:SJ', 131),
     ('LST SJ_SUB_02', '查询 A1事件测量控制参数', 'A1事件测量控制参数', 'LST', 'chapter:SJ', 140),
@@ -27834,10 +27840,10 @@ WITH si_group AS (
     LIMIT 1
 ), command_defs(command_code, command_name, logical_name, operation_type, rpc_method) AS (
     VALUES
-        ('LST LTE_INTER_FREQ_CARRIER', '查询 LTE邻频参数管理', 'LTE邻频参数管理', 'LST', 'GetParameterValues'),
-        ('MOD LTE_INTER_FREQ_CARRIER', '修改 LTE邻频参数管理', 'LTE邻频参数管理', 'MOD', 'SetParameterValues'),
-        ('ADD LTE_INTER_FREQ_CARRIER', '添加 LTE邻频参数管理', 'LTE邻频参数管理', 'ADD', 'AddObject'),
-        ('RMV LTE_INTER_FREQ_CARRIER', '删除 LTE邻频参数管理', 'LTE邻频参数管理', 'RMV', 'DeleteObject')
+		('LST LTE_INTER_FREQ_CARRIER', '查询 LTE异频载波参数管理', 'LTE异频载波参数管理', 'LST', 'GetParameterValues'),
+		('MOD LTE_INTER_FREQ_CARRIER', '修改 LTE异频载波参数管理', 'LTE异频载波参数管理', 'MOD', 'SetParameterValues'),
+		('ADD LTE_INTER_FREQ_CARRIER', '添加 LTE异频载波参数管理', 'LTE异频载波参数管理', 'ADD', 'AddObject'),
+		('RMV LTE_INTER_FREQ_CARRIER', '删除 LTE异频载波参数管理', 'LTE异频载波参数管理', 'RMV', 'DeleteObject')
 )
 INSERT INTO public.mml_commands (
     command_name, command_code, category, description, rpc_method, operation_type,
@@ -28836,6 +28842,22 @@ SET target_paths = jsonb_build_array(c.target_object),
 WHERE c.operation_type IN ('ADD', 'RMV')
   AND c.deprecated_at IS NULL
   AND COALESCE(c.target_object, '') <> '';
+
+UPDATE public.mml_commands c
+SET group_id = g.id,
+		updated_at = NOW()
+FROM public.mml_command_groups g
+WHERE g.group_code = 'chapter:SI_INTER_FREQ'
+	AND g.param_version = 'cmcc-td-lte-v2.3'
+	AND g.deleted_at IS NULL
+	AND c.command_code IN (
+			'LST LTE_INTER_FREQ_CARRIER', 'MOD LTE_INTER_FREQ_CARRIER',
+			'ADD LTE_INTER_FREQ_CARRIER', 'RMV LTE_INTER_FREQ_CARRIER',
+			'LST SJ_LTE_IDLE_INTER_FREQ_CARRIER', 'MOD SJ_LTE_IDLE_INTER_FREQ_CARRIER',
+			'ADD SJ_LTE_IDLE_INTER_FREQ_CARRIER', 'RMV SJ_LTE_IDLE_INTER_FREQ_CARRIER',
+			'LST SJ_CONN_NR_INTER_FREQ_CARRIER', 'MOD SJ_CONN_NR_INTER_FREQ_CARRIER',
+			'ADD SJ_CONN_NR_INTER_FREQ_CARRIER', 'RMV SJ_CONN_NR_INTER_FREQ_CARRIER'
+	);
 
 COMMIT;
 

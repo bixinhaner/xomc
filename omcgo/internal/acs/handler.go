@@ -961,7 +961,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 				combinedMsg = fmt.Sprintf("[%s] %s", soapFaultCode, faultMsg)
 			}
 			// 参数同步 GPV 自愈：剔除坏 path 后续查，命中即跳过 MarkTaskFailed
-			if !h.tryRecoverGPVFault(r.Context(), taskItem, badPath, faultCode, log) {
+			if !h.tryRecoverGPVFault(r.Context(), taskItem, badPath, faultCode, body, log) {
 				if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, combinedMsg); markErr != nil {
 					log.Error("mark task failed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
 				}
@@ -1438,7 +1438,7 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 	}
 	if taskItem != nil {
 		// 参数同步 GPV 自愈：剔除坏 path 后续查；命中即跳过 MarkTaskFailed + Fault 事件。
-		if h.tryRecoverGPVFault(r.Context(), taskItem, badPath, faultCode, log) {
+		if h.tryRecoverGPVFault(r.Context(), taskItem, badPath, faultCode, body, log) {
 			// 自愈分支已标 task completed 并入队 retry batch，继续走 PopTask 推进队列。
 		} else {
 			// T-0174 / T-0180 — SPV / GPV 失败时把 per-parameter 详情提取出来,
@@ -1629,7 +1629,7 @@ const syncGPVRecoveryTaskExpiresIn = 1800
 //
 // 仅对具体叶子参数的 9005 做 recovery。对象/实例前缀（以 "." 结尾）通常表示实例不存在
 // 或对象不可枚举，不能逐个实例滚动重试，否则会把一段连续缺失实例膨胀成很长的 -r 链。
-func (h *Handler) tryRecoverGPVFault(ctx context.Context, taskItem *task.Task, badPath string, faultCode int, log *zap.Logger) bool {
+func (h *Handler) tryRecoverGPVFault(ctx context.Context, taskItem *task.Task, badPath string, faultCode int, body []byte, log *zap.Logger) bool {
 	if taskItem == nil || badPath == "" {
 		return false
 	}
@@ -1649,7 +1649,8 @@ func (h *Handler) tryRecoverGPVFault(ctx context.Context, taskItem *task.Task, b
 		return false
 	}
 	isLegacy := strings.HasPrefix(taskItem.CommandKey, "sync-gpv-")
-	if !isLegacy && !isDurable {
+	isMML := taskItem.Source == task.TaskSourceMML
+	if !isLegacy && !isDurable && !isMML {
 		return false
 	}
 	var paramsObj struct {
@@ -1673,6 +1674,15 @@ func (h *Handler) tryRecoverGPVFault(ctx context.Context, taskItem *task.Task, b
 		"bad_path":      badPath,
 		"fault_code":    faultCode,
 		"remaining_cnt": len(remaining),
+	}
+	if len(body) > 0 {
+		result["raw_response"] = string(body)
+	}
+	if badPath != "" {
+		result["param_faults"] = []SPVFault{{
+			ParameterName: badPath,
+			FaultCode:     faultCode,
+		}}
 	}
 	if len(skippedPaths) > 1 || (len(skippedPaths) == 1 && skippedPaths[0] != badPath) {
 		result["bad_paths"] = skippedPaths

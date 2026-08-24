@@ -3,7 +3,6 @@ package mml
 import (
 	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -374,7 +373,7 @@ func TestValidatePath_AllReasons(t *testing.T) {
 }
 
 func TestBuildTR069Params_GetParameterValues_FiltersIllegalPaths(t *testing.T) {
-	// 复刻 baicell 现场报文形态：7 条完全未知前缀（非法）、1 条带 {i} 占位符（自动展开）、
+	// 复刻 baicell 现场报文形态：7 条完全未知前缀（非法）、1 条带 {i} 占位符（未绑定）、
 	// 其余合法。校验后应只剩 6 条合法路径 + 1 条 {i} 展开 = 7。
 	//
 	// 注：DeviceGSM 已被加入合法根白名单（百怡 GSM 设备子树），
@@ -396,29 +395,12 @@ func TestBuildTR069Params_GetParameterValues_FiltersIllegalPaths(t *testing.T) {
 		{ParamCode: "DEV_RUN", Tr069Path: "Device.DeviceInfo.X_COM_STATION_RUN_Time", ValueType: "string"},
 	}
 	payload, err := BuildTR069Params("GetParameterValues", refs, nil, "LST")
-	require.NoError(t, err)
-	var got struct {
-		Names []string `json:"names"`
-	}
-	require.NoError(t, json.Unmarshal(payload, &got))
-	// Sprint B Q-V3-2：含 {i} 的 Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress
-	// 自动展开为 partial path Device.IP.Interface.（不再被过滤）— 总数变 7。
-	assert.Len(t, got.Names, 7, "6 条合法 + 1 条 {i} 展开为 partial path")
-	// 仍不应包含完全未知前缀
-	for _, n := range got.Names {
-		assert.False(t, strings.HasPrefix(n, "MadeUpRoot."), "未知私有前缀必须被过滤")
-		assert.NotContains(t, n, "{i}", "占位符必须被展开（不残留）")
-	}
-	// 必须保留合法的具体路径
-	assert.Contains(t, got.Names, "Device.DeviceInfo.HardwareVersion")
-	assert.Contains(t, got.Names, "Device.DeviceInfo.X_COM_MACAddress")
-	// 含 {i} 的路径展开为 partial path
-	assert.Contains(t, got.Names, "Device.IP.Interface.")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "has_placeholder")
 }
 
 func TestBuildTR069Params_GetParameterValues_AllIllegalReturnsError(t *testing.T) {
-	// Sprint B Q-V3-2 后：Device.X.{i}.Y 路径自动展开为 partial path Device.X.，
-	// 不再视为非法 — 所以本 case 只保留**真正非法**前缀路径来验证 ErrNoUsableParams。
+	// 未绑定的动态路径和非法前缀路径都应验证 ErrNoUsableParams。
 	refs := []MMLParamRef{
 		{ParamCode: "A", Tr069Path: "Internal.Mcc"},   // 非法前缀
 		{ParamCode: "B", Tr069Path: "BogusRoot.X"},    // 非法前缀

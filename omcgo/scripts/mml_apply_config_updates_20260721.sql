@@ -11517,13 +11517,36 @@ WHERE c.command_code IN (
 COMMIT;
 -- END GPS merged query/modify commands
 
--- BEGIN NeighborList coverage under neighbor cell parameter group
+-- BEGIN NeighborList frequency coverage under neighbor frequency parameter group
 BEGIN;
+
+INSERT INTO public.mml_command_groups (
+    group_code, group_name_zh, group_name_en, name_i18n, path,
+    param_version, display_order, source, catalog_protected,
+    chapter_code, instance_arity, instance_levels
+)
+VALUES (
+    'chapter:SI_FREQ', '邻频参数管理', 'Neighbor Frequency Parameters',
+    '{"zh-CN":"邻频参数管理","en-US":"Neighbor Frequency Parameters"}'::jsonb,
+    'chapter_SI_FREQ'::ltree, 'cmcc-td-lte-v2.3', 9, 'standard', true,
+    'SI_FREQ', 0, ARRAY[]::text[]
+)
+ON CONFLICT (param_version, group_code) DO UPDATE
+SET group_name_zh = EXCLUDED.group_name_zh,
+    group_name_en = EXCLUDED.group_name_en,
+    name_i18n = EXCLUDED.name_i18n,
+    display_order = EXCLUDED.display_order,
+    source = EXCLUDED.source,
+    catalog_protected = EXCLUDED.catalog_protected,
+    chapter_code = EXCLUDED.chapter_code,
+    deleted_at = NULL,
+    deprecated_at = NULL,
+    updated_at = NOW();
 
 WITH si_group AS (
     SELECT id
     FROM public.mml_command_groups
-    WHERE group_code = 'chapter:SI'
+    WHERE group_code = 'chapter:SI_FREQ'
       AND param_version = 'cmcc-td-lte-v2.3'
       AND deleted_at IS NULL
     ORDER BY updated_at DESC
@@ -11748,7 +11771,7 @@ FROM merged m
 WHERE c.id = m.id;
 
 COMMIT;
--- END NeighborList coverage under neighbor cell parameter group
+-- END NeighborList frequency coverage under neighbor frequency parameter group
 
 -- BEGIN NeighborList duplicate operation cleanup
 BEGIN;
@@ -17286,6 +17309,284 @@ SET total_entries = stats.total_entries,
     updated_at = NOW()
 FROM stats
 WHERE pm.id = stats.param_model_id;
+
+-- Split multi-instance HALOB/IPsec objects from the carrier-wide FAP_SERVICE
+-- command.  A single GPV/SPV command must not mix parent fields with child
+-- instance fields; ADD/RMV also need an object-specific target_object.
+DO $$
+DECLARE
+    sf_group_id uuid;
+BEGIN
+    INSERT INTO public.mml_command_groups (
+        group_code, group_name_zh, group_name_en, name_i18n, path,
+        param_version, display_order, source, catalog_protected,
+        chapter_code, instance_arity, instance_levels, object_path_template
+    ) VALUES
+        ('SF_HALOB_L2_APN', 'HALOB APN参数', 'HALOB APN Parameters',
+         '{"zh-CN":"HALOB APN参数","en-US":"HALOB APN Parameters"}'::jsonb,
+         'SF_HALOB.HALOB_L2_APN'::ltree, 'cmcc-td-lte-v2.3', 1, 'standard', true,
+         'SF', 2, ARRAY['FAPService','Apn'],
+         'Device.Services.FAPService.{i}.FAPControl.Halob.L2.Apn.{i}.'),
+        ('SF_HALOB_L2_VXLAN', 'HALOB VXLAN参数', 'HALOB VXLAN Parameters',
+         '{"zh-CN":"HALOB VXLAN参数","en-US":"HALOB VXLAN Parameters"}'::jsonb,
+         'SF_HALOB.HALOB_L2_VXLAN'::ltree, 'cmcc-td-lte-v2.3', 1, 'standard', true,
+         'SF', 2, ARRAY['FAPService','VxLan'],
+         'Device.Services.FAPService.{i}.FAPControl.Halob.L2.VxLan.{i}.'),
+        ('SF_MULTI_IPSEC', '多实例IPsec参数', 'Multi-instance IPsec Parameters',
+         '{"zh-CN":"多实例IPsec参数","en-US":"Multi-instance IPsec Parameters"}'::jsonb,
+         'SF_MULTI_IPSEC'::ltree, 'cmcc-td-lte-v2.3', 1, 'standard', true,
+         'SF', 2, ARRAY['FAPService','MultiIpsecConfigParam'],
+         'Device.Services.FAPService.{i}.CellConfig.LTE.MultiIpsecConfigParam.{i}.')
+    ON CONFLICT (param_version, group_code) DO UPDATE
+    SET group_name_zh = EXCLUDED.group_name_zh,
+        group_name_en = EXCLUDED.group_name_en,
+        name_i18n = EXCLUDED.name_i18n,
+        path = EXCLUDED.path,
+        display_order = EXCLUDED.display_order,
+        source = EXCLUDED.source,
+        catalog_protected = EXCLUDED.catalog_protected,
+        chapter_code = EXCLUDED.chapter_code,
+        instance_arity = EXCLUDED.instance_arity,
+        instance_levels = EXCLUDED.instance_levels,
+        object_path_template = EXCLUDED.object_path_template,
+        is_active = true,
+        deleted_at = NULL,
+        deprecated_at = NULL,
+        updated_at = NOW();
+
+    UPDATE public.mml_command_groups
+    SET path = CASE group_code
+                   WHEN 'SF_HALOB_L2_APN' THEN 'SF_HALOB.HALOB_L2_APN'::ltree
+                   WHEN 'SF_HALOB_L2_VXLAN' THEN 'SF_HALOB.HALOB_L2_VXLAN'::ltree
+                   WHEN 'SF_MULTI_IPSEC' THEN 'SF_MULTI_IPSEC'::ltree
+               END,
+        group_name_zh = CASE group_code
+                            WHEN 'SF_HALOB_L2_APN' THEN 'HALOB APN参数'
+                            WHEN 'SF_HALOB_L2_VXLAN' THEN 'HALOB VXLAN参数'
+                            WHEN 'SF_MULTI_IPSEC' THEN '多实例IPsec参数'
+                        END,
+        group_name_en = CASE group_code
+                            WHEN 'SF_HALOB_L2_APN' THEN 'HALOB APN Parameters'
+                            WHEN 'SF_HALOB_L2_VXLAN' THEN 'HALOB VXLAN Parameters'
+                            WHEN 'SF_MULTI_IPSEC' THEN 'Multi-instance IPsec Parameters'
+                        END,
+        name_i18n = CASE group_code
+                        WHEN 'SF_HALOB_L2_APN' THEN '{"zh-CN":"HALOB APN参数","en-US":"HALOB APN Parameters"}'::jsonb
+                        WHEN 'SF_HALOB_L2_VXLAN' THEN '{"zh-CN":"HALOB VXLAN参数","en-US":"HALOB VXLAN Parameters"}'::jsonb
+                        WHEN 'SF_MULTI_IPSEC' THEN '{"zh-CN":"多实例IPsec参数","en-US":"Multi-instance IPsec Parameters"}'::jsonb
+                    END,
+        is_active = true, deleted_at = NULL, deprecated_at = NULL, updated_at = NOW()
+    WHERE group_code IN ('SF_HALOB_L2_APN', 'SF_HALOB_L2_VXLAN', 'SF_MULTI_IPSEC')
+      AND param_version = 'cmcc-td-lte-v2.3';
+END $$;
+
+WITH object_defs(command_code, command_name, logical_name, operation_type, rpc_method,
+                 target_object, group_code) AS (
+    VALUES
+        ('LST HALOB_APN', '查询 HALOB APN参数', 'HALOB APN参数', 'LST', 'GetParameterValues', NULL, 'SF_HALOB_L2_APN'),
+        ('MOD HALOB_APN', '修改 HALOB APN参数', 'HALOB APN参数', 'MOD', 'SetParameterValues', NULL, 'SF_HALOB_L2_APN'),
+        ('ADD HALOB_APN', '添加 HALOB APN参数', 'HALOB APN参数', 'ADD', 'AddObject', 'Device.Services.FAPService.{i}.FAPControl.Halob.L2.Apn.', 'SF_HALOB_L2_APN'),
+        ('RMV HALOB_APN', '删除 HALOB APN参数', 'HALOB APN参数', 'RMV', 'DeleteObject', 'Device.Services.FAPService.{i}.FAPControl.Halob.L2.Apn.', 'SF_HALOB_L2_APN'),
+        ('LST HALOB_VXLAN', '查询 HALOB VXLAN参数', 'HALOB VXLAN参数', 'LST', 'GetParameterValues', NULL, 'SF_HALOB_L2_VXLAN'),
+        ('MOD HALOB_VXLAN', '修改 HALOB VXLAN参数', 'HALOB VXLAN参数', 'MOD', 'SetParameterValues', NULL, 'SF_HALOB_L2_VXLAN'),
+        ('ADD HALOB_VXLAN', '添加 HALOB VXLAN参数', 'HALOB VXLAN参数', 'ADD', 'AddObject', 'Device.Services.FAPService.{i}.FAPControl.Halob.L2.VxLan.', 'SF_HALOB_L2_VXLAN'),
+        ('RMV HALOB_VXLAN', '删除 HALOB VXLAN参数', 'HALOB VXLAN参数', 'RMV', 'DeleteObject', 'Device.Services.FAPService.{i}.FAPControl.Halob.L2.VxLan.', 'SF_HALOB_L2_VXLAN'),
+        ('LST MULTI_IPSEC_CONFIG_PARAM', '查询多实例IPsec参数', '多实例IPsec参数', 'LST', 'GetParameterValues', NULL, 'SF_MULTI_IPSEC'),
+        ('MOD MULTI_IPSEC_CONFIG_PARAM', '修改多实例IPsec参数', '多实例IPsec参数', 'MOD', 'SetParameterValues', NULL, 'SF_MULTI_IPSEC'),
+        ('ADD MULTI_IPSEC_CONFIG_PARAM', '添加多实例IPsec参数', '多实例IPsec参数', 'ADD', 'AddObject', 'Device.Services.FAPService.{i}.CellConfig.LTE.MultiIpsecConfigParam.', 'SF_MULTI_IPSEC'),
+        ('RMV MULTI_IPSEC_CONFIG_PARAM', '删除多实例IPsec参数', '多实例IPsec参数', 'RMV', 'DeleteObject', 'Device.Services.FAPService.{i}.CellConfig.LTE.MultiIpsecConfigParam.', 'SF_MULTI_IPSEC')
+), groups AS (
+    SELECT g.id, g.group_code
+    FROM public.mml_command_groups g
+    WHERE g.group_code IN ('SF_HALOB_L2_APN', 'SF_HALOB_L2_VXLAN', 'SF_MULTI_IPSEC')
+      AND g.param_version = 'cmcc-td-lte-v2.3'
+      AND g.deleted_at IS NULL AND g.deprecated_at IS NULL
+)
+INSERT INTO public.mml_commands (
+    command_name, command_code, category, description, rpc_method, operation_type,
+    target_paths, target_object, tree_node_refs, group_id, command_name_i18n,
+    logical_name_i18n, source, catalog_protected, help_doc
+)
+SELECT d.command_name, d.command_code, 'MML', d.command_name, d.rpc_method, d.operation_type,
+       '[]'::jsonb, d.target_object, jsonb_build_array(d.target_object), g.id,
+       jsonb_build_object('zh-CN', d.command_name, 'en-US', d.command_code),
+       jsonb_build_object('zh-CN', d.logical_name, 'en-US', d.logical_name),
+       'standard', true, ''
+FROM object_defs d JOIN groups g ON g.group_code = d.group_code
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name, description = EXCLUDED.description,
+    rpc_method = EXCLUDED.rpc_method, operation_type = EXCLUDED.operation_type,
+    target_object = EXCLUDED.target_object, group_id = EXCLUDED.group_id,
+    command_name_i18n = EXCLUDED.command_name_i18n, logical_name_i18n = EXCLUDED.logical_name_i18n,
+    source = EXCLUDED.source, catalog_protected = EXCLUDED.catalog_protected,
+    deprecated_at = NULL, updated_at = NOW();
+
+WITH object_paths(command_code, standard_path, mml_code, sort_order) AS (
+    VALUES
+        ('LST HALOB_APN', 'Device.Services.FAPService.{i}.FAPControl.Halob.L2.Apn.{i}.apnDefault', 'APN_DEFAULT', 1),
+        ('LST HALOB_APN', 'Device.Services.FAPService.{i}.FAPControl.Halob.L2.Apn.{i}.apnName', 'APN_NAME', 2),
+        ('LST HALOB_APN', 'Device.Services.FAPService.{i}.FAPControl.Halob.L2.Apn.{i}.apnType', 'APN_TYPE', 3),
+        ('LST HALOB_APN', 'Device.Services.FAPService.{i}.FAPControl.Halob.L2.Apn.{i}.apnVlanId', 'APN_VLAN_ID', 4),
+        ('LST HALOB_VXLAN', 'Device.Services.FAPService.{i}.FAPControl.Halob.L2.VxLan.{i}.apnName', 'APN_NAME', 1),
+        ('LST HALOB_VXLAN', 'Device.Services.FAPService.{i}.FAPControl.Halob.L2.VxLan.{i}.id', 'ID', 2)
+), all_paths AS (
+    SELECT command_code, standard_path, mml_code, sort_order FROM object_paths
+    UNION ALL
+    SELECT replace(command_code, 'LST ', 'MOD '), standard_path, mml_code, sort_order FROM object_paths
+    UNION ALL
+    SELECT replace(command_code, 'LST ', 'ADD '), standard_path, mml_code, sort_order FROM object_paths
+), ipsec_paths AS (
+    SELECT 'LST MULTI_IPSEC_CONFIG_PARAM' AS command_code, sp.standard_path,
+           upper(regexp_replace(regexp_replace(sp.standard_path, '^.*\.\{i\}\.', ''), '[^A-Za-z0-9]+', '_', 'g')) AS mml_code,
+           row_number() OVER (ORDER BY sp.standard_path)::int + 10 AS sort_order
+    FROM public.standard_params sp
+    WHERE sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.MultiIpsecConfigParam.{i}.%'
+      AND sp.entry_type = 'parameter'
+), selected AS (
+    SELECT * FROM all_paths
+    UNION ALL SELECT * FROM ipsec_paths
+    UNION ALL SELECT replace(command_code, 'LST ', 'MOD '), standard_path, mml_code, sort_order FROM ipsec_paths
+    UNION ALL SELECT replace(command_code, 'LST ', 'ADD '), standard_path, mml_code, sort_order FROM ipsec_paths
+)
+INSERT INTO public.mml_command_sub_fields (command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order, access_type, is_supported)
+SELECT c.id, sp.id, s.mml_code,
+       jsonb_build_object('zh-CN', s.mml_code, 'en-US', s.mml_code), true,
+       c.operation_type IN ('MOD', 'ADD'), s.sort_order,
+       CASE WHEN c.operation_type = 'LST' THEN 'RO' ELSE 'RW' END, true
+FROM selected s
+JOIN public.mml_commands c ON c.command_code = s.command_code AND c.deprecated_at IS NULL
+JOIN public.standard_params sp ON sp.standard_path = s.standard_path AND sp.entry_type = 'parameter'
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code, label_i18n = EXCLUDED.label_i18n,
+    is_required = EXCLUDED.is_required, sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type, deprecated_at = NULL, updated_at = NOW();
+
+UPDATE public.mml_command_sub_fields sf
+SET deprecated_at = COALESCE(sf.deprecated_at, NOW()), updated_at = NOW()
+FROM public.mml_commands c
+JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+WHERE c.id = sf.command_id AND c.command_code IN ('LST FAP_SERVICE', 'MOD FAP_SERVICE')
+  AND c.deprecated_at IS NULL AND sf.deprecated_at IS NULL
+  AND (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.Halob.L2.Apn.%'
+       OR sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.Halob.L2.VxLan.%'
+       OR sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.MultiIpsecConfigParam.%');
+
+UPDATE public.mml_commands c
+SET target_paths = COALESCE(r.paths, '[]'::jsonb), tree_node_refs = COALESCE(r.paths, '[]'::jsonb), updated_at = NOW()
+FROM (
+    SELECT c2.id, jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path) AS paths
+    FROM public.mml_commands c2
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = c2.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    WHERE c2.command_code IN ('LST FAP_SERVICE', 'MOD FAP_SERVICE')
+    GROUP BY c2.id
+) r
+WHERE c.id = r.id;
+
+UPDATE public.mml_commands c
+SET target_paths = CASE
+                       WHEN c.operation_type IN ('ADD', 'RMV') THEN jsonb_build_array(c.target_object)
+                       ELSE COALESCE(r.paths, '[]'::jsonb)
+                   END,
+    tree_node_refs = CASE
+                       WHEN c.operation_type IN ('ADD', 'RMV') THEN jsonb_build_array(c.target_object)
+                       ELSE COALESCE(r.paths, '[]'::jsonb)
+                   END,
+    updated_at = NOW()
+FROM (
+    SELECT c2.id,
+           jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path)
+               FILTER (WHERE sp.standard_path IS NOT NULL) AS paths
+    FROM public.mml_commands c2
+    LEFT JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c2.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    WHERE c2.command_code IN (
+        'LST HALOB_APN', 'MOD HALOB_APN', 'ADD HALOB_APN', 'RMV HALOB_APN',
+        'LST HALOB_VXLAN', 'MOD HALOB_VXLAN', 'ADD HALOB_VXLAN', 'RMV HALOB_VXLAN',
+        'LST MULTI_IPSEC_CONFIG_PARAM', 'MOD MULTI_IPSEC_CONFIG_PARAM',
+        'ADD MULTI_IPSEC_CONFIG_PARAM', 'RMV MULTI_IPSEC_CONFIG_PARAM'
+    )
+    GROUP BY c2.id
+) r
+WHERE c.id = r.id;
+
+INSERT INTO public.mml_command_groups (
+    group_code, group_name_zh, group_name_en, name_i18n, path,
+    param_version, display_order, source, catalog_protected,
+    chapter_code, instance_arity, instance_levels
+)
+VALUES (
+    'chapter:SI_FREQ', '邻频参数管理', 'Neighbor Frequency Parameters',
+    '{"zh-CN":"邻频参数管理","en-US":"Neighbor Frequency Parameters"}'::jsonb,
+    'chapter_SI_FREQ'::ltree, 'cmcc-td-lte-v2.3', 9, 'standard', true,
+    'SI_FREQ', 0, ARRAY[]::text[]
+)
+ON CONFLICT (param_version, group_code) DO UPDATE
+SET group_name_zh = EXCLUDED.group_name_zh,
+    group_name_en = EXCLUDED.group_name_en,
+    name_i18n = EXCLUDED.name_i18n,
+    display_order = EXCLUDED.display_order,
+    source = EXCLUDED.source,
+    catalog_protected = EXCLUDED.catalog_protected,
+    chapter_code = EXCLUDED.chapter_code,
+    deleted_at = NULL,
+    deprecated_at = NULL,
+    updated_at = NOW();
+
+UPDATE public.mml_commands c
+SET group_id = g.id,
+    updated_at = NOW()
+FROM public.mml_command_groups g
+WHERE g.group_code = 'chapter:SI_FREQ'
+  AND g.param_version = 'cmcc-td-lte-v2.3'
+  AND g.deleted_at IS NULL
+  AND c.command_code IN (
+      'LST SI_SUB_01', 'MOD SI_SUB_01', 'ADD SI_SUB_01', 'RMV SI_SUB_01',
+      'LST SI_SUB_02', 'MOD SI_SUB_02', 'ADD SI_SUB_02', 'RMV SI_SUB_02',
+      'LST SI_SUB_03', 'MOD SI_SUB_03', 'ADD SI_SUB_03', 'RMV SI_SUB_03',
+      'LST SI_SUB_04', 'MOD SI_SUB_04', 'ADD SI_SUB_04', 'RMV SI_SUB_04',
+      'LST SI_SUB_05', 'MOD SI_SUB_05', 'ADD SI_SUB_05', 'RMV SI_SUB_05'
+  );
+
+INSERT INTO public.mml_command_groups (
+    group_code, group_name_zh, group_name_en, name_i18n, path,
+    param_version, display_order, source, catalog_protected,
+    chapter_code, instance_arity, instance_levels
+)
+VALUES (
+    'chapter:SI_INTER_FREQ', '异频参数管理', 'Inter-Frequency Parameters',
+    '{"zh-CN":"异频参数管理","en-US":"Inter-Frequency Parameters"}'::jsonb,
+    'chapter_SI_INTER_FREQ'::ltree, 'cmcc-td-lte-v2.3', 10, 'standard', true,
+    'SI_INTER_FREQ', 0, ARRAY[]::text[]
+)
+ON CONFLICT (param_version, group_code) DO UPDATE
+SET group_name_zh = EXCLUDED.group_name_zh,
+    group_name_en = EXCLUDED.group_name_en,
+    name_i18n = EXCLUDED.name_i18n,
+    display_order = EXCLUDED.display_order,
+    source = EXCLUDED.source,
+    catalog_protected = EXCLUDED.catalog_protected,
+    chapter_code = EXCLUDED.chapter_code,
+    deleted_at = NULL,
+    deprecated_at = NULL,
+    updated_at = NOW();
+
+UPDATE public.mml_commands c
+SET group_id = g.id,
+    updated_at = NOW()
+FROM public.mml_command_groups g
+WHERE g.group_code = 'chapter:SI_INTER_FREQ'
+  AND g.param_version = 'cmcc-td-lte-v2.3'
+  AND g.deleted_at IS NULL
+  AND c.command_code IN (
+      'LST LTE_INTER_FREQ_CARRIER', 'MOD LTE_INTER_FREQ_CARRIER',
+      'ADD LTE_INTER_FREQ_CARRIER', 'RMV LTE_INTER_FREQ_CARRIER',
+      'LST SJ_LTE_IDLE_INTER_FREQ_CARRIER', 'MOD SJ_LTE_IDLE_INTER_FREQ_CARRIER',
+      'ADD SJ_LTE_IDLE_INTER_FREQ_CARRIER', 'RMV SJ_LTE_IDLE_INTER_FREQ_CARRIER',
+      'LST SJ_CONN_NR_INTER_FREQ_CARRIER', 'MOD SJ_CONN_NR_INTER_FREQ_CARRIER',
+      'ADD SJ_CONN_NR_INTER_FREQ_CARRIER', 'RMV SJ_CONN_NR_INTER_FREQ_CARRIER'
+  );
 
 COMMIT;
 
