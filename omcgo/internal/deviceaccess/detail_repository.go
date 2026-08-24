@@ -129,20 +129,8 @@ func (s *PgManagementStore) ListNotifications(
 		return nil, 0, err
 	}
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
-	where := sq.And{
-		sq.Eq{
-			"decision.carrier":       strings.TrimSpace(filter.Carrier),
-			"decision.serial_number": strings.TrimSpace(filter.SerialNumber),
-		},
-		sq.Eq{"history.source_type": "device_access_action"},
-	}
-	countBuilder := storage.Psql.Select("COUNT(*)").From("notification_history history").
-		Join("device_access_actions action ON action.id = history.source_id").
-		Join("device_access_decisions decision ON decision.id = action.decision_id").
-		Where(where)
-	countBuilder = applyAccessIdentityVisibility(
-		countBuilder, "decision.device_id", "decision.carrier", "decision.serial_number", filter.VisibleGroups,
-	)
+	where := accessNotificationScope(filter)
+	countBuilder := storage.Psql.Select("COUNT(*)").From("notification_history history").Where(where)
 	countQuery, countArgs, err := countBuilder.ToSql()
 	if err != nil {
 		return nil, 0, fmt.Errorf("build access notification count: %w", err)
@@ -155,14 +143,9 @@ func (s *PgManagementStore) ListNotifications(
 		"history.id", "history.channel", "history.recipients", "history.subject", "history.status",
 		"COALESCE(history.error_message, '')", "history.source_type", "history.source_id", "history.event_id",
 		"history.correlation_id", "history.retry_count", "history.sent_at", "history.created_at",
-	).From("notification_history history").
-		Join("device_access_actions action ON action.id = history.source_id").
-		Join("device_access_decisions decision ON decision.id = action.decision_id").
-		Where(where).OrderBy("history.created_at DESC", "history.id DESC").
+	).From("notification_history history").Where(where).
+		OrderBy("history.created_at DESC", "history.id DESC").
 		Limit(uint64(pageSize)).Offset(uint64((page - 1) * pageSize))
-	listBuilder = applyAccessIdentityVisibility(
-		listBuilder, "decision.device_id", "decision.carrier", "decision.serial_number", filter.VisibleGroups,
-	)
 	query, args, err := listBuilder.ToSql()
 	if err != nil {
 		return nil, 0, fmt.Errorf("build access notification list: %w", err)
@@ -188,6 +171,51 @@ func (s *PgManagementStore) ListNotifications(
 		return nil, 0, fmt.Errorf("iterate access notifications: %w", err)
 	}
 	return items, total, nil
+}
+
+// accessNotificationScope resolves each supported notification source to the
+// owning access decision before applying tenant and device-group visibility.
+// Keeping the source types in separate EXISTS branches prevents an unrelated
+// action and decision with the same UUID from being joined accidentally.
+func accessNotificationScope(filter ManagementFilter) sq.Sqlizer {
+	carrier := strings.TrimSpace(filter.Carrier)
+	serialNumber := strings.TrimSpace(filter.SerialNumber)
+
+	directDecision := sq.Select("1").From("device_access_decisions source_decision").
+		Where(sq.Expr("source_decision.id = history.source_id")).
+		Where(sq.Eq{
+			"source_decision.carrier":       carrier,
+			"source_decision.serial_number": serialNumber,
+		})
+	directDecision = applyAccessIdentityVisibility(
+		directDecision,
+		"source_decision.device_id", "source_decision.carrier", "source_decision.serial_number",
+		filter.VisibleGroups,
+	)
+
+	actionDecision := sq.Select("1").From("device_access_actions source_action").
+		Join("device_access_decisions source_decision ON source_decision.id = source_action.decision_id").
+		Where(sq.Expr("source_action.id = history.source_id")).
+		Where(sq.Eq{
+			"source_decision.carrier":       carrier,
+			"source_decision.serial_number": serialNumber,
+		})
+	actionDecision = applyAccessIdentityVisibility(
+		actionDecision,
+		"source_decision.device_id", "source_decision.carrier", "source_decision.serial_number",
+		filter.VisibleGroups,
+	)
+
+	return sq.Or{
+		sq.And{
+			sq.Eq{"history.source_type": "device_access_decision"},
+			sq.Expr("EXISTS (?)", directDecision),
+		},
+		sq.And{
+			sq.Eq{"history.source_type": "device_access_action"},
+			sq.Expr("EXISTS (?)", actionDecision),
+		},
+	}
 }
 
 func (s *PgManagementStore) ListManualOperations(
