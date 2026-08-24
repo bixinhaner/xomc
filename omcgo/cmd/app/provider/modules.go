@@ -41,6 +41,7 @@ import (
 	"github.com/omcgo/omcgo/internal/eventlog"
 	"github.com/omcgo/omcgo/internal/events"
 	"github.com/omcgo/omcgo/internal/filemanager"
+	"github.com/omcgo/omcgo/internal/imsparam"
 	"github.com/omcgo/omcgo/internal/interop"
 	"github.com/omcgo/omcgo/internal/interop/cases"
 	"github.com/omcgo/omcgo/internal/license"
@@ -278,6 +279,8 @@ func initSoftwareModule(c *Container) error {
 	runtimeLogSubRepo := transferrepo.NewPgSubTaskRepo(c.PgPool, transferrepo.TableRuntimeLogCollectSubTasks, transferrepo.TableRuntimeLogCollectTasks)
 	faultLogTaskRepo := transferrepo.NewPgTaskRepo(c.PgPool, transferrepo.TableFaultLogCollectTasks)
 	faultLogSubRepo := transferrepo.NewPgSubTaskRepo(c.PgPool, transferrepo.TableFaultLogCollectSubTasks, transferrepo.TableFaultLogCollectTasks)
+	imsParamTaskRepo := transferrepo.NewPgTaskRepo(c.PgPool, transferrepo.TableImsParamCollectTasks)
+	imsParamSubRepo := transferrepo.NewPgSubTaskRepo(c.PgPool, transferrepo.TableImsParamCollectSubTasks, transferrepo.TableImsParamCollectTasks)
 	deviceLockRepo := transferrepo.NewPgDeviceLockRepo(c.PgPool)
 	_ = deviceLockRepo // S4 阶段接入 reaper / executor 时启用
 
@@ -307,6 +310,11 @@ func initSoftwareModule(c *Container) error {
 			SubTaskTable: transferrepo.TableFaultLogCollectSubTasks,
 			BusinessType: transferrepo.BusinessFaultLogCollect,
 		},
+		ImsParamCollect: software.TransferRepoSet{
+			Task: imsParamTaskRepo, SubTask: imsParamSubRepo,
+			SubTaskTable: transferrepo.TableImsParamCollectSubTasks,
+			BusinessType: transferrepo.BusinessImsParamCollect,
+		},
 	}
 	taskRepo := software.NewRoutingTaskRepository(transferRouter, rawTaskRepo)
 	subTaskRepo := software.NewRoutingSubTaskRepository(transferRouter, rawSubTaskRepo)
@@ -321,7 +329,7 @@ func initSoftwareModule(c *Container) error {
 	softwareService.RestorePendingUpgrades(context.Background())
 	softwareService.StartTaskReaper()
 
-	// 定时任务调度器：周期扫所有 5 张 task 表的"pending+timing"行，到期触发。
+	// 定时任务调度器：周期扫所有 6 张 task 表的"pending+timing"行，到期触发。
 	// LogCollect 类任务的触发回调由 UFTE 模块在 initUFTEModule 中通过
 	// taskScheduler.SetCollectTrigger 注入。
 	taskScheduler := software.NewTaskScheduler(
@@ -332,6 +340,7 @@ func initSoftwareModule(c *Container) error {
 			configRestoreTaskRepo,
 			runtimeLogTaskRepo,
 			faultLogTaskRepo,
+			imsParamTaskRepo,
 		},
 		0, // 默认 30s
 		logger,
@@ -2858,6 +2867,9 @@ type miscDeps struct {
 	backupHandler       *backup.Handler
 	backupPolicyMonitor *backup.PolicyMonitor // T-0073 Phase 1
 	snapshotService     *backup.SnapshotService
+
+	// ImsParam（核心网参数文件库）
+	imsParamHandler *imsparam.Handler
 
 	// StationLog
 	stationlogHandler *stationlog.Handler

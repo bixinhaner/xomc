@@ -21,6 +21,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/omcgo/omcgo/internal/imsparam"
 	"github.com/omcgo/omcgo/internal/storageprotection"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.uber.org/zap"
@@ -239,6 +240,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			)
 		}
 		filename = derived
+	} else if isImsCoreUpload(ft) && filename == "" {
+		// 核心网采集类（参数/日志/License/恢复）：URL filename= 留空（设备自决文件名）。
+		// 设备也没给 filename 时按类型 + sn 派生兜底名。
+		if queryTaskID == "" || querySN == "" {
+			http.Error(w, "missing filename, and cannot derive: taskId/sn query params also empty", http.StatusBadRequest)
+			return
+		}
+		subType := r.URL.Query().Get("paramType")
+		filename = deriveImsFilename(subType, querySN, now)
+		h.logger.Info("derived ims filename from sn+taskId (URL filename was empty)",
+			zap.String("file_type", fileType),
+			zap.String("sn", querySN),
+			zap.String("task_id", queryTaskID),
+			zap.String("derived_filename", filename),
+		)
 	} else if filename == "" {
 		if queryTaskID == "" || querySN == "" {
 			http.Error(w, "missing filename, and cannot derive: taskId/sn query params also empty", http.StatusBadRequest)
@@ -545,6 +561,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			r.URL.Query().Get("sn"), queryTaskID)
 	}
 
+	// 6.3.1 核心网参数文件（IMS_PARAM）：同 LOG 链路发 backup.file.received ——
+	// FilePathRecorder 写 backup_restore_file（UFTE 设备列表 presigned 下载反查）+
+	// 通知 software.HandleFileLandedForCollect 把采集子任务推 Completed。
+	// TC 随后到达时走 handleTCBody 幂等收口。
+	// 参数（FT1~12）/ 日志（FT13/18/19）/ License（FT15）/ 恢复（FT17）四类同链路。
+	if isImsCoreUpload(ft) && h.eventBus != nil {
+		h.publishBackupFileReceivedEvent(ctx, bucket, objectPath, filename, info.Size, info.ETag,
+			r.URL.Query().Get("sn"), queryTaskID)
+	}
+
 	// 6.4. T-0164 G1 真机闭环修复点：FileType=PM (4) 文件入库后发 pm.file.received，
 	// pm.Collector 订阅后解析 XML 写 pm_metrics / 触发 KPI 反算。
 	// 此前只有 transfer-bridge 路径（订阅 AutonomousTransferComplete + 下载文件）
@@ -648,6 +674,12 @@ func normalizeFileType(raw string) tr069.FileType {
 		return tr069.FileTypeDataModel
 	case "SSL":
 		return tr069.FileTypeSSLCert
+	case "IMS_FILE", "IMS FILE", "IMS_PARAM", "IMSCORE_PARAMETERS_TYPE", "IMSCORE PARAMETERS FILE",
+		"IMS_LOG", "IMS LOG FILE", "IMS_LICENSE", "IMS LICENSE FILE", "IMS_RECOVERY", "IMS RECOVERY FILE":
+		// 核心网文件传输（CWMP FileType 统一 "Ims File"；历史别名保留兼容在途 URL）。
+		// 具体文件类型由 URL query paramType=FT_ImsCore_* 携带
+		// （见 internal/imsparam / docs/design/imscore-file-transfer.md）。
+		return tr069.FileTypeImsCoreParam
 	default:
 		return tr069.FileTypeRunningLog
 	}
@@ -1331,6 +1363,34 @@ func deriveUploadFilenameAt(fileType, taskID, sn string, now time.Time) string {
 
 func timestampMillis(t time.Time) string {
 	return t.Format("20060102150405") + fmt.Sprintf("%03d", t.Nanosecond()/int(time.Millisecond))
+}
+
+// isImsCoreUpload 判断是否核心网上传（FileType 别名统一归一到 IMS_PARAM 后，
+// 历史上 Log/License/Recovery 枚举不再由 URL 触达，仅保留枚举定义兼容存量对象）。
+func isImsCoreUpload(ft tr069.FileType) bool {
+	switch ft {
+	case tr069.FileTypeImsCoreParam, tr069.FileTypeImsCoreLog,
+		tr069.FileTypeImsCoreLicense, tr069.FileTypeImsCoreRecovery:
+		return true
+	}
+	return false
+}
+
+// deriveImsFilename 为 URL filename= 留空的核心网上传派生兜底文件名（与
+// executor.imsParamUploadFileName 同款格式）：paramType 去 FT_ImsCore_ 前缀 +
+// 年月日时分秒；日志类（*_Logs_U）.log 后缀，其余 .dat。paramType 非法时退化
+// sn + 毫秒时间戳，保证文件仍可落地可追踪。
+func deriveImsFilename(subType, sn string, now time.Time) string {
+	code := imsparam.NormalizeParamType(subType)
+	if _, ok := imsparam.Lookup(code); ok {
+		name := strings.TrimPrefix(code, "FT_ImsCore_")
+		ext := ".dat"
+		if imsparam.IsLogType(code) {
+			ext = ".log"
+		}
+		return fmt.Sprintf("%s_%s%s", name, now.Format("20060102150405"), ext)
+	}
+	return fmt.Sprintf("ims-%s-%s.dat", sn, timestampMillis(now))
 }
 
 // canonicalConfigBackupFilename 推导配置备份上传的规范文件名 {sn}_CFG.{ext}。

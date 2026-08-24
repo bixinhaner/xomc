@@ -14,6 +14,7 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	coremodel "github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/imsparam"
 	"github.com/omcgo/omcgo/internal/software"
 )
 
@@ -82,6 +83,13 @@ type Service struct {
 	// nil → LICENSE_UPGRADE 任务创建返回 not configured。
 	// 由 backup.LicenseService 满足；wiring 在 cmd/app/provider/modules.go。
 	licenseUpgradeDispatcher LicenseUpgradeDispatcher
+
+	// imsParamDispatcher：IMS_FILE_DISTRIBUTE 任务派发器（docs/design/imscore-file-transfer.md）。
+	// 接 SN 列表 + 参数文件 ID → ims_param_files 取文件 → 逐设备 Download
+	// device_tasks（FileType="ImsCore Parameters File"，URL 带 paramType query）。
+	// nil → IMS_FILE_DISTRIBUTE 任务创建返回 not configured。
+	// 由 imsparam.Service 满足；wiring 在 cmd/app/provider/modules.go。
+	imsParamDispatcher ImsParamDispatcher
 
 	// groupReader 是 #63 设备组可见性强制层的按设备归属读取器（device_group_members）。
 	// 由 device.NewPgDeviceGroupReader 满足；nil 表示 dev/test 退化（authz 包 nil-safe，
@@ -318,6 +326,25 @@ func (s *Service) SetLicenseUpgradeDispatcher(d LicenseUpgradeDispatcher) {
 	s.licenseUpgradeDispatcher = d
 }
 
+// ImsParamDispatcher 是 UFTE 对 imsparam.Service 的最小依赖（核心网参数下发）。
+//
+// 返回：
+//   - dispatchedID：成功时返回派发主 ID（UFTE 用作 placeholder Task.ID）
+//   - dispatchedFiles[sn]：每台设备实际下发的参数文件名（写回 sub_task.dest_version）
+//   - err：基础设施错误（文件缺失等以 ErrNotFound 包装返回）
+type ImsParamDispatcher interface {
+	DispatchImsParamByFileID(
+		ctx context.Context, targetDeviceSNs []string, fileID uuid.UUID, createUser string, upgradeTaskID uuid.UUID,
+	) (dispatchedID uuid.UUID, dispatchedFiles map[string]string, err error)
+	// PreviewImsParamFile 只查不派发：返回待下发文件（校验存在性 + 目标文件名展示）。
+	PreviewImsParamFile(ctx context.Context, fileID uuid.UUID) (fileName string, paramType string, err error)
+}
+
+// SetImsParamDispatcher 注入 IMS 文件下发派发器。
+func (s *Service) SetImsParamDispatcher(d ImsParamDispatcher) {
+	s.imsParamDispatcher = d
+}
+
 func NewService(
 	softwareService *software.SoftwareService,
 	taskTypeRepo TaskTypeRepository,
@@ -533,18 +560,19 @@ func (s *Service) StartTask(ctx context.Context, taskID uuid.UUID, visibleGroups
 		if err != nil {
 			return err
 		}
+		// 用读路径统一分类入口（resolveTaskType 带 IMS ParamType 尾段剥离重试）；
+		// 旧的 tt.FileType == task.DownloadFileType 精确比对在 IMS 任务上必然 miss。
+		matchedDef, ok := s.resolveTaskTypeForTask(ctx, catalog, task.TaskType, task.ProductClass, task.DownloadFileType)
 		var matched *TaskType
-		for i := range catalog {
-			tt := catalog[i]
-			if tt.softwareTaskType == software.TaskTypeLogCollect && tt.FileType == task.DownloadFileType {
-				matched = &tt
-				break
-			}
+		if ok {
+			matched = &matchedDef
 		}
-		// CONFIG_RESTORE / LICENSE_UPGRADE 是"直接派发 device_tasks"链路，不能走
-		// ResumeCollect（那是 Upload RPC 调度）。改走对应 dispatcher 再派发一遍，
-		// 然后把占位 upgrade_tasks 推到 ended。
-		if matched != nil && (matched.TypeCode == "CONFIG_RESTORE" || matched.TypeCode == "LICENSE_UPGRADE") {
+		// CONFIG_RESTORE / LICENSE_UPGRADE / IMS 下发类（参数/鉴权/备份）是"直接派发
+		// device_tasks"链路，不能走 ResumeCollect（那是 Upload RPC 调度）。改走对应
+		// dispatcher 再派发一遍，然后把占位 upgrade_tasks 推到 ended。
+		if matched != nil && (matched.TypeCode == "CONFIG_RESTORE" ||
+			matched.TypeCode == "LICENSE_UPGRADE" ||
+			matched.TypeCode == "IMS_FILE_DISTRIBUTE") {
 			return s.startDirectDispatchTask(ctx, task, matched)
 		}
 		transportPath, rpcType, paramPath := "", "", ""
@@ -552,8 +580,14 @@ func (s *Service) StartTask(ctx context.Context, taskID uuid.UUID, visibleGroups
 			transportPath = matched.TransportPath
 			rpcType = matched.RPCType
 			// FAULT_LOG_COLLECT 用 URLTemplate 存 SPV 参数路径（如
-			// Device.DeviceInfo.X_COM_Log.FaultLogURL）。详见 model.go 注释。
+			// Device.DeviceInfo.FaultLogURL）。详见 model.go 注释。
 			paramPath = matched.URLTemplate
+			// IMS 采集（参数/日志）：子类型落库在 download_file_type 尾段，重派发时
+			// 重新渲染进 TransportPath（executor 只认 {sn}/{taskId} 等占位符，
+			// 不认 {paramType}；License/恢复无尾段不需要渲染）。
+			if pt := imsParamTypeFromStoredFileType(task.DownloadFileType); pt != "" {
+				transportPath = renderImsParamPlaceholders(transportPath, pt)
+			}
 		}
 		return s.softwareService.ResumeCollect(ctx, taskID, transportPath, rpcType, paramPath)
 	}
@@ -618,6 +652,28 @@ func (s *Service) startDirectDispatchTask(
 			return fmt.Errorf("dispatch LICENSE_UPGRADE on resume: %w", dErr)
 		}
 		s.persistDispatchedFiles(ctx, "LICENSE_UPGRADE", task.ID, dispatchedFiles)
+	case "IMS_FILE_DISTRIBUTE":
+		if s.imsParamDispatcher == nil {
+			return fmt.Errorf("%w: %s dispatcher not wired", commonerrors.ErrInvalidInput, typeDef.TypeCode)
+		}
+		// 文件 ID 在占位任务行 file_name 列（UUID）；文件类型在
+		// download_file_type 尾段（"IMS_FILE_DISTRIBUTE:FT_ImsCore_*"）。
+		fileID, fidErr := uuid.Parse(strings.TrimSpace(task.FileName))
+		if fidErr != nil || fileID == uuid.Nil {
+			return fmt.Errorf("%w: suspended IMS task missing file id (file_name=%q)",
+				commonerrors.ErrInvalidInput, task.FileName)
+		}
+		paramType := imsParamTypeFromStoredFileType(task.DownloadFileType)
+		if _, ok := imsparam.Lookup(paramType); !ok {
+			return fmt.Errorf("%w: suspended IMS task missing paramType (download_file_type=%q)",
+				commonerrors.ErrInvalidInput, task.DownloadFileType)
+		}
+		_, dispatchedFiles, dErr := s.imsParamDispatcher.
+			DispatchImsParamByFileID(ctx, sns, fileID, task.CreateUser, task.ID)
+		if dErr != nil {
+			return fmt.Errorf("dispatch %s on resume: %w", typeDef.TypeCode, dErr)
+		}
+		s.persistDispatchedFiles(ctx, typeDef.TypeCode, task.ID, dispatchedFiles)
 	default:
 		return fmt.Errorf("%w: unsupported direct-dispatch type %s",
 			commonerrors.ErrInvalidInput, typeDef.TypeCode)
@@ -644,12 +700,17 @@ func (s *Service) ResumeLogCollectSubTask(ctx context.Context, subTask *software
 		return fmt.Errorf("load UFTE catalog: %w", err)
 	}
 	transportPath, rpcType, paramPath := "", "", ""
-	for _, tt := range catalog {
-		if tt.softwareTaskType == software.TaskTypeLogCollect && tt.FileType == parent.DownloadFileType {
-			transportPath = tt.TransportPath
-			rpcType = tt.RPCType
-			paramPath = tt.URLTemplate
-			break
+	// resolveTaskTypeForTask 带 IMS ParamType 尾段剥离重试；旧精确比对在
+	// "ImsCore Parameters File:FT_ImsCore_*" 上 miss 会导致挂起采集任务唤醒后 URL 退化。
+	matchedDef, matchedOK := s.resolveTaskTypeForTask(ctx, catalog, parent.TaskType, parent.ProductClass, parent.DownloadFileType)
+	if matchedOK {
+		transportPath = matchedDef.TransportPath
+		rpcType = matchedDef.RPCType
+		paramPath = matchedDef.URLTemplate
+		// IMS 采集（参数/日志）：子类型落库在 download_file_type 尾段，恢复时重新
+		// 渲染进模板（License/恢复无尾段不需要渲染）。
+		if pt := imsParamTypeFromStoredFileType(parent.DownloadFileType); pt != "" {
+			transportPath = renderImsParamPlaceholders(transportPath, pt)
 		}
 	}
 	if transportPath == "" {
@@ -661,6 +722,7 @@ func (s *Service) ResumeLogCollectSubTask(ctx context.Context, subTask *software
 		s.softwareService.ExecuteOneSetParamCollectDirect(ctx, subTask, paramPath, transportPath)
 		return nil
 	}
+	// 传任务行落库值（IMS 含 ":FT_ImsCore_*" 尾段），executor.ExecuteOneUpload 内部 split。
 	s.softwareService.ExecuteOneUploadDirect(ctx, subTask, parent.DownloadFileType, parent.FileName, transportPath)
 	return nil
 }
@@ -787,6 +849,43 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 	// T-0165：LICENSE_UPGRADE 与 CONFIG_RESTORE 同款，走 backup.LicenseService 派发。
 	if typeDef.TypeCode == "LICENSE_UPGRADE" {
 		return s.createLicenseUpgradeTask(ctx, &typeDef, req, createUser, createSuspended, scheduledAt)
+	}
+
+	// IMS 文件下发（OMC → 设备 Download）：占位 + 直接派发 device_tasks。
+	if typeDef.TypeCode == "IMS_FILE_DISTRIBUTE" {
+		return s.createImsParamDistributeTask(ctx, &typeDef, req, createUser, createSuspended, scheduledAt)
+	}
+
+	// IMS 文件采集（设备 → OMC Upload）。文件类型（FT_ImsCore_*）预渲染进
+	// TransportPath（{paramType} 占位符），StoredFileType 让任务行落
+	// "Ims File:FT_ImsCore_*"（反查键 + 文件类型）；CWMP 下发的 FileType 仍是
+	// catalog 统一字面值 "Ims File"（executor 把子类型放进 <ParameterType> 标签）。
+	if typeDef.TypeCode == "IMS_FILE_COLLECT" {
+		paramDef, ok := imsparam.Lookup(req.ParamType)
+		if !ok {
+			return nil, fmt.Errorf("%w: missing/invalid paramType %q for IMS_FILE_COLLECT (expect FT_ImsCore_*)",
+				commonerrors.ErrInvalidInput, req.ParamType)
+		}
+		if !paramDef.UploadSupported {
+			return nil, fmt.Errorf("%w: file type %s does not support upload", commonerrors.ErrInvalidInput, paramDef.Code)
+		}
+		createdTask, err = s.softwareService.BatchCollect(ctx, software.BatchCollectRequest{
+			DeviceIDs:              req.DeviceIDs,
+			TaskName:               req.TaskName,
+			FileType:               typeDef.FileType,
+			StoredFileType:         typeDef.FileType + ":" + paramDef.Code,
+			TargetFileNameTemplate: renderImsParamPlaceholders(typeDef.TargetFileNameTemplate, paramDef.Code),
+			TransportPath:          renderImsParamPlaceholders(typeDef.TransportPath, paramDef.Code),
+			RPCType:                typeDef.RPCType,
+			ParamPath:              typeDef.URLTemplate,
+			CreateUser:             createUser,
+			CreateSuspended:        createSuspended,
+			ScheduledAt:            scheduledAt,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return s.mapTask(ctx, catalog, createdTask)
 	}
 
 	switch {
@@ -989,6 +1088,106 @@ func (s *Service) createLicenseUpgradeTask(
 	}
 	s.persistDispatchedFiles(ctx, "LICENSE_UPGRADE", placeholder.ID, dispatchedFiles)
 	placeholder = s.finalizeDirectDispatchPlaceholder(ctx, placeholder, len(sns), "LICENSE_UPGRADE")
+
+	catalog, _ := s.loadTaskTypeCatalog(ctx)
+	return s.mapTask(ctx, catalog, placeholder)
+}
+
+// createImsParamDistributeTask 处理 IMS_FILE_DISTRIBUTE（核心网文件下发）任务创建。
+// 与 createLicenseUpgradeTask 同款：占位 upgrade_tasks + 直接派发 device_tasks，
+// TC 经 CommandKey 回推占位 sub_tasks。差异点：
+//   - 文件源是 ims_param_files（运营者在参数文件库上传），任务级单选一份文件；
+//   - download_file_type 落 "IMS_FILE_DISTRIBUTE:FT_ImsCore_*"（文件类型尾段），
+//     file_name 落文件 UUID —— 挂起/定时任务 Start 时按两者重派发同一份文件。
+//
+// createImsParamDistributeTask 处理 IMS_FILE_DISTRIBUTE（核心网文件下发）任务创建。
+// 与 createLicenseUpgradeTask 同款：占位 upgrade_tasks + 直接派发 device_tasks，
+// TC 经 CommandKey 回推占位 sub_tasks。差异点：
+//   - 文件源是 ims_param_files（运营者在文件库上传），任务级单选一份文件；
+//   - 需选文件类型（FT_ImsCore_*，Download 段），落库值带 ":FT_ImsCore_*" 尾段；
+//   - file_name 落文件 UUID —— 挂起/定时任务 Start 时按其重派发同一份文件。
+func (s *Service) createImsParamDistributeTask(
+	ctx context.Context,
+	typeDef *TaskType,
+	req CreateTaskRequest,
+	createUser string,
+	createSuspended bool,
+	scheduledAt *time.Time,
+) (*Task, error) {
+	if s.imsParamDispatcher == nil {
+		return nil, fmt.Errorf("%w: %s dispatcher not wired", commonerrors.ErrInvalidInput, typeDef.TypeCode)
+	}
+	// 落库 FileType：参数类带子类型尾段（重派发时还原 <ParameterType>），
+	// 鉴权/备份单一类型直接用 catalog 反查键。
+	paramDef, ok := imsparam.Lookup(req.ParamType)
+	if !ok || !paramDef.DownloadSupported {
+		return nil, fmt.Errorf("%w: missing/invalid paramType %q for IMS_FILE_DISTRIBUTE (expect download FT_ImsCore_* types)",
+			commonerrors.ErrInvalidInput, req.ParamType)
+	}
+	storedFileType := typeDef.FileType + ":" + paramDef.Code
+	if req.FileID == nil || *req.FileID == uuid.Nil {
+		return nil, fmt.Errorf("%w: fileId is required for %s", commonerrors.ErrInvalidInput, typeDef.TypeCode)
+	}
+
+	sns := make([]string, 0, len(req.DeviceIDs))
+	for _, did := range req.DeviceIDs {
+		dev, err := s.deviceRepo.GetByID(ctx, did)
+		if err != nil || dev == nil {
+			return nil, fmt.Errorf("%w: device %s not found", commonerrors.ErrInvalidInput, did)
+		}
+		sns = append(sns, dev.SerialNumber)
+	}
+
+	// 1) 先建占位 upgrade_tasks + sub_tasks（拿 task.ID 用于派生 CommandKey）。
+	placeholder, phErr := s.softwareService.CreatePlaceholderTrackingTask(ctx,
+		software.PlaceholderTrackingRequest{
+			DeviceIDs:   req.DeviceIDs,
+			TaskName:    req.TaskName,
+			TypeCode:    typeDef.TypeCode,    // CommandKey 前缀 = 模板 TypeCode
+			FileType:    storedFileType,      // 反查键（参数类含子类型尾段）
+			FileName:    req.FileID.String(), // 重派发用文件 UUID
+			CreateUser:  createUser,
+			Suspended:   createSuspended,
+			ScheduledAt: scheduledAt,
+		})
+	if phErr != nil {
+		return nil, fmt.Errorf("create %s placeholder: %w", typeDef.TypeCode, phErr)
+	}
+
+	// 1.5) 预览目标文件名（校验文件仍存在 + 类型与模板匹配），写到
+	// sub_task.dest_version 让挂起 / 定时任务在派发前也能看到"目标文件"。
+	if previewName, previewParamType, prevErr := s.imsParamDispatcher.PreviewImsParamFile(ctx, *req.FileID); prevErr == nil {
+		if def, ok := imsparam.Lookup(previewParamType); ok {
+			// 所选文件的类型必须与任务所选文件类型一致（防文件库与任务表单错配）。
+			if def.Code != imsparam.NormalizeParamType(req.ParamType) {
+				return nil, fmt.Errorf("%w: file %s (type %s) does not match selected param type %s",
+					commonerrors.ErrInvalidInput, previewName, def.Code, req.ParamType)
+			}
+		}
+		previewFiles := make(map[string]string, len(sns))
+		for _, sn := range sns {
+			previewFiles[sn] = previewName
+		}
+		s.persistDispatchedFiles(ctx, typeDef.TypeCode, placeholder.ID, previewFiles)
+	} else {
+		s.logger.Warn("preview IMS file failed; dest_version stays empty",
+			zap.String("task_id", placeholder.ID.String()), zap.Error(prevErr))
+	}
+
+	// 2) Suspended / scheduled：到此结束；等用户点"开始"或 scheduler 到点触发。
+	if createSuspended || (scheduledAt != nil && scheduledAt.After(time.Now())) {
+		catalog, _ := s.loadTaskTypeCatalog(ctx)
+		return s.mapTask(ctx, catalog, placeholder)
+	}
+
+	// 3) 派发 device_tasks（CommandKey 与 sub_task 一致 → TC 自动推进）。
+	_, dispatchedFiles, err := s.imsParamDispatcher.
+		DispatchImsParamByFileID(ctx, sns, *req.FileID, createUser, placeholder.ID)
+	if err != nil {
+		return nil, fmt.Errorf("dispatch %s: %w", typeDef.TypeCode, err)
+	}
+	s.persistDispatchedFiles(ctx, typeDef.TypeCode, placeholder.ID, dispatchedFiles)
+	placeholder = s.finalizeDirectDispatchPlaceholder(ctx, placeholder, len(sns), typeDef.TypeCode)
 
 	catalog, _ := s.loadTaskTypeCatalog(ctx)
 	return s.mapTask(ctx, catalog, placeholder)
@@ -1628,13 +1827,21 @@ func (s *Service) mapTask(ctx context.Context, catalog []TaskType, task *softwar
 	if typeDef.softwareTaskType != software.TaskTypeLogCollect {
 		taskTargetVersion = strings.TrimSpace(task.FileName)
 	}
+	// IMS 任务把 ParamType 附加到类型展示名（"核心网参数采集（P3 IMS用户设置）"），
+	// 让任务列表无需新列即可区分同模板不同参数类型的具体任务。
+	typeDisplayName := typeDef.DisplayName
+	if typeDef.Category == "ims_core" {
+		if pt := imsParamTypeFromStoredFileType(task.DownloadFileType); pt != "" {
+			typeDisplayName = fmt.Sprintf("%s（%s）", typeDef.DisplayName, imsparam.DisplayName(pt))
+		}
+	}
 	return &Task{
 		ID:              task.ID.String(),
 		TaskName:        task.TaskName,
 		Category:        typeDef.Category,
 		CategoryLabel:   typeDef.CategoryLabel,
 		TypeCode:        typeDef.TypeCode,
-		TypeDisplayName: typeDef.DisplayName,
+		TypeDisplayName: typeDisplayName,
 		FirmwareID:      firmwareID,
 		TargetVersion:   taskTargetVersion,
 		ProductType:     task.ProductClass,
@@ -1803,11 +2010,13 @@ func (s *Service) mapDeviceItem(
 	} else if targetVersion == "" {
 		targetVersion = parent.FileName
 	}
-	// CONFIG_RESTORE / LICENSE_UPGRADE 是 ACS → 设备 的下发方向：UFTE 派发后把实际
-	// 下发文件名（snapshot / license 文件 basename）写到 sub_task.dest_version，
-	// 这里直接拎出来填到 TargetFile 让前端"目标文件"列正常展示。
-	// 这两类不走 fileLandedLookup（没有上行文件落地），下面 if 分支也跳过。
-	isDirectDispatchFile := typeDef.TypeCode == "CONFIG_RESTORE" || typeDef.TypeCode == "LICENSE_UPGRADE"
+	// CONFIG_RESTORE / LICENSE_UPGRADE / IMS_FILE_DISTRIBUTE 是 ACS → 设备 的下发方向：
+	// UFTE 派发后把实际下发文件名（snapshot / license / 参数文件 basename）写到
+	// sub_task.dest_version，这里直接拎出来填到 TargetFile 让前端"目标文件"列正常展示。
+	// 这几类不走 fileLandedLookup（没有上行文件落地），下面 if 分支也跳过。
+	isDirectDispatchFile := typeDef.TypeCode == "CONFIG_RESTORE" ||
+		typeDef.TypeCode == "LICENSE_UPGRADE" ||
+		typeDef.TypeCode == "IMS_FILE_DISTRIBUTE"
 	if isDirectDispatchFile && subTask.DestVersion != "" {
 		targetFile = subTask.DestVersion
 	}
@@ -1913,6 +2122,13 @@ func (s *Service) mapDeviceItem(
 		startedAt = endedAt
 	}
 
+	// IMS 任务设备列表同步附加 ParamType 后缀（与 mapTask 口径一致）。
+	deviceTypeDisplayName := typeDef.DisplayName
+	if typeDef.Category == "ims_core" {
+		if pt := imsParamTypeFromStoredFileType(parent.DownloadFileType); pt != "" {
+			deviceTypeDisplayName = fmt.Sprintf("%s（%s）", typeDef.DisplayName, imsparam.DisplayName(pt))
+		}
+	}
 	return &DeviceItem{
 		ID:              subTask.ID.String(),
 		TaskID:          subTask.TaskID.String(),
@@ -1920,7 +2136,7 @@ func (s *Service) mapDeviceItem(
 		Category:        typeDef.Category,
 		CategoryLabel:   typeDef.CategoryLabel,
 		TypeCode:        typeDef.TypeCode,
-		TypeDisplayName: typeDef.DisplayName,
+		TypeDisplayName: deviceTypeDisplayName,
 		DeviceName:      deviceName,
 		DeviceSN:        subTask.DeviceSN,
 		ProductType:     productType,

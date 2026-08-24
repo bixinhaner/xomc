@@ -10,6 +10,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	coremodel "github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/imsparam"
 	"github.com/omcgo/omcgo/internal/software"
 )
 
@@ -167,6 +168,11 @@ type CreateTaskRequest struct {
 	// 解析失败 / 时间已过 → 退化为 immediate（不阻断主流程，由 service 层兜底）。
 	ScheduledAt string `json:"scheduledAt,omitempty"`
 	Note        string `json:"note"`
+	// ParamType 核心网（ims_core）任务必填：参数类型标签 FT_ImsCore_*，
+	// 区分 ImsCore Parameters File 下的具体参数配置（FT1~FT12）。
+	ParamType string `json:"paramType,omitempty"`
+	// FileID IMS_PARAM_DISTRIBUTE 必填：参数文件库（ims_param_files）目标文件 ID。
+	FileID *uuid.UUID `json:"fileId,omitempty"`
 }
 
 type TaskTypeWriteRequest struct {
@@ -613,6 +619,68 @@ func builtInTaskTypes() []TaskType {
 			UpdatedAt:              now,
 			softwareTaskType:       software.TaskTypeLogCollect, // 同上
 		},
+		{
+			// 核心网文件采集（imscore_filetask.txt Upload 段，设备 → OMC）。
+			// CWMP FileType 统一 "ImsCore Parameters File"（核心网侧要求所有文件传输
+			// 共用此字面值；方向由 Upload RPC 表达），具体类型由报文 <ParameterType>
+			// 标签承载（FT_ImsCore_*），在 CreateTask 时预渲染进 TransportPath 的
+			// {paramType} 占位符；任务行 download_file_type 落
+			// "ImsCore Parameters File:FT_ImsCore_*"（反查键 + 文件类型，见 resolveTaskType）。
+			TypeCode:         "IMS_FILE_COLLECT",
+			SortOrder:        60,
+			Category:         "ims_core",
+			CategoryLabel:    "核心网",
+			DisplayName:      "核心网文件采集",
+			Description:      "核心网（IMS Core）文件采集（Upload 段 17 种文件类型），FileType 统一为 ImsCore Parameters File，文件类型（ParameterType）区分。",
+			RPCType:          "UPLOAD",
+			BuiltIn:          true,
+			Enabled:          true,
+			StepChain:        []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"},
+			PermissionCode:   "CODE_IMS_FILE_COLLECT",
+			PlatformScope:    []string{},
+			Products:         []string{},
+			FileType:         imsparam.CWMPFileTypeImsParam,
+			FileTypeLabel:    "ImsCore Parameters File",
+			FileTypeEditable: false,
+			// 目标文件名由 executor 固定生成（类型去 FT_ImsCore_ 前缀 + 年月日时分秒，
+			// 日志类 .log / 其余 .dat），模板值仅作 UI 展示。
+			TargetFileNameTemplate: "{paramTypeShort}_{yyyyMMddHHmmss}.dat",
+			FileNameTemplate:       "{paramTypeShort}_{yyyyMMddHHmmss}.dat",
+			TransportPath:          "/smallcell/FileUploadService?fileType=" + imsparam.UploadQueryFileTypeAlias + "&paramType={paramType}&sn={sn}&taskId={taskId}&filename=",
+			LastEditor:             "system",
+			UpdatedAt:              now,
+			softwareTaskType:       software.TaskTypeLogCollect,
+		},
+		{
+			// 核心网文件下发（imscore_filetask.txt Download 段，OMC → 设备）。
+			// 与 LICENSE_UPGRADE / CONFIG_RESTORE 同款"占位 + 直接派发 device_tasks"链路；
+			// catalog FileType "IMS_FILE_DISTRIBUTE" 仅作任务行反查键（真实 CWMP
+			// FileType 由 imsparam.Service 派发时统一写死为 ImsCore Parameters File），任务行
+			// download_file_type 落 "IMS_FILE_DISTRIBUTE:FT_ImsCore_*"，
+			// file_name 落所选文件 UUID（挂起/定时重派发用）。
+			TypeCode:               "IMS_FILE_DISTRIBUTE",
+			SortOrder:              65,
+			Category:               "ims_core",
+			CategoryLabel:          "核心网",
+			DisplayName:            "核心网文件下发",
+			Description:            "从文件库选取指定文件类型（Download 段 9 种）的文件，通过 TR-069 Download RPC 下发到核心网设备。",
+			RPCType:                "DOWNLOAD",
+			BuiltIn:                true,
+			Enabled:                true,
+			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"},
+			PermissionCode:         "CODE_IMS_FILE_DISTRIBUTE",
+			PlatformScope:          []string{},
+			Products:               []string{},
+			FileType:               "IMS_FILE_DISTRIBUTE",
+			FileTypeLabel:          "ImsCore Parameters File",
+			FileTypeEditable:       false,
+			TargetFileNameTemplate: "{file_name}",
+			FileNameTemplate:       "{file_name}",
+			TransportPath:          "/smallcell/FileDownloadService/ims-params/{object_path}",
+			LastEditor:             "system",
+			UpdatedAt:              now,
+			softwareTaskType:       software.TaskTypeLogCollect,
+		},
 	}
 }
 
@@ -659,14 +727,23 @@ func resolveTaskType(catalog []TaskType, taskType software.TaskType, productClas
 	// RUNTIME_LOG_COLLECT, CONFIG_BACKUP_XML, CONFIG_BACKUP_NV, CONFIG_RESTORE
 	// all use TaskTypeLogCollect=10), disambiguate by matching the FileType
 	// stored on the upgrade_task row against each catalog entry's FileType.
+	//
+	// IMS 任务（ims_core）的落库值带 ParamType 尾段（"ImsCore Parameters File:FT_ImsCore_*" /
+	// "IMS_PARAM_DISTRIBUTE:FT_ImsCore_*"）：先精确匹配，未命中且串含 ':' 时去掉最后一段
+	// 再匹配一次（catalog 字面值 "ImsCore Parameters File" / "IMS_PARAM_DISTRIBUTE"）。
+	if item, ok := matchTaskTypeByFileType(catalog, taskType, fileType); ok {
+		return item, true
+	}
+	if idx := strings.LastIndex(fileType, ":"); idx > 0 {
+		if item, ok := matchTaskTypeByFileType(catalog, taskType, fileType[:idx]); ok {
+			return item, true
+		}
+	}
 	var fallback TaskType
 	foundFallback := false
 	for _, item := range catalog {
 		if item.softwareTaskType != taskType {
 			continue
-		}
-		if fileType != "" && item.FileType != "" && fileType == item.FileType {
-			return item, true
 		}
 		if !foundFallback {
 			if item.techHint == nil {
@@ -685,6 +762,46 @@ func resolveTaskType(catalog []TaskType, taskType software.TaskType, productClas
 		return findTaskTypeByCode(catalog, "ENB_IMG_UPGRADE")
 	}
 	return TaskType{}, false
+}
+
+// matchTaskTypeByFileType 精确匹配 fileType == item.FileType 的 catalog 条目。
+func matchTaskTypeByFileType(catalog []TaskType, taskType software.TaskType, fileType string) (TaskType, bool) {
+	if fileType == "" {
+		return TaskType{}, false
+	}
+	for _, item := range catalog {
+		if item.softwareTaskType != taskType {
+			continue
+		}
+		if item.FileType != "" && fileType == item.FileType {
+			return item, true
+		}
+	}
+	return TaskType{}, false
+}
+
+// imsParamTypeFromStoredFileType 从任务行 download_file_type 落库值解析 ParamType
+// 尾段（"ImsCore Parameters File:FT_ImsCore_Policy_Setting_UD" → "FT_ImsCore_Policy_Setting_UD"）。
+// 尾段不是合法 FT_ImsCore_* 时返回空串。
+func imsParamTypeFromStoredFileType(fileType string) string {
+	idx := strings.LastIndex(fileType, ":")
+	if idx < 0 || idx == len(fileType)-1 {
+		return ""
+	}
+	tail := fileType[idx+1:]
+	if _, ok := imsparam.Lookup(tail); !ok {
+		return ""
+	}
+	return imsparam.NormalizeParamType(tail)
+}
+
+// renderImsParamPlaceholders 把模板里的 {paramType} 占位符替换为运行时 ParamType。
+// 在 CreateTask / Resume 时预渲染，executor 零改动。
+func renderImsParamPlaceholders(tmpl, paramType string) string {
+	if tmpl == "" || paramType == "" {
+		return tmpl
+	}
+	return strings.ReplaceAll(tmpl, "{paramType}", paramType)
 }
 
 func matchesTaskTypeScope(item TaskType, productClass string) bool {
@@ -941,6 +1058,23 @@ func materializeTaskTypes(stored []TaskType) []TaskType {
 			item.StepChain = base.StepChain
 			if item.FirmwareFileType == nil && base.FirmwareFileType != nil {
 				item.FirmwareFileType = firmwareFileTypePtr(*base.FirmwareFileType)
+			}
+			// 内置模板且 FileType 不可编辑（固定反查键：IMS_FILE_* / CONFIG_* /
+			// LICENSE_UPGRADE / VERSION_ROLLBACK 等）→ 强制跟随代码定义，避免代码
+			// 升级后 DB 里残留的旧字面值（如 "ImsCore_Parameters_Type"）导致
+			// resolveTaskType 反查 miss、任务错归模板。升级类（fileTypeEditable=true）
+			// 保留用户编辑值。
+			if !base.FileTypeEditable {
+				item.FileType = base.FileType
+				item.FileTypeLabel = base.FileTypeLabel
+			}
+			// 核心网（ims_core）内置模板的 TransportPath 同样强制跟随代码定义：
+			// 内置模板的传输路径由代码统一定义（模板 UI 不暴露 transport_path 编辑），
+			// 且含 fileType URL 别名等与报文契约耦合的细节——EnsureBuiltInTaskTypes
+			// 只插入不更新，不同步会让代码升级后新建任务仍用旧别名（如 IMS_FILE）。
+			if base.Category == "ims_core" {
+				item.TransportPath = base.TransportPath
+				item.URLTemplate = base.URLTemplate
 			}
 		}
 		result = append(result, item)

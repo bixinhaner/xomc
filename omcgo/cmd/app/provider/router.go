@@ -153,6 +153,15 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init:    func() error { return initBackupModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
+		Name: "imsparam",
+		// 核心网参数文件库（docs/design/imscore-file-transfer.md）。
+		// 依赖 software（BuildDirectDispatchCommandKey / device_tasks 队列语义）、
+		// ufte（IMS_PARAM_DISTRIBUTE 派发器反向注入目标必须先就绪）、task（c.TaskSvc）、
+		// admin（sys_configs transfer policy 失效钩子）。
+		Depends: []string{"software", "ufte", "task", "admin"},
+		Init:    func() error { return initImsParamModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
 		Name:    "stationlog",
 		Depends: []string{"device"},
 		Init:    func() error { return initStationLogModule(c) },
@@ -679,6 +688,12 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- Backup routes → resource "devices" -----
 	md.backupHandler.RegisterRoutes(featGroup("devices", deviceMonitorFeatures...))
+
+	// ----- ImsParam routes（核心网参数文件库）→ resource "firmware" -----
+	// 与 UFTE 同资源组：参数文件库 + 派发同属文件传输域（文件管理/任务管理页面使用）。
+	if md.imsParamHandler != nil {
+		md.imsParamHandler.RegisterRoutes(featGroup("firmware", "eNB.UpgradeFile", "gNB.UpgradeFile", "CPE.UpgradeFile"))
+	}
 
 	// ----- 文件管理 4 Tab 批量下载（bundle 模块,同步流式） -----
 	// 每个模块 POST /<module>/batch-download 挂在各自资源下,鉴权独立。

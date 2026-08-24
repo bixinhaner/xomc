@@ -23393,6 +23393,170 @@ $$;
 -- above keeps new and updated tasks indexed; runtime lookups lazily repair the
 -- rare historical miss.
 -- +omcgo MainReconcileEnd
+-- 核心网（IMS Core）参数配置文件传输：任务表对 + 参数文件库。
+-- docs/design/imscore-file-transfer.md。幂等写法供既有库 reconcile 自动协调。
+-- +omcgo MainReconcileBegin
+CREATE TABLE IF NOT EXISTS public.ims_param_collect_tasks (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    firmware_id uuid,
+    status character varying(20) DEFAULT 'pending'::character varying NOT NULL,
+    error_message text,
+    retry_count integer DEFAULT 0 NOT NULL,
+    max_retries integer DEFAULT 3 NOT NULL,
+    started_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    task_name character varying(256),
+    task_type smallint DEFAULT 1 NOT NULL,
+    file_name character varying(256),
+    file_md5 character varying(64),
+    result character varying(20),
+    product_class character varying(64),
+    is_keep_config boolean DEFAULT true,
+    create_status character varying(16) DEFAULT 'active'::character varying NOT NULL,
+    create_user character varying(64) DEFAULT 'system'::character varying NOT NULL,
+    total_count integer DEFAULT 0 NOT NULL,
+    success_count integer DEFAULT 0 NOT NULL,
+    fail_count integer DEFAULT 0 NOT NULL,
+    max_concurrent integer DEFAULT 5,
+    ended_at timestamp with time zone,
+    strategy character varying(16) DEFAULT 'full'::character varying NOT NULL,
+    canary_stages jsonb,
+    current_stage integer DEFAULT 0 NOT NULL,
+    stage_status character varying(20) DEFAULT 'pending'::character varying NOT NULL,
+    stage_history jsonb DEFAULT '[]'::jsonb NOT NULL,
+    auto_advance boolean DEFAULT false NOT NULL,
+    auto_advance_minutes integer DEFAULT 0 NOT NULL,
+    rollback_reason text,
+    rollback_source character varying(32) DEFAULT 'manual'::character varying NOT NULL,
+    rollback_target_firmware_id uuid,
+    rollback_on_failure boolean DEFAULT false NOT NULL,
+    download_file_type text DEFAULT ''::text NOT NULL,
+    scheduled_at timestamp with time zone,
+    CONSTRAINT ims_param_collect_tasks_pkey PRIMARY KEY (id),
+    CONSTRAINT chk_ims_param_collect_tasks_create_status CHECK (((create_status)::text = ANY (ARRAY[('active'::character varying)::text, ('suspend'::character varying)::text, ('timing'::character varying)::text]))),
+    CONSTRAINT chk_ims_param_collect_tasks_result CHECK (((result IS NULL) OR ((result)::text = ANY (ARRAY[('success'::character varying)::text, ('partial'::character varying)::text, ('failed'::character varying)::text, ('terminated'::character varying)::text])))),
+    CONSTRAINT chk_ims_param_collect_tasks_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('in_progress'::character varying)::text, ('suspended'::character varying)::text, ('ended'::character varying)::text]))),
+    CONSTRAINT chk_ims_param_collect_tasks_task_type CHECK ((task_type = ANY (ARRAY[1, 2, 4, 6, 8, 10])))
+);
+
+CREATE TABLE IF NOT EXISTS public.ims_param_collect_sub_tasks (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    task_id uuid NOT NULL,
+    device_id uuid NOT NULL,
+    firmware_id uuid,
+    status character varying(20) DEFAULT 'pending'::character varying NOT NULL,
+    error_message text,
+    retry_count integer DEFAULT 0 NOT NULL,
+    max_retries integer DEFAULT 3 NOT NULL,
+    device_sn character varying(64),
+    ori_version character varying(64),
+    dest_version character varying(64),
+    command_key character varying(256),
+    failure_reason text,
+    pre_suspend_status character varying(20),
+    started_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ims_param_collect_sub_tasks_pkey PRIMARY KEY (id),
+    CONSTRAINT ims_param_collect_sub_tasks_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.ims_param_collect_tasks(id) ON DELETE CASCADE,
+    CONSTRAINT chk_ims_param_collect_sub_tasks_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('downloading'::character varying)::text, ('uploading'::character varying)::text, ('rebooting'::character varying)::text, ('verifying'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text, ('suspended'::character varying)::text, ('terminated'::character varying)::text])))
+);
+
+CREATE TABLE IF NOT EXISTS public.ims_param_files (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    param_type character varying(64) NOT NULL,
+    file_name character varying(256) NOT NULL,
+    object_bucket character varying(64) NOT NULL,
+    object_path text NOT NULL,
+    md5 character varying(64),
+    file_size bigint DEFAULT 0 NOT NULL,
+    description text,
+    uploaded_by character varying(64),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ims_param_files_pkey PRIMARY KEY (id),
+    CONSTRAINT ims_param_files_param_type_file_name_key UNIQUE (param_type, file_name)
+);
+
+-- 既有库协调：param_type 从 varchar(8)（旧 P1~P12）扩到 varchar(64)，CHECK 约束
+-- 从 P1~P12 切换为 FT_ImsCore_*（core.net FTx 前缀改造）。扩列是 binary-coercible，
+-- 不重建表。先 DROP 旧 CHECK 再回填数据（旧 P 值 → FT_ImsCore 值），最后 ADD 新 CHECK，
+-- 全程幂等。
+ALTER TABLE public.ims_param_files ALTER COLUMN param_type TYPE character varying(64);
+ALTER TABLE public.ims_param_files DROP CONSTRAINT IF EXISTS ims_param_files_param_type_check;
+UPDATE public.ims_param_files SET param_type = CASE param_type
+    WHEN 'P1' THEN 'FT_ImsCore_Pcrf_Policy_Setting_UD'
+    WHEN 'P2' THEN 'FT_ImsCore_User_Setting_UD'
+    WHEN 'P3' THEN 'FT_ImsCore_Ims_User_Setting_UD'
+    WHEN 'P4' THEN 'FT_ImsCore_Pbx_User_Setting_UD'
+    WHEN 'P5' THEN 'FT_ImsCore_User_Apn_Setting_UD'
+    WHEN 'P6' THEN 'FT_ImsCore_Ue_IMEI_UD'
+    WHEN 'P7' THEN 'FT_ImsCore_Ue_Route_Setting_UD'
+    WHEN 'P8' THEN 'FT_ImsCore_User_Location_Info_U'
+    WHEN 'P9' THEN 'FT_ImsCore_eNBgNB_Location_Info_U'
+    WHEN 'P10' THEN 'FT_ImsCore_Signaling_Events_U'
+    WHEN 'P11' THEN 'FT_ImsCore_Sip_Events_U'
+    WHEN 'P12' THEN 'FT_ImsCore_Cdr_U'
+    ELSE param_type
+END
+WHERE param_type IN ('P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11', 'P12');
+ALTER TABLE public.ims_param_files ADD CONSTRAINT ims_param_files_param_type_check CHECK (
+    param_type IN (
+        -- imscore_filetask.txt（Download 段 = 文件库承载的下发源，9 种）
+        'FT_ImsCore_User_Setting_UD',
+        'FT_ImsCore_Ims_User_Setting_UD',
+        'FT_ImsCore_Pbx_User_Setting_UD',
+        'FT_ImsCore_User_Apn_Setting_UD',
+        'FT_ImsCore_Ue_IMEI_UD',
+        'FT_ImsCore_Ue_Route_Setting_UD',
+        'FT_ImsCore_Pcrf_Policy_Setting_UD',
+        'FT_ImsCore_Upload_License_D',
+        'FT_ImsCore_Recovery_D'
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_ims_param_collect_sub_tasks_command_key
+    ON public.ims_param_collect_sub_tasks USING btree (command_key) WHERE (command_key IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_ims_param_collect_sub_tasks_created_at
+    ON public.ims_param_collect_sub_tasks USING btree (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ims_param_collect_sub_tasks_device_sn
+    ON public.ims_param_collect_sub_tasks USING btree (device_sn);
+CREATE INDEX IF NOT EXISTS idx_ims_param_collect_sub_tasks_task_status
+    ON public.ims_param_collect_sub_tasks USING btree (task_id, status);
+CREATE INDEX IF NOT EXISTS idx_ims_param_collect_tasks_created_at
+    ON public.ims_param_collect_tasks USING btree (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ims_param_collect_tasks_due_scheduled
+    ON public.ims_param_collect_tasks USING btree (scheduled_at) WHERE (((create_status)::text = 'timing'::text) AND ((status)::text = 'pending'::text));
+CREATE INDEX IF NOT EXISTS idx_ims_param_files_created_at
+    ON public.ims_param_files USING btree (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ims_param_files_param_type
+    ON public.ims_param_files USING btree (param_type);
+
+DROP TRIGGER IF EXISTS trigger_ims_param_collect_sub_tasks_updated_at ON public.ims_param_collect_sub_tasks;
+CREATE TRIGGER trigger_ims_param_collect_sub_tasks_updated_at BEFORE UPDATE ON public.ims_param_collect_sub_tasks FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+DROP TRIGGER IF EXISTS trigger_ims_param_collect_tasks_updated_at ON public.ims_param_collect_tasks;
+CREATE TRIGGER trigger_ims_param_collect_tasks_updated_at BEFORE UPDATE ON public.ims_param_collect_tasks FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+DROP TRIGGER IF EXISTS trigger_ims_param_files_updated_at ON public.ims_param_files;
+CREATE TRIGGER trigger_ims_param_files_updated_at BEFORE UPDATE ON public.ims_param_files FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+ALTER TABLE public.device_active_tasks
+    DROP CONSTRAINT IF EXISTS device_active_tasks_business_type_check;
+ALTER TABLE public.device_active_tasks
+    ADD CONSTRAINT device_active_tasks_business_type_check
+        CHECK (business_type IN ('upgrade', 'rollback', 'config_backup', 'config_restore', 'runtime_log_collect', 'fault_log_collect', 'ims_param_collect'));
+-- +omcgo MainReconcileEnd
+
+-- 上游主 DDL 新增但未纳入既有库协调的列：param_models.content_hash（dictload
+-- 启动期用于跳过未变化 XML）。既有库已建过 param_models（旧结构无此列），
+-- goose 已记录 version 1 不会重放主 DDL 区——补一个幂等 reconcile 供既有库对齐。
+-- +omcgo MainReconcileBegin
+ALTER TABLE public.param_models
+    ADD COLUMN IF NOT EXISTS content_hash character varying(64);
+-- +omcgo MainReconcileEnd
+
 
 -- +goose Down
 -- +goose StatementBegin

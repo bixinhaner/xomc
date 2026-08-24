@@ -146,19 +146,30 @@ type DownloadData struct {
 	DelaySeconds   int    `json:"delay_seconds"`
 	Md5            string `json:"md5"`
 	RawMode        string `json:"raw_mode"`
+	// ParamType 是核心网参数配置（ImsCore Parameters File）的细分标签（FT_ImsCore_*），
+	// 渲染为 SOAP 报文的 <ParameterType> 元素。
+	// 非核心网任务留空，模板条件渲染 → 报文不含该标签，与既有厂商 CPE 完全兼容。
+	ParamType string `json:"param_type"`
+	// LogType 是核心网日志（Ims Log File）的细分标签（FT_ImsCore_*_Logs_U），
+	// 渲染为 <LogType> 元素；与 ParamType 按文件大类互斥。
+	LogType        string `json:"log_type"`
 	NoMoreRequests int    `json:"no_more_requests"` // 0=more requests coming, 1=last request
 }
 
 type UploadData struct {
-	ID             string `json:"id"`
-	CommandKey     string `json:"command_key"`
-	FileType       string `json:"file_type"`
-	URL            string `json:"url"`
-	Username       string `json:"username"`
-	Password       string `json:"password"`
-	DelaySeconds   int    `json:"delay_seconds"`
-	Md5            string `json:"md5"`
-	RawMode        string `json:"raw_mode"`
+	ID           string `json:"id"`
+	CommandKey   string `json:"command_key"`
+	FileType     string `json:"file_type"`
+	URL          string `json:"url"`
+	Username     string `json:"username"`
+	Password     string `json:"password"`
+	DelaySeconds int    `json:"delay_seconds"`
+	Md5          string `json:"md5"`
+	RawMode      string `json:"raw_mode"`
+	// ParamType 同上：渲染为 <ParameterType> 元素，非核心网任务留空（不渲染）。
+	ParamType string `json:"param_type"`
+	// LogType 同上：渲染为 <LogType> 元素（日志类任务用）。
+	LogType        string `json:"log_type"`
 	NoMoreRequests int    `json:"no_more_requests"` // 0=more requests coming, 1=last request
 }
 
@@ -306,6 +317,10 @@ const downloadXML = soapEnvelopeOpen +
 	`<cwmp:Download>` +
 	`<CommandKey>{{.CommandKey | xmlescape}}</CommandKey>` +
 	`<FileType>{{.FileType | xmlescape}}</FileType>` +
+	// ParameterType：核心网参数配置的 vendor 扩展标签（FT_ImsCore_*）。仅非空时渲染，
+	// 其它 Download（固件/配置恢复/license）不带此标签，保持既有厂商兼容。
+	`{{- if .ParamType}}<ParameterType>{{.ParamType | xmlescape}}</ParameterType>{{end}}` +
+	`{{- if .LogType}}<LogType>{{.LogType | xmlescape}}</LogType>{{end}}` +
 	`<URL>{{.URL | xmlescape}}</URL>` +
 	`<Username>{{.Username | xmlescape}}</Username>` +
 	`<Password>{{.Password | xmlescape}}</Password>` +
@@ -325,6 +340,9 @@ const uploadXML = soapEnvelopeOpen +
 	`<cwmp:Upload>` +
 	`<CommandKey>{{.CommandKey | xmlescape}}</CommandKey>` +
 	`<FileType>{{.FileType | xmlescape}}</FileType>` +
+	// ParameterType：同上，核心网参数采集的 vendor 扩展标签，仅非空时渲染。
+	`{{- if .ParamType}}<ParameterType>{{.ParamType | xmlescape}}</ParameterType>{{end}}` +
+	`{{- if .LogType}}<LogType>{{.LogType | xmlescape}}</LogType>{{end}}` +
 	`<URL>{{.URL | xmlescape}}</URL>` +
 	`<Username>{{.Username | xmlescape}}</Username>` +
 	`<Password>{{.Password | xmlescape}}</Password>` +
