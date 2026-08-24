@@ -198,13 +198,13 @@ func parseSNMPNotificationID(value string) (int, bool) {
 
 func alarmSeverityText(severity model.AlarmSeverity) string {
 	switch severity {
-	case model.AlarmCritical:
+	case model.AlarmCritical, 31001:
 		return "critical"
-	case model.AlarmMajor:
+	case model.AlarmMajor, 31002:
 		return "major"
-	case model.AlarmMinor:
+	case model.AlarmMinor, 31003:
 		return "minor"
-	case model.AlarmWarning:
+	case model.AlarmWarning, 31004:
 		return "warning"
 	default:
 		return "unknown"

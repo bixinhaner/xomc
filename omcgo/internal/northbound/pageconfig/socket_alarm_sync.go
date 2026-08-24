@@ -470,15 +470,21 @@ func socketAlarmSequenceJSONValue(alarm model.Alarm) any {
 }
 
 func socketAlarmStatus(alarm model.Alarm, subject string) string {
-	if subject == event.SubjectAlarmCleared || alarm.Status == model.AlarmCleared {
+	if socketAlarmIsCleared(alarm, subject) {
 		return "0"
 	}
 	return "1"
 }
 
+func socketAlarmIsCleared(alarm model.Alarm, subject string) bool {
+	return subject == event.SubjectAlarmCleared ||
+		alarm.Status == model.AlarmCleared ||
+		(alarm.ClearedAt != nil && !alarm.ClearedAt.IsZero())
+}
+
 func socketAlarmEventTime(alarm model.Alarm, subject string) time.Time {
 	eventTime := alarm.RaisedAt
-	if subject == event.SubjectAlarmCleared || alarm.Status == model.AlarmCleared {
+	if socketAlarmIsCleared(alarm, subject) {
 		if alarm.ClearedAt != nil && !alarm.ClearedAt.IsZero() {
 			eventTime = *alarm.ClearedAt
 		} else if !alarm.UpdatedAt.IsZero() {
