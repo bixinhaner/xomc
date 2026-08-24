@@ -132,15 +132,21 @@ type actionPlanQuerier interface {
 }
 
 func findConflictingActionPlan(ctx context.Context, db actionPlanQuerier, plan ActionPlan) (uuid.UUID, error) {
-	activeOrRetryable := sq.Or{
-		sq.Eq{"status": []ActionStatus{
-			ActionStatusPendingDispatch, ActionStatusDispatching, ActionStatusVerifying, ActionStatusRetryWait,
-		}},
-		sq.And{
-			sq.Eq{"status": ActionStatusSucceeded},
-			sq.Eq{"owned_rf_change": true},
-			sq.Expr("jsonb_array_length(COALESCE(rf_change_paths, '[]'::jsonb)) > 0"),
-		},
+	activeOrRetryable := sq.Sqlizer(sq.Eq{"status": []ActionStatus{
+		ActionStatusPendingDispatch, ActionStatusDispatching, ActionStatusVerifying, ActionStatusRetryWait,
+	}})
+	// A completed containment records ownership for a later, scoped recovery,
+	// but it must not suppress the baseline check for a newer reject decision.
+	// The device may have been changed out-of-band after the earlier action.
+	if plan.ActionType == ActionTypeRFOn {
+		activeOrRetryable = sq.Or{
+			activeOrRetryable,
+			sq.And{
+				sq.Eq{"status": ActionStatusSucceeded},
+				sq.Eq{"owned_rf_change": true},
+				sq.Expr("jsonb_array_length(COALESCE(rf_change_paths, '[]'::jsonb)) > 0"),
+			},
+		}
 	}
 	builder := storage.Psql.Select("id").From("device_access_actions").
 		Where(actionPlanTargetPredicate(plan, "")).
@@ -279,6 +285,16 @@ func (s *PgActionStore) FindOwnedIsolation(ctx context.Context, deviceID uuid.UU
 			AND recovery.action_type = 'rf_on'
 			AND recovery.status IN ('pending_dispatch','dispatching','verifying','retry_wait','succeeded')
 		)`).
+		Where(`NOT EXISTS (
+			SELECT 1 FROM device_access_actions successor
+			WHERE successor.device_id = a.device_id
+			AND successor.action_type = 'rf_off'
+			AND successor.status = 'succeeded'
+			AND successor.owned_rf_change = TRUE
+			AND jsonb_array_length(COALESCE(successor.rf_change_paths, '[]'::jsonb)) > 0
+			AND (successor.created_at > a.created_at
+				OR (successor.created_at = a.created_at AND successor.id > a.id))
+		)`).
 		OrderBy("a.completed_at DESC NULLS LAST", "a.created_at DESC").Limit(1).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build owned RF isolation query: %w", err)
@@ -303,14 +319,7 @@ func (s *PgActionStore) FindOpenContainment(ctx context.Context, deviceID uuid.U
 			"a.action_type": ActionTypeRFOff,
 			"a.status": []ActionStatus{
 				ActionStatusPendingDispatch, ActionStatusDispatching, ActionStatusVerifying,
-				ActionStatusRetryWait, ActionStatusSucceeded,
-			},
-		}).
-		Where(sq.Or{
-			sq.NotEq{"a.status": ActionStatusSucceeded},
-			sq.And{
-				sq.Eq{"a.owned_rf_change": true},
-				sq.Expr("jsonb_array_length(COALESCE(a.rf_change_paths, '[]'::jsonb)) > 0"),
+				ActionStatusRetryWait,
 			},
 		}).
 		Where(`NOT EXISTS (
@@ -343,14 +352,7 @@ func (s *PgActionStore) FindOpenCandidateContainment(ctx context.Context, candid
 			"a.action_type":  ActionTypeRFOff,
 			"a.status": []ActionStatus{
 				ActionStatusPendingDispatch, ActionStatusDispatching, ActionStatusVerifying,
-				ActionStatusRetryWait, ActionStatusSucceeded,
-			},
-		}).
-		Where(sq.Or{
-			sq.NotEq{"a.status": ActionStatusSucceeded},
-			sq.And{
-				sq.Eq{"a.owned_rf_change": true},
-				sq.Expr("jsonb_array_length(COALESCE(a.rf_change_paths, '[]'::jsonb)) > 0"),
+				ActionStatusRetryWait,
 			},
 		}).
 		OrderBy("a.created_at DESC").Limit(1).ToSql()

@@ -218,7 +218,7 @@ func TestPgRepositoryRejectsMissingTenantIdentityBeforeQuery(t *testing.T) {
 	require.ErrorIs(t, err, ErrCarrierRequired)
 }
 
-func TestLegacyOwnedIsolationWithoutPathsDoesNotBlockFreshContainment(t *testing.T) {
+func TestSucceededOwnedIsolationDoesNotBlockFreshDecisionContainment(t *testing.T) {
 	db := &repositoryTestDB{row: repositoryTestRow{scan: func(...any) error { return pgx.ErrNoRows }}}
 	deviceID := uuid.New()
 	_, err := findConflictingActionPlan(context.Background(), db, ActionPlan{
@@ -226,12 +226,38 @@ func TestLegacyOwnedIsolationWithoutPathsDoesNotBlockFreshContainment(t *testing
 		Direction: ActionDirectionContain, IdempotencyKey: "fresh-containment",
 	})
 	require.NoError(t, err)
-	require.Contains(t, db.lastSQL, "jsonb_array_length(COALESCE(rf_change_paths, '[]'::jsonb)) > 0")
+	require.NotContains(t, db.lastSQL, "owned_rf_change")
+	require.NotContains(t, db.lastSQL, "jsonb_array_length(COALESCE(rf_change_paths, '[]'::jsonb)) > 0")
 
 	repo := newPgActionStoreWithDB(db)
 	_, err = repo.FindOpenContainment(context.Background(), uuid.New())
 	require.NoError(t, err)
-	require.Contains(t, db.lastSQL, "jsonb_array_length(COALESCE(a.rf_change_paths, '[]'::jsonb)) > 0")
+	require.NotContains(t, db.lastSQL, "a.owned_rf_change =")
+	require.NotContains(t, db.lastSQL, "jsonb_array_length(COALESCE(a.rf_change_paths, '[]'::jsonb)) > 0")
+}
+
+func TestSuccessfulRecoveryStillConflictsForSameOwnedIsolation(t *testing.T) {
+	db := &repositoryTestDB{row: repositoryTestRow{scan: func(...any) error { return pgx.ErrNoRows }}}
+	deviceID, isolationID := uuid.New(), uuid.New()
+	_, err := findConflictingActionPlan(context.Background(), db, ActionPlan{
+		DeviceID: &deviceID, DecisionID: uuid.New(), ActionType: ActionTypeRFOn,
+		Direction: ActionDirectionRelease, RecoveryOfActionID: &isolationID,
+		IdempotencyKey: "same-recovery",
+	})
+	require.NoError(t, err)
+	require.Contains(t, db.lastSQL, "owned_rf_change")
+	require.Contains(t, db.lastSQL, "jsonb_array_length(COALESCE(rf_change_paths, '[]'::jsonb)) > 0")
+}
+
+func TestOwnedIsolationUsesLatestSuccessfulRFChangeAsRecoveryOwner(t *testing.T) {
+	db := &repositoryTestDB{row: repositoryTestRow{scan: func(...any) error { return pgx.ErrNoRows }}}
+	repo := newPgActionStoreWithDB(db)
+
+	_, err := repo.FindOwnedIsolation(context.Background(), uuid.New())
+	require.NoError(t, err)
+	require.Contains(t, db.lastSQL, "successor.device_id = a.device_id")
+	require.Contains(t, db.lastSQL, "successor.owned_rf_change = TRUE")
+	require.Contains(t, db.lastSQL, "successor.created_at > a.created_at")
 }
 
 func TestPromoteCandidateTargetMovesProjectionAndActionsAtomically(t *testing.T) {
