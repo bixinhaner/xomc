@@ -86,8 +86,7 @@ func (s *actionStoreFake) FindOpenContainment(context.Context, uuid.UUID) (*Acti
 	for _, action := range s.actions {
 		if action.ActionType == ActionTypeRFOff &&
 			(action.Status == ActionStatusPendingDispatch || action.Status == ActionStatusDispatching ||
-				action.Status == ActionStatusVerifying || action.Status == ActionStatusRetryWait ||
-				(action.Status == ActionStatusSucceeded && action.OwnedRFChange)) {
+				action.Status == ActionStatusVerifying || action.Status == ActionStatusRetryWait) {
 			copy := action
 			return &copy, nil
 		}
@@ -100,8 +99,7 @@ func (s *actionStoreFake) FindOpenCandidateContainment(_ context.Context, candid
 		if action.CandidateID != nil && *action.CandidateID == candidateID &&
 			action.ActionType == ActionTypeRFOff &&
 			(action.Status == ActionStatusPendingDispatch || action.Status == ActionStatusDispatching ||
-				action.Status == ActionStatusVerifying || action.Status == ActionStatusRetryWait ||
-				(action.Status == ActionStatusSucceeded && action.OwnedRFChange)) {
+				action.Status == ActionStatusVerifying || action.Status == ActionStatusRetryWait) {
 			copy := action
 			return &copy, nil
 		}
@@ -579,6 +577,29 @@ func TestActionServiceRejectedDecisionAutomaticallyDispatchesRFOff(t *testing.T)
 		require.Equal(t, 1, action.Attempts)
 		require.NotNil(t, action.DeviceTaskID)
 	}
+}
+
+func TestActionServiceNewRejectedDecisionRevalidatesSucceededContainment(t *testing.T) {
+	deviceID := uuid.New()
+	previous := Action{
+		ID: uuid.New(), DeviceID: &deviceID, DecisionID: uuid.New(), ActionType: ActionTypeRFOff,
+		Direction: ActionDirectionContain, Status: ActionStatusSucceeded, OwnedRFChange: true,
+		RFChangePaths: []string{"Device.Services.FAPService.1.FAPControl.LTE.AdminState"},
+		SerialNumber:  "SN-1", Carrier: "cmcc", Technology: model.TechLTE,
+	}
+	store := newActionStoreFake(previous)
+	repo := &actionRepositoryFake{evaluation: EvaluationContext{State: &AccessStateProjection{
+		DeviceID: &deviceID, State: AccessStateRejected, DecisionVersion: 2,
+	}}}
+	dispatcher := &rfDispatcherFake{}
+	service := NewActionService(store, dispatcher, repo, nil, nil)
+
+	newDecisionID := uuid.New()
+	require.NoError(t, service.PlanFromDecision(context.Background(), rejectedEvent(t, deviceID, newDecisionID, 2)))
+	require.Len(t, store.plans, 1)
+	require.Equal(t, newDecisionID, store.plans[0].DecisionID)
+	require.Equal(t, 1, dispatcher.readbackCalls)
+	require.Zero(t, dispatcher.writeCalls)
 }
 
 func TestActionServiceResumesDispatchingActionWithoutDuplicateAttempt(t *testing.T) {
