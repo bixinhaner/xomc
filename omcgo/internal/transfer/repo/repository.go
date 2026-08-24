@@ -86,6 +86,7 @@ const (
 	BusinessConfigRestore     = "config_restore"
 	BusinessRuntimeLogCollect = "runtime_log_collect"
 	BusinessFaultLogCollect   = "fault_log_collect"
+	BusinessImsParamCollect   = "ims_param_collect"
 )
 
 // 物理表名常量。Repo 实例化、跨业务 dispatch、device_active_tasks.sub_task_table 都用这套。
@@ -98,6 +99,8 @@ const (
 	TableRuntimeLogCollectSubTasks = "runtime_log_collect_sub_tasks"
 	TableFaultLogCollectTasks      = "fault_log_collect_tasks"
 	TableFaultLogCollectSubTasks   = "fault_log_collect_sub_tasks"
+	TableImsParamCollectTasks      = "ims_param_collect_tasks"
+	TableImsParamCollectSubTasks   = "ims_param_collect_sub_tasks"
 	// 旧表仍保留给 upgrade / rollback 用，列在这里方便 reaper / dispatch 集中引用。
 	TableUpgradeTasks    = "upgrade_tasks"
 	TableUpgradeSubTasks = "upgrade_sub_tasks"

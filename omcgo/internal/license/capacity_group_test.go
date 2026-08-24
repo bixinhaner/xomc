@@ -21,3 +21,19 @@ func TestCapacityGroupUsage(t *testing.T) {
 	assert.Equal(t, 5, capacityGroupUsage(usedByType, "gNB"), "ungrouped usage passes through")
 	assert.Equal(t, 0, capacityGroupUsage(nil, "eNB"))
 }
+
+func TestIsCapacityExempt(t *testing.T) {
+	assert.True(t, IsCapacityExempt("IMSCORE"), "IMSCORE is exempt")
+	assert.True(t, IsCapacityExempt("imscore"), "exemption is case-insensitive")
+	assert.True(t, IsCapacityExempt(" ImsCore "), "exemption trims whitespace like upperKey")
+	assert.False(t, IsCapacityExempt("eNB"), "radio types are not exempt")
+	assert.False(t, IsCapacityExempt(""), "empty type is not exempt")
+}
+
+func TestCapacityExemptTypes(t *testing.T) {
+	types := CapacityExemptTypes()
+	assert.Equal(t, []string{"IMSCORE"}, types, "stable sorted exempt list")
+	for _, tt := range types {
+		assert.True(t, IsCapacityExempt(tt))
+	}
+}

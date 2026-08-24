@@ -82,12 +82,27 @@ type TransferRepoRouter struct {
 	ConfigRestore     TransferRepoSet // 暂未启用 — CONFIG_RESTORE Download 路径
 	RuntimeLogCollect TransferRepoSet // FileType 前导 4 / 6（Vendor Log File / 运行日志）
 	FaultLogCollect   TransferRepoSet // FileType 前导 8（异常日志）
+	ImsParamCollect   TransferRepoSet // FileType 字面值 Ims*（核心网参数/日志/License/恢复采集，docs/design/imscore-file-transfer.md）
 }
 
 // ForUploadFileType 根据 Upload 业务的 FileType 字符串选 repo。
 // fileType 可能是 "10 {OUI} Configuration File" 或纯数字 "8"，仅看前导数字 token。
-// 不识别 → Default（旧表）兜底，保证向前兼容。
+// IMS 采集类（CWMP FileType 统一 "ImsCore Parameters File"，历史值 "Ims Log
+// File" / "Ims License File" / "Ims Recovery File" / "Ims File" 等保留兼容存量
+// 任务行），或带子类型尾段）无前导数字，按字面值前缀识别（大小写不敏感）。
+// 注意只列采集类字面值 —— 下发占位任务的反查键（"IMS_FILE_DISTRIBUTE"）也以
+// IMS 开头，但必须走 Default（旧表），与 CONFIG_RESTORE / LICENSE_UPGRADE 占位
+// 行为一致，不能用宽泛的 "IMS" 前缀。不识别 → Default（旧表）兜底。
 func (r *TransferRepoRouter) ForUploadFileType(fileType string) TransferRepoSet {
+	upper := strings.ToUpper(strings.TrimSpace(fileType))
+	for _, prefix := range [...]string{"IMSCORE PARAMETERS FILE", "IMS FILE", "IMS LOG FILE", "IMS LICENSE FILE", "IMS RECOVERY FILE"} {
+		if strings.HasPrefix(upper, prefix) {
+			if r.ImsParamCollect.Task != nil {
+				return r.ImsParamCollect
+			}
+			break
+		}
+	}
 	switch leadingNumericToken(fileType) {
 	case "4", "6":
 		if r.RuntimeLogCollect.Task != nil {
@@ -124,6 +139,10 @@ func (r *TransferRepoRouter) ForBusiness(business string) TransferRepoSet {
 		if r.FaultLogCollect.Task != nil {
 			return r.FaultLogCollect
 		}
+	case "ims_param_collect":
+		if r.ImsParamCollect.Task != nil {
+			return r.ImsParamCollect
+		}
 	}
 	return r.Default
 }
@@ -131,7 +150,7 @@ func (r *TransferRepoRouter) ForBusiness(business string) TransferRepoSet {
 // AllSets 返回当前已配置的所有 repo set（含 Default）。reaper 调用方迭代用。
 func (r *TransferRepoRouter) AllSets() []TransferRepoSet {
 	out := []TransferRepoSet{r.Default}
-	for _, s := range []TransferRepoSet{r.ConfigBackup, r.ConfigRestore, r.RuntimeLogCollect, r.FaultLogCollect} {
+	for _, s := range []TransferRepoSet{r.ConfigBackup, r.ConfigRestore, r.RuntimeLogCollect, r.FaultLogCollect, r.ImsParamCollect} {
 		if s.Task != nil {
 			out = append(out, s)
 		}

@@ -421,6 +421,14 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    # nginx 边缘网关（omc-web 容器）的 upstream 用稳定正式别名 acs-primary 反代
+    # ACS 的 TR-069 入口（/smallcell/AcsService）。必须显式注册别名，否则
+    # `server acs-primary:7557 resolve` 解析失败 → 设备 Inform 502。
+    networks:
+      default:
+        aliases:
+          - acs
+          - acs-primary
 
   app:
     build:

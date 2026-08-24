@@ -508,6 +508,21 @@ func resolveTemplate(tmpl string, vars map[string]string) string {
 	return result
 }
 
+// imsParamUploadFileName 生成 IMS 采集的目标文件名：
+// paramType 去 FT_ImsCore_ 前缀 + 年月日时分秒，如
+// FT_ImsCore_User_Setting_UD → User_Setting_UD_20260820153201.dat；
+// 日志类（*_Logs_U）用 .log 后缀。无法识别前缀时用原值兜底。
+// 日志判断本地实现（后缀 _Logs_U）——imsparam → software 已有依赖，反向 import 成环。
+func imsParamUploadFileName(paramType string, now time.Time) string {
+	trimmed := strings.TrimSpace(paramType)
+	name := strings.TrimPrefix(trimmed, "FT_ImsCore_")
+	ext := ".dat"
+	if strings.HasSuffix(trimmed, "_Logs_U") {
+		ext = ".log"
+	}
+	return fmt.Sprintf("%s_%s%s", name, now.Format("20060102150405"), ext)
+}
+
 // taskIDPrefix 提取任务 UUID 的前 8 位十六进制字符（不含连字符）。
 func taskIDPrefix(id uuid.UUID) string {
 	hex := strings.ReplaceAll(id.String(), "-", "")
@@ -618,6 +633,14 @@ func isRuntimeLogUpload(fileType, transportPath string) bool {
 		strings.Contains(normalizedPath, "FILETYPE=LOG")
 }
 
+// isImsParamUpload 判断是否核心网文件采集（TransportPath 含 fileType=IMS_PARAM）。
+// 独立判断而非并入 isRuntimeLogUpload：避免核心网任务被误标 runtimeLog 而改变
+// CommandKey 派生（"Collect LOG," 前缀）与 reaper 语义。仅用于决定是否走
+// 传输地址决策链路（与运行日志/配置备份一致）。
+func isImsParamUpload(fileType, transportPath string) bool {
+	return strings.Contains(strings.ToUpper(strings.TrimSpace(transportPath)), "FILETYPE=IMS_PARAM")
+}
+
 func isConfigBackupUpload(fileType, transportPath string) bool {
 	normalized := strings.ToUpper(strings.TrimSpace(fileType))
 	normalizedPath := strings.ToUpper(strings.TrimSpace(transportPath))
@@ -652,7 +675,13 @@ func (e *UpgradeExecutor) resolveOUIPlaceholders(deviceSN, deviceOUI string, raw
 // ExecuteOneUpload 执行日志采集类 Upload RPC 子任务。
 // 流程：设备在线检查 → 获取设备锁 → 构造上传 URL → 推送 Upload 命令 → 发送 Connection Request。
 // 当 CPE 上传完成后，ACS 收到 TransferComplete 事件，通过 handleTCBody 将子任务标记为 completed。
+//
+// fileType 是任务行 download_file_type 落库值：IMS 参数采集为
+// "ImsCore Parameters File:FT_ImsCore_*"（CWMP 字面值 + ParamType 尾段），此处 split 后
+// 真正下发 CWMP 的 FileType 是 "ImsCore Parameters File"，ParamType 单独塞进
+// SOAP 报文的 <ParamType> 标签（见 soap.UploadData.ParamType）。
 func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *UpgradeSubTask, fileType, targetFileNameTemplate, transportPath string) {
+	cwmpFileType, paramType := splitStoredFileType(fileType)
 	dev, err := e.deviceRepo.GetByID(ctx, subTask.DeviceID)
 	if err != nil {
 		e.failSubTask(ctx, subTask, "Log collect can not be started, device not found.", FailureDeviceNotFound)
@@ -693,7 +722,7 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 	// 渲染 {OUI} —— 必须在所有 {OUI} 出现的字符串上都做替换，否则 CPE 会收到
 	// 字面 "{OUI}" 的 FileType / URL，无法识别后回 FaultCode 直接拒收。
 	// UFTE 内置 catalog 里 BACKUP / PATCH 类 FileType 都带 "{OUI}" 占位符（详见 ufte/model.go）。
-	resolvedFileType := e.resolveOUIPlaceholders(dev.SerialNumber, dev.OUI, fileType)
+	resolvedFileType := e.resolveOUIPlaceholders(dev.SerialNumber, dev.OUI, cwmpFileType)
 	resolvedTransport := e.resolveOUIPlaceholders(dev.SerialNumber, dev.OUI, transportPath)
 
 	// 构造目标文件名：替换 {task_id8} 和 {sn}
@@ -702,12 +731,20 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 		"task_id8": task_id8,
 		"sn":       dev.SerialNumber,
 	})
+	// IMS 采集类（参数/日志）：目标文件名固定为 "类型去 FT_ImsCore_ 前缀_年月日时分秒
+	// + .dat/.log"（如 Policy_Setting_UD_20260820153201.dat / Operation_Logs_U_...log），
+	// 不依赖 catalog 模板值 —— 既有库 ufte_task_types 里残留的旧模板不影响文件名格式。
+	// License/恢复采集无子类型尾段，沿用模板渲染。
+	if paramType != "" {
+		targetFileName = imsParamUploadFileName(paramType, time.Now())
+	}
 
 	// 拿运行时 ACS 上传 base URL（前端"系统管理 → ACS 传输 → 上传服务"维护）。
 	// 优先级：transferProvider.Snapshot.Upload.BaseURL → SetUploadConfig 静态兜底 → 空。
 	// 凭据不下发——产品线要求 Upload / Download 都不走 HTTP Basic Auth，CPE 拿到空 Username/Password 标签即可。
 	runtimeLogUpload := isRuntimeLogUpload(resolvedFileType, resolvedTransport)
-	useTransferDecision := runtimeLogUpload || isConfigBackupUpload(resolvedFileType, resolvedTransport)
+	useTransferDecision := runtimeLogUpload || isConfigBackupUpload(resolvedFileType, resolvedTransport) ||
+		isImsParamUpload(resolvedFileType, resolvedTransport)
 	uploadBaseURL := e.resolveUploadBaseURL(ctx)
 	transferDecision := transfercfg.AddressDecision{
 		Direction:  transfercfg.TransferDirectionUpload,
@@ -756,12 +793,18 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 	commandKey := deriveUploadCommandKey(resolvedFileType, dev.OUI, dev.SerialNumber, subTask.ID.String(), runtimeLogUpload)
 	// username / password 不传——产品线要求 Upload 不走 Basic Auth，
 	// soap.UploadData 零值字段会渲染成空 <cwmp:Username></cwmp:Username>。
-	paramsJSON, err := json.Marshal(map[string]interface{}{
+	params := map[string]interface{}{
 		"command_key":      commandKey,
 		"file_type":        resolvedFileType, // 已渲染 {OUI}，避免 CPE 收到字面占位符
 		"url":              uploadURL,
 		"target_file_name": targetFileName,
-	})
+	}
+	// IMS 采集类子类型标签：统一进 <ParameterType>（两个任务模板合并后日志类
+	// 也走同一标签）。非空才带，其它任务报文结构不变。
+	if paramType != "" {
+		params["param_type"] = paramType
+	}
+	paramsJSON, err := json.Marshal(params)
 	if err != nil {
 		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.failSubTask(ctx, subTask, fmt.Sprintf("Log collect can not be started, internal error: %v", err), FailureInternalError)
@@ -1694,10 +1737,33 @@ func (e *UpgradeExecutor) failSubTaskWithLockRelease(ctx context.Context, subTas
 
 // failLockedSubTask handles the DEVICE_LOCKED case by looking up the blocking task name.
 func (e *UpgradeExecutor) failLockedSubTask(ctx context.Context, subTask *UpgradeSubTask, deviceSN string) {
-	reason := "Upgrade can not be started, device can not be in multi running tasks."
+	reason := fmt.Sprintf("Upgrade can not be started, device %s is busy in another task%s",
+		deviceSN, e.describeDeviceLockHolder(ctx, deviceSN))
 
 	// This contender never acquired the lock, so it must not release it.
 	e.failSubTaskWithLockRelease(ctx, subTask, reason, FailureDeviceLocked, false)
+}
+
+// describeDeviceLockHolder 读 Redis 设备锁 value（占用者 subTaskID），反查其主任务名，
+// 生成 " (held by task \"xxx\")" 供排查；查不到返回空串（错误信息仍可辨识）。
+func (e *UpgradeExecutor) describeDeviceLockHolder(ctx context.Context, deviceSN string) string {
+	val, err := e.redis.Get(ctx, upgradeDeviceLockKey(deviceSN)).Result()
+	if err != nil || strings.TrimSpace(val) == "" {
+		return ""
+	}
+	holderID, parseErr := uuid.Parse(strings.TrimSpace(val))
+	if parseErr != nil {
+		return ""
+	}
+	holder, lookupErr := e.subTaskRepo.GetByID(ctx, holderID)
+	if lookupErr != nil || holder == nil {
+		return ""
+	}
+	parent, parentErr := e.taskRepo.GetByID(ctx, holder.TaskID)
+	if parentErr != nil || parent == nil || parent.TaskName == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (held by task %q, wait for it to finish or terminate it first)", parent.TaskName)
 }
 
 func (e *UpgradeExecutor) completeSubTask(ctx context.Context, subTask *UpgradeSubTask, deviceSN string) {

@@ -39,7 +39,9 @@ export function TransferTemplateCard({
           <Text strong>{displayName}</Text>
           <Tag color={taskType.builtIn ? 'blue' : 'gold'}>{taskType.builtIn ? t('ufte.tag.builtIn') : t('ufte.tag.custom')}</Tag>
           <Tag>{taskType.rpcType}</Tag>
-          <Tag color="cyan">FileType {taskType.fileType}</Tag>
+          {/* ims_core：展示报文实际字面值（fileTypeLabel），catalog fileType 是
+              任务反查键不面向用户；其它分类两者一致。 */}
+          <Tag color="cyan">FileType {taskType.category === 'ims_core' ? taskType.fileTypeLabel : taskType.fileType}</Tag>
           {taskType.firmwareFileType !== undefined ? (
             <Tag color="geekblue">{t('ufte.template.softLibTag', { label: getSoftwareLibraryFileTypeLabel(taskType.firmwareFileType, t) })}</Tag>
           ) : null}

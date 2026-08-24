@@ -463,6 +463,10 @@ type BatchCollectRequest struct {
 	FileType               string // Upload RPC FileType，如 "6"（运行日志）、"8"（故障日志）
 	TargetFileNameTemplate string // 目标文件名模板，如 "runtime-{task_id8}-{sn}.tar.gz"
 	TransportPath          string // 上传路径模板（Upload 或 SPV 模式各自的 URL 模板，渲染规则不同）
+	// StoredFileType 覆盖任务行 download_file_type 的落库值（缺省 = FileType）。
+	// IMS_PARAM_COLLECT 用它落 "ImsCore Parameters File:FT_ImsCore_*"（反查键 + ParamType），
+	// 而 CWMP 下发的 file_type 仍保持统一字面值 "ImsCore Parameters File"。
+	StoredFileType string
 	// RPCType 决定使用 TR-069 Upload RPC（"UPLOAD"，默认）还是 SetParameterValues
 	// 直接给设备私有参数写 URL（"SET_PARAM_VALUES"，如 FAULT_LOG_COLLECT 用 FaultLogURL）。
 	// 留空 → "UPLOAD"，兼容现有 RUNTIME_LOG_COLLECT / CONFIG_BACKUP 链路。
@@ -497,10 +501,14 @@ func (s *SoftwareService) BatchCollect(ctx context.Context, req BatchCollectRequ
 		createUser = "system"
 	}
 
+	storedFileType := req.StoredFileType
+	if storedFileType == "" {
+		storedFileType = req.FileType
+	}
 	mainTask := &UpgradeTask{
 		TaskName:         req.TaskName,
 		TaskType:         TaskTypeLogCollect,
-		DownloadFileType: req.FileType,               // 复用字段存放 Upload FileType（如 "6"）
+		DownloadFileType: storedFileType,             // 复用字段存放 Upload FileType（如 "6"；IMS 为 "ImsCore Parameters File:FT_ImsCore_*"）
 		FileName:         req.TargetFileNameTemplate, // 复用字段存放目标文件名模板
 		Status:           TaskPending,
 		CreateStatus:     CreateStatusActive,
@@ -567,7 +575,11 @@ type PlaceholderTrackingRequest struct {
 	// resolveTaskType(catalog, taskType, productClass, fileType) 精确回找
 	// catalog 条目。对 CONFIG_RESTORE 是 "10 <OUI> Configuration File" 这种
 	// 字面值（含 <OUI> 占位），与 dispatcher 真实下发 FileType（含真实 OUI）解耦。
-	FileType   string
+	FileType string
+	// FileName 可选：落 upgrade_tasks.file_name（LogCollect 类默认存目标文件名模板，
+	// mapTask 对 LogCollect 不读该列）。IMS_PARAM_DISTRIBUTE 用它存所选参数文件 UUID，
+	// 挂起 / 定时任务 Start 时按 ID 重派发同一份文件。空串 = 不写（原行为）。
+	FileName   string
 	CreateUser string
 	Suspended  bool
 	// ScheduledAt 非 nil 且未过时 → 占位任务建成 pending + create_status=timing，
@@ -622,6 +634,7 @@ func (s *SoftwareService) CreatePlaceholderTrackingTask(
 		TaskName:         req.TaskName,
 		TaskType:         TaskTypeLogCollect, // 复用使 typeSet 过滤覆盖到本任务
 		DownloadFileType: req.FileType,       // 用 catalog FileType 字面值（含 <OUI> 占位）
+		FileName:         req.FileName,       // IMS_PARAM_DISTRIBUTE 存参数文件 UUID（可空）
 		Status:           initialStatus,
 		CreateStatus:     CreateStatusActive,
 		CreateUser:       req.CreateUser,
@@ -765,9 +778,27 @@ func (s *SoftwareService) startCollectExecution(mainTask *UpgradeTask, subTasks 
 				s.executor.ExecuteOneSetParamCollect(context.Background(), st, paramPath, transportPath)
 				return
 			}
+			// 直接传任务行落库值（IMS 为 "ImsCore Parameters File:FT_ImsCore_*"），
+			// executor.ExecuteOneUpload 内部 split 出 CWMP FileType 与 ParamType。
 			s.executor.ExecuteOneUpload(context.Background(), st, mainTask.DownloadFileType, mainTask.FileName, transportPath)
 		}(subTasks[i])
 	}
+}
+
+// splitStoredFileType 把任务行 download_file_type 落库值拆成 (CWMP FileType, ParamType)。
+// 约定见 docs/design/imscore-file-transfer.md：IMS 采集任务落库
+// "ImsCore Parameters File:FT_ImsCore_Policy_Setting_UD"（反查键 + ParamType），CWMP
+// 下发只允许统一字面值 "ImsCore Parameters File"，ParamType 单独进 SOAP 报文
+// <ParamType> 标签。用 FT_ImsCore 前缀识别而非 import imsparam（imsparam → software
+// 已有依赖，反向会成环）。非 IMS 任务（尾段非 FT_ImsCore*）→ paramType 空、原样返回。
+func splitStoredFileType(fileType string) (cwmpFileType, paramType string) {
+	if idx := strings.LastIndex(fileType, ":"); idx > 0 {
+		tail := fileType[idx+1:]
+		if strings.HasPrefix(strings.ToUpper(tail), "FT_IMSCORE") {
+			return fileType[:idx], tail
+		}
+	}
+	return fileType, ""
 }
 
 // BatchUpgrade creates a main upgrade task and sub-tasks for each device, then starts execution.
@@ -1560,6 +1591,32 @@ func (s *SoftwareService) DeleteUpgrade(ctx context.Context, taskID uuid.UUID) e
 
 	if task.Status == TaskInProgress {
 		return commonerrors.NewBusinessError(8011, "cannot delete a running task; terminate it first", commonerrors.ErrInvalidInput)
+	}
+
+	// 删除前释放子任务持有的设备级 Redis 锁（owner 校验只释放自己的）。
+	// 场景：任务行删除后 reaper / TC 回调再也找不到行推进终态（releaseOwnedDeviceLock
+	// 靠 sub_task.ID 做 owner 匹配），锁会一直挂到 1h TTL 自然过期——期间该设备的
+	// 一切新传输任务都会 DEVICE_LOCKED。TerminateUpgrade 已有同款释放（见其注释），
+	// 这里补齐 Delete 路径。best-effort：失败仅 warn，不阻断删除。
+	if s.redis != nil {
+		subs, listErr := listAllSubTasksByTaskID(ctx, s.subTaskRepo, taskID,
+			UpgradePending, UpgradeSuspended, UpgradeDownloading, UpgradeUploading)
+		if listErr != nil {
+			s.logger.Warn("list sub-tasks for device lock release on delete (best-effort)",
+				zap.String("task_id", taskID.String()), zap.Error(listErr))
+		} else {
+			for i := range subs {
+				if subs[i].DeviceSN == "" {
+					continue
+				}
+				if err := releaseOwnedDeviceLock(ctx, s.redis, subs[i].DeviceSN, subs[i].ID); err != nil {
+					s.logger.Warn("release device lock on delete (best-effort)",
+						zap.String("task_id", taskID.String()),
+						zap.String("device_sn", subs[i].DeviceSN),
+						zap.Error(err))
+				}
+			}
+		}
 	}
 
 	// 先回收任务关联的 MinIO 对象 + backup_restore_file 元数据（LogCollect 类

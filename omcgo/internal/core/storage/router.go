@@ -18,6 +18,7 @@ import (
 //	Logs      → logs bucket, running/security/fault/pcap/
 //	DataModel → exchange bucket, datamodel/
 //	SSLCert   → config_backup bucket, ssl-cert/
+//	ImsCoreParam → config_backup bucket, ims-param/（核心网参数文件，docs/design/imscore-file-transfer.md）
 func BucketAndCategory(ft tr069.FileType, buckets appconfig.BucketConfig) (bucket, category string) {
 	switch ft {
 	case tr069.FileTypeFirmware:
@@ -44,6 +45,14 @@ func BucketAndCategory(ft tr069.FileType, buckets appconfig.BucketConfig) (bucke
 		return buckets.Exchange, "datamodel"
 	case tr069.FileTypeSSLCert:
 		return appconfig.NormalizeConfigBackupBucket(buckets.ConfigBackup), "ssl-cert"
+	case tr069.FileTypeImsCoreParam:
+		return appconfig.NormalizeConfigBackupBucket(buckets.ConfigBackup), "ims-param"
+	case tr069.FileTypeImsCoreLog:
+		return appconfig.NormalizeConfigBackupBucket(buckets.ConfigBackup), "ims-log"
+	case tr069.FileTypeImsCoreLicense:
+		return appconfig.NormalizeConfigBackupBucket(buckets.ConfigBackup), "ims-license"
+	case tr069.FileTypeImsCoreRecovery:
+		return appconfig.NormalizeConfigBackupBucket(buckets.ConfigBackup), "ims-recovery"
 	default:
 		return buckets.Logs, "unknown"
 	}

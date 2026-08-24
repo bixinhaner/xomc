@@ -461,6 +461,11 @@ func (m *Monitor) evaluateCapacityExhausted(ctx context.Context, lic *SystemLice
 	anyExhausted := false
 	var sampleType string
 	for t, max := range lic.DevicesSupport {
+		// 容量豁免类型（capacity_group.go）：不参与容量满告警（EnforceCapacity
+		// 已对其放行，license 即便残留同名 key 也不再有控制语义）。
+		if IsCapacityExempt(t) {
+			continue
+		}
 		// 容量分组（issue #318）：用量按组合计（eNB 配额的用量含 GSM 设备）。
 		if max > 0 && capacityGroupUsage(usedByType, upperKey(t)) >= max {
 			anyExhausted = true

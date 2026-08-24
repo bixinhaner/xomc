@@ -168,6 +168,10 @@ export interface CreateUnifiedFileTransferTaskInput {
    */
   scheduledAt?: string;
   note?: string;
+  /** 核心网（ims_core）任务：参数类型标签 P1~P12，区分 ImsCore_Parameters_Type 具体参数配置。 */
+  paramType?: string;
+  /** IMS_PARAM_DISTRIBUTE：参数文件库目标文件 ID（ims_param_files.id）。 */
+  fileId?: string;
 }
 
 export interface CreateUnifiedFileTransferTypeInput {

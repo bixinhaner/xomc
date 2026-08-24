@@ -58,6 +58,7 @@ import {
   isDeviceStandardValueVisibleByLicense,
   isDeviceStandardVisibleByLicense,
 } from '@core/utils/licenseFeatures';
+import { useImsParamTypes, useImsParamFiles } from '@core/hooks/api/useImsParam';
 import { unifiedFileTransferApi } from '@core/services/api/unifiedFileTransferApi';
 import { configSnapshotApi } from '@core/services/api/configSnapshotApi';
 import type { BatchGetSnapshotsResult } from '@core/services/api/configSnapshotApi';
@@ -115,6 +116,21 @@ import {
 
 const { Text, Title } = Typography;
 
+/**
+ * 失败原因 Tooltip：中文说明为主文案，后端英文原文（error_message，可能含占用任务名、
+ * 厂商 FaultString 等排查线索）以次要样式附在下方——避免"列表中文、详情突然变英文"的
+ * 割裂感，同时保留原文供厂商侧排查。
+ */
+function renderFailureTooltip(display: string, detail?: string) {
+  if (!detail || detail === display) return display;
+  return (
+    <div>
+      <div>{display}</div>
+      <div style={{ marginTop: 4, fontSize: 12, opacity: 0.65, wordBreak: 'break-all' }}>{detail}</div>
+    </div>
+  );
+}
+
 // qa-614 c6 #367：任务详情 Descriptions 局部样式——标签/内容单行不换行（超长走
 // ellipsis），并把详情区字号收紧至 12（不动全局 token，避免全 v1 页面回归）。
 const DETAIL_LABEL_STYLE: React.CSSProperties = { whiteSpace: 'nowrap', fontSize: 12 };
@@ -145,6 +161,14 @@ function isUpgradeTaskCategory(category?: string) {
 
 function needsFirmwareSelection(taskType?: UnifiedFileTransferTaskType) {
   return Boolean(taskType && taskType.rpcType === 'DOWNLOAD' && isUpgradeTaskCategory(taskType.category));
+}
+
+// IMS 参数文件下拉的体积展示（B/KB/MB）。
+function formatImsFileSize(n: number): string {
+  if (!n || n < 0) return '0 B';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
 }
 
 function buildFirmwareCandidateList(versions: SoftwareVersion[]) {
@@ -431,6 +455,36 @@ export default function FileTransferCenter() {
     () => licensedTaskTypes.find((item) => item.typeCode === drawerTypeCode) ?? activeTaskType,
     [activeTaskType, drawerTypeCode, licensedTaskTypes],
   );
+  // IMS（核心网）任务：文件类型注册表 + 子类型/下发文件候选。
+  // - 参数采集/日志采集：选子类型（按模板大类过滤 kind；下发侧再限 downloadSupported）
+  // - License/恢复采集：单一类型，无子类型
+  // - 参数/鉴权/备份下发：文件库选文件（按模板对应 kind 过滤）
+  const { data: imsParamTypes = [] } = useImsParamTypes();
+  const drawerParamType = Form.useWatch('paramType', taskForm) as string | undefined;
+  // 核心网两个模板都要先选文件类型（报文 <ParameterType>）：
+  // 采集列 Upload 段（17 种）、下发列 Download 段（9 种）。
+  const IMS_SUBTYPE_TEMPLATES = new Set(['IMS_FILE_COLLECT', 'IMS_FILE_DISTRIBUTE']);
+  const isImsTaskType = drawerTypeCode !== undefined && IMS_SUBTYPE_TEMPLATES.has(drawerTypeCode);
+  const imsParamTypeOptions = useMemo(
+    () => imsParamTypes
+      .filter((item) => (drawerTypeCode === 'IMS_FILE_DISTRIBUTE' ? item.downloadSupported : item.uploadSupported))
+      .map((item) => ({ label: item.name, value: item.code })),
+    [imsParamTypes, drawerTypeCode],
+  );
+  // 下发文件候选：按所选文件类型过滤文件库。
+  const isImsDistributeType = drawerTypeCode === 'IMS_FILE_DISTRIBUTE';
+  const imsFileFilterParamType = drawerParamType;
+  const { data: imsFilePage, isLoading: imsFilesLoading } = useImsParamFiles(
+    { page: 1, pageSize: 200, paramType: imsFileFilterParamType },
+    { enabled: isImsDistributeType && Boolean(imsFileFilterParamType) },
+  );
+  const imsFileOptions = useMemo(
+    () => (imsFilePage?.items ?? []).map((f) => ({
+      label: `${f.fileName}（${formatImsFileSize(f.fileSize)}）`,
+      value: f.id,
+    })),
+    [imsFilePage],
+  );
   // #492：升级抽屉「产品类型」改为产品名。products 来自产品中心目录，用于把所选产品名映射成
   // product_id（固件按产品过滤）。
   const { data: productsData } = useProductList();
@@ -674,14 +728,11 @@ export default function FileTransferCenter() {
     render: (value: string, record: UnifiedFileTransferDeviceItem) => {
       if (!value) return '-';
       const { display } = formatFailureReasonDisplay(value, t);
-      // 设备厂商原始 fault（FaultCode + FaultString）放 Tooltip 里——i18n label 只看到统一
-      // 错误码描述，hover 后能拿到设备端原文（如 "FaultCode: 0, FaultString: httpUpload OM
-      // Http Put Upload stat file error"），方便厂商侧排查。
       const detail = record.failureDetail;
       const text = <span style={{ color: '#ff4d4f' }}>{display}</span>;
       if (!detail || detail === display) return text;
       return (
-        <Tooltip title={detail} placement="topLeft" overlayStyle={{ maxWidth: 480 }}>
+        <Tooltip title={renderFailureTooltip(display, detail)} placement="topLeft" overlayStyle={{ maxWidth: 480 }}>
           {text}
         </Tooltip>
       );
@@ -1411,6 +1462,23 @@ export default function FileTransferCenter() {
     // 选中跨页保留，用户可在"已选 N 台"清单里逐台移除。
   }, [drawerProductClass, drawerProductClassOptions, drawerTaskType, firmwareOptions, taskDrawerOpen, taskForm]);
 
+  // IMS（核心网）：切换任务类型（采集 ↔ 下发）时参数类型可选范围变化（下发仅限
+  // 支持下载的类型），已选值若不在新列表里，Select 会把原始编码（FT_ImsCore_*）
+  // 直接当文案显示——清空让用户重选；切到非 IMS 类型时同样清掉残留。
+  useEffect(() => {
+    if (!taskDrawerOpen) {
+      return;
+    }
+    const current = taskForm.getFieldValue('paramType') as string | undefined;
+    if (!current) {
+      return;
+    }
+    if (!isImsTaskType || !imsParamTypeOptions.some((option) => option.value === current)) {
+      taskForm.setFieldValue('paramType', undefined);
+      taskForm.setFieldValue('fileId', undefined);
+    }
+  }, [drawerTypeCode, taskDrawerOpen, isImsTaskType, imsParamTypeOptions, taskForm]);
+
   // 同步 in-flight 锁：防止快速连点「创建」时发出两条创建请求、落两条相同任务（issue #522）。
   // isPending 与按钮 loading 都是「渲染态」，在第一次 mutateAsync 触发的 re-render 落地前一直为 false，
   // 加上处理函数中间 await validateFields 的异步间隙，一个渲染周期内的连点都能越过 isPending 守卫。
@@ -1457,9 +1525,16 @@ export default function FileTransferCenter() {
     const scheduledAtIso = values.executionMode === 'scheduled' && rawScheduledAt
       ? toTransferSystemTimeRFC3339(rawScheduledAt, systemTimezone)
       : undefined;
+    // IMS（核心网）字段只在对应类型任务提交；其它类型剥离，避免上一类型残留值透传。
+    const IMS_TYPE_CODES = new Set(['IMS_FILE_COLLECT', 'IMS_FILE_DISTRIBUTE']);
+    const submitValues = { ...values } as typeof values & { paramType?: string; fileId?: string };
+    if (!IMS_TYPE_CODES.has(values.typeCode)) {
+      delete submitValues.paramType;
+      delete submitValues.fileId;
+    }
     void createTaskMutation
       .mutateAsync({
-        ...values,
+        ...submitValues,
         scheduledAt: scheduledAtIso,
         deviceIds: selectedDrawerDeviceIds,
         deviceCount: selectedDrawerDeviceIds.length,
@@ -1780,6 +1855,74 @@ export default function FileTransferCenter() {
               message={t('ufte.form.upsInformDispatchHint')}
               style={{ marginBottom: 16 }}
             />
+          ) : null}
+          {isImsTaskType ? (
+            <Form.Item
+              label={t('ufte.form.imsFileType')}
+              name="paramType"
+              rules={[{ required: true, message: t('ufte.form.imsFileType.required') }]}
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                options={imsParamTypeOptions}
+                placeholder={t('ufte.form.imsFileType.placeholder')}
+                onChange={() => {
+                  // 参数类型切换后文件候选集变化，清掉已选文件避免错配。
+                  taskForm.setFieldValue('fileId', undefined);
+                }}
+              />
+            </Form.Item>
+          ) : null}
+          {isImsDistributeType ? (
+            <Form.Item
+              label={(
+                <Space size={8}>
+                  <span>{t('ufte.form.imsParamFile')}</span>
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<ExportOutlined />}
+                    onClick={() =>
+                      window.open('/transfer/file-management?tab=imsParam&return=ufte', '_blank')
+                    }
+                  >
+                    {t('ufte.form.openImsParamManager')}
+                  </Button>
+                </Space>
+              )}
+              name="fileId"
+              rules={[{ required: true, message: t('ufte.form.imsParamFile.required') }]}
+              extra={(
+                <Space direction="vertical" size={0}>
+                  <Text type="secondary">{t('ufte.form.imsParamFileHint')}</Text>
+                  <Button
+                    type="link"
+                    style={{ paddingInline: 0 }}
+                    icon={<ReloadOutlined />}
+                    onClick={() => void queryClient.invalidateQueries({ queryKey: ['ims-param', 'files'] })}
+                  >
+                    {t('ufte.form.refreshImsParamFiles')}
+                  </Button>
+                </Space>
+              )}
+            >
+              <Select
+                showSearch
+                allowClear
+                optionFilterProp="label"
+                loading={imsFilesLoading}
+                disabled={isImsDistributeType && !drawerParamType}
+                placeholder={
+                  isImsDistributeType && !drawerParamType
+                    ? t('ufte.form.imsParamFile.needParamTypeFirst')
+                    : imsFileOptions.length > 0
+                      ? t('ufte.form.imsParamFile.required')
+                      : t('ufte.form.imsParamFile.empty')
+                }
+                options={imsFileOptions}
+              />
+            </Form.Item>
           ) : null}
           {needsFirmwareSelection(drawerTaskType) ? (
             <>
@@ -2302,11 +2445,11 @@ function TaskDetailDevicesPanel({ taskId }: { taskId: string }) {
       ellipsis: true,
       render: (reason: string | undefined, record) => {
         if (!reason) {
-          return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+          return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>
         }
         const { display } = formatFailureReasonDisplay(reason, t);
         return (
-          <Tooltip title={record.failureDetail || reason}>
+          <Tooltip title={renderFailureTooltip(display, record.failureDetail)}>
             <Text type="danger" style={{ fontSize: 12 }}>{display}</Text>
           </Tooltip>
         );

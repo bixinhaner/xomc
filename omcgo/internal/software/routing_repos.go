@@ -24,7 +24,7 @@ import (
 // service 完全不感知，零改动获得多表支持。
 //
 // 性能权衡：GetByID / GetByCommandKey / GetActiveByDeviceID 等"无 hint"读路径在最坏
-// 情况会 fan-out 查 4 张新表 + 1 张旧表 = 5 次 SELECT。但每次操作都是 PK / 唯一索引
+// 情况会 fan-out 查 5 张新表 + 1 张旧表 = 6 次 SELECT。但每次操作都是 PK / 唯一索引
 // 命中，单次 < 1ms；活跃任务峰值 ~500，完全可接受。
 //
 // 关键：commandKey 前缀已经能识别业务：
@@ -89,7 +89,7 @@ func (r *RoutingTaskRepository) pickByID(ctx context.Context, id uuid.UUID) (Bas
 	} else if !errors.Is(err, commonerrors.ErrNotFound) {
 		return nil, nil, err
 	}
-	for _, set := range []TransferRepoSet{r.router.ConfigBackup, r.router.RuntimeLogCollect, r.router.FaultLogCollect, r.router.ConfigRestore} {
+	for _, set := range []TransferRepoSet{r.router.ConfigBackup, r.router.RuntimeLogCollect, r.router.FaultLogCollect, r.router.ConfigRestore, r.router.ImsParamCollect} {
 		if set.Task == nil {
 			continue
 		}
@@ -217,7 +217,7 @@ func (r *RoutingTaskRepository) List(ctx context.Context, filter UpgradeTaskFilt
 // allTaskRepos 返回所有装载的 main task repo（fallback 优先）。
 func (r *RoutingTaskRepository) allTaskRepos() []BasicTaskRepo {
 	out := []BasicTaskRepo{r.fallback}
-	for _, set := range []TransferRepoSet{r.router.ConfigBackup, r.router.RuntimeLogCollect, r.router.FaultLogCollect, r.router.ConfigRestore} {
+	for _, set := range []TransferRepoSet{r.router.ConfigBackup, r.router.RuntimeLogCollect, r.router.FaultLogCollect, r.router.ConfigRestore, r.router.ImsParamCollect} {
 		if set.Task != nil {
 			out = append(out, set.Task)
 		}
@@ -314,7 +314,7 @@ func (r *RoutingSubTaskRepository) pickByID(ctx context.Context, id uuid.UUID) (
 	} else if !errors.Is(err, commonerrors.ErrNotFound) {
 		return nil, nil, err
 	}
-	for _, set := range []TransferRepoSet{r.router.ConfigBackup, r.router.RuntimeLogCollect, r.router.FaultLogCollect, r.router.ConfigRestore} {
+	for _, set := range []TransferRepoSet{r.router.ConfigBackup, r.router.RuntimeLogCollect, r.router.FaultLogCollect, r.router.ConfigRestore, r.router.ImsParamCollect} {
 		if set.SubTask == nil {
 			continue
 		}
@@ -329,7 +329,7 @@ func (r *RoutingSubTaskRepository) pickByID(ctx context.Context, id uuid.UUID) (
 
 func (r *RoutingSubTaskRepository) allSubTaskRepos() []BasicSubTaskRepo {
 	out := []BasicSubTaskRepo{r.fallback}
-	for _, set := range []TransferRepoSet{r.router.ConfigBackup, r.router.RuntimeLogCollect, r.router.FaultLogCollect, r.router.ConfigRestore} {
+	for _, set := range []TransferRepoSet{r.router.ConfigBackup, r.router.RuntimeLogCollect, r.router.FaultLogCollect, r.router.ConfigRestore, r.router.ImsParamCollect} {
 		if set.SubTask != nil {
 			out = append(out, set.SubTask)
 		}
