@@ -6333,6 +6333,9 @@ export default function NorthboundPageConfig() {
   const [apiCatalogLayout, setApiCatalogLayout] = useState<ApiCatalogLayout>(() => resolveApiCatalogLayout());
   const [selectedApi, setSelectedApi] = useState<NorthboundApiRow | null>(null);
   const pageConfigLoadingRef = useRef(false);
+  const pageConfigLoadSeqRef = useRef(0);
+  const pageConfigMutationSeqRef = useRef(0);
+  const pageConfigMutationInFlightRef = useRef(0);
   const apiUserDirtyRef = useRef(false);
   const apiUserSavingRef = useRef(false);
   const [selectedReportStatus, setSelectedReportStatus] = useState<ReportStatusInfo | null>(null);
@@ -6368,11 +6371,13 @@ export default function NorthboundPageConfig() {
       cloneDeliveryTargets(`${config.key}-file-sync`),
     ])),
   );
+  const [socketSaving, setSocketSaving] = useState<Record<string, boolean>>({});
   const [snmpTargets, setSnmpTargets] = useState<SnmpAlarmTargetRow[]>(snmpAlarmTargets);
   const [snmpEnabled, setSnmpEnabled] = useState<Record<string, boolean>>(defaultSnmpEnabled);
   const [snmpSaving, setSnmpSaving] = useState<Record<string, boolean>>({});
   const [selectedSnmp, setSelectedSnmp] = useState<SnmpAlarmTargetRow | null>(null);
   const [snmpEditor, setSnmpEditor] = useState<SnmpAlarmTargetRow | null>(null);
+  const [snmpEditorEnabled, setSnmpEditorEnabled] = useState(false);
   const [pmMetricRows, setPmMetricRows] = useState<PmMetric[]>([]);
   const [pmLoading, setPmLoading] = useState(true);
   const [pageConfigLoading, setPageConfigLoading] = useState(false);
@@ -6384,7 +6389,26 @@ export default function NorthboundPageConfig() {
   const apiGloballyEnabled = apiManagedKeys.length > 0 && apiEnabledCount === apiManagedKeys.length;
   const apiPartiallyEnabled = apiEnabledCount > 0 && apiEnabledCount < apiManagedKeys.length;
 
+  const beginPageConfigMutation = useCallback(() => {
+    pageConfigMutationSeqRef.current += 1;
+    pageConfigMutationInFlightRef.current += 1;
+  }, []);
+
+  const finishPageConfigMutation = useCallback(() => {
+    pageConfigMutationInFlightRef.current = Math.max(0, pageConfigMutationInFlightRef.current - 1);
+    pageConfigMutationSeqRef.current += 1;
+  }, []);
+
+  const shouldApplyPageConfigLoad = useCallback((loadSeq: number, mutationSeq: number) => (
+    loadSeq === pageConfigLoadSeqRef.current
+    && mutationSeq === pageConfigMutationSeqRef.current
+    && pageConfigMutationInFlightRef.current === 0
+  ), []);
+
   const loadPageConfig = useCallback(async (silent = false) => {
+    const loadSeq = pageConfigLoadSeqRef.current + 1;
+    pageConfigLoadSeqRef.current = loadSeq;
+    const mutationSeq = pageConfigMutationSeqRef.current;
     pageConfigLoadingRef.current = true;
     if (!silent) setPageConfigLoading(true);
     try {
@@ -6423,6 +6447,7 @@ export default function NorthboundPageConfig() {
           limit: 1000,
         }),
       ]);
+      if (!shouldApplyPageConfigLoad(loadSeq, mutationSeq)) return;
       const nextFileProfiles = fileProfileResp.items.map(mapApiFileProfile);
       const nextInventoryProfiles = inventoryProfileResp.items
         .map(mapApiInventoryProfile)
@@ -6511,10 +6536,12 @@ export default function NorthboundPageConfig() {
         void message.error(nt('北向页面配置加载失败，已保留当前页面数据'));
       }
     } finally {
-      pageConfigLoadingRef.current = false;
-      if (!silent) setPageConfigLoading(false);
+      if (loadSeq === pageConfigLoadSeqRef.current) {
+        pageConfigLoadingRef.current = false;
+        if (!silent) setPageConfigLoading(false);
+      }
     }
-  }, []);
+  }, [shouldApplyPageConfigLoad]);
 
   useEffect(() => {
     let cancelled = false;
@@ -6549,12 +6576,17 @@ export default function NorthboundPageConfig() {
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'hidden') return;
-      if (pageConfigLoadingRef.current || apiUserDirtyRef.current || apiUserSavingRef.current) return;
-      if (editorOpen || inventoryEditorOpen || socketEditor) return;
+      if (
+        pageConfigLoadingRef.current
+        || pageConfigMutationInFlightRef.current > 0
+        || apiUserDirtyRef.current
+        || apiUserSavingRef.current
+      ) return;
+      if (editorOpen || inventoryEditorOpen || socketEditor || snmpEditor) return;
       void loadPageConfig(true);
     }, 30000);
     return () => window.clearInterval(timer);
-  }, [editorOpen, inventoryEditorOpen, loadPageConfig, socketEditor]);
+  }, [editorOpen, inventoryEditorOpen, loadPageConfig, snmpEditor, socketEditor]);
 
   const selectedInventoryConfig = useMemo(
     () => inventoryConfigs.find((row) => row.key === selectedInventoryType) ?? inventoryConfigs[0],
@@ -6822,6 +6854,16 @@ export default function NorthboundPageConfig() {
     setSocketEditorDeliveryTargets([]);
   };
 
+  const openSnmpEditor = (target: SnmpAlarmTargetRow) => {
+    setSnmpEditor(target);
+    setSnmpEditorEnabled(Boolean(snmpEnabled[target.key]));
+  };
+
+  const closeSnmpEditor = () => {
+    setSnmpEditor(null);
+    setSnmpEditorEnabled(false);
+  };
+
   const addSocketEditorAccount = (config: SocketAlarmConfigRow) => {
     setSocketEditorAccounts((currentRows) => {
       const hasFtpAccount = currentRows.some((account) => account.type === 'ftp');
@@ -6945,6 +6987,15 @@ export default function NorthboundPageConfig() {
     });
   };
 
+  const setSocketConfigSaving = (key: string, saving: boolean) => {
+    setSocketSaving((prev) => {
+      const next = { ...prev };
+      if (saving) next[key] = true;
+      else delete next[key];
+      return next;
+    });
+  };
+
   const setSnmpTargetSaving = (key: string, saving: boolean) => {
     setSnmpSaving((prev) => {
       const next = { ...prev };
@@ -6960,6 +7011,7 @@ export default function NorthboundPageConfig() {
     const fields = inventoryFieldRowsByType[selectedInventoryConfig.key] ?? [];
     const deliveryRows = getInventoryDeliveryTargets(selectedInventoryConfig.key);
     if (!validateDeliveryTargetsBeforeSave('inventory', selectedInventoryConfig.key, deliveryRows)) return;
+    beginPageConfigMutation();
     setInventorySaving(selectedInventoryConfig.key, true);
     void Promise.all([
       northboundPageConfigApi.updateInventoryProfile(
@@ -6982,7 +7034,10 @@ export default function NorthboundPageConfig() {
       .catch(() => {
         void message.error(nt(`${selectedInventoryConfig.objectCode} Inventory 配置保存失败`));
       })
-      .finally(() => setInventorySaving(selectedInventoryConfig.key, false));
+      .finally(() => {
+        finishPageConfigMutation();
+        setInventorySaving(selectedInventoryConfig.key, false);
+      });
   };
 
   const getInventoryFieldTooltip = (key: InventoryType) => {
@@ -7216,6 +7271,7 @@ export default function NorthboundPageConfig() {
         groups,
       };
 
+      beginPageConfigMutation();
       setFileSaving(code, true);
       if (editorMode === 'create') {
         const createRequest: NorthboundFileProfile = {
@@ -7250,7 +7306,10 @@ export default function NorthboundPageConfig() {
           .catch(() => {
             void message.error(nt(`配置保存失败：${code}`));
           })
-          .finally(() => setFileSaving(code, false));
+          .finally(() => {
+            finishPageConfigMutation();
+            setFileSaving(code, false);
+          });
         return;
       }
 
@@ -7272,7 +7331,10 @@ export default function NorthboundPageConfig() {
         .catch(() => {
           void message.error(nt(`配置保存失败：${code}`));
         })
-        .finally(() => setFileSaving(code, false));
+        .finally(() => {
+          finishPageConfigMutation();
+          setFileSaving(code, false);
+        });
     });
   };
 
@@ -7657,6 +7719,7 @@ export default function NorthboundPageConfig() {
 
   const persistFileProfileEnabled = (row: ScenarioRow, checked: boolean) => {
     const previous = Boolean(scenarioEnabled[row.code]);
+    beginPageConfigMutation();
     setScenarioEnabled((prev) => ({ ...prev, [row.code]: checked }));
     setFileSaving(row.code, true);
     void northboundPageConfigApi.updateFileProfile(row.code, {
@@ -7668,11 +7731,15 @@ export default function NorthboundPageConfig() {
         setScenarioEnabled((prev) => ({ ...prev, [row.code]: previous }));
         void message.error(nt(`${row.code} 启停状态保存失败`));
       })
-      .finally(() => setFileSaving(row.code, false));
+      .finally(() => {
+        finishPageConfigMutation();
+        setFileSaving(row.code, false);
+      });
   };
 
   const persistInventoryEnabled = (row: InventoryConfigRow, checked: boolean) => {
     const previous = Boolean(inventoryEnabled[row.key]);
+    beginPageConfigMutation();
     setInventoryEnabled((prev) => ({ ...prev, [row.key]: checked }));
     setInventorySaving(row.key, true);
     void northboundPageConfigApi.updateInventoryProfile(row.key, {
@@ -7684,7 +7751,10 @@ export default function NorthboundPageConfig() {
         setInventoryEnabled((prev) => ({ ...prev, [row.key]: previous }));
         void message.error(nt(`${row.objectCode} Inventory 启停状态保存失败`));
       })
-      .finally(() => setInventorySaving(row.key, false));
+      .finally(() => {
+        finishPageConfigMutation();
+        setInventorySaving(row.key, false);
+      });
   };
 
   const hasFailedDeliveryForRuns = async (profileCode: string, runs: NorthboundFileRun[]) => {
@@ -7808,6 +7878,7 @@ export default function NorthboundPageConfig() {
       return;
     }
     const previous = Boolean(snmpEnabled[row.key]);
+    beginPageConfigMutation();
     setSnmpTargetSaving(row.key, true);
     setSnmpEnabled((prev) => ({ ...prev, [row.key]: checked }));
     void northboundPageConfigApi.updateSNMPAlarmTarget(row.key, serializeSnmpTarget(row, checked))
@@ -7820,12 +7891,17 @@ export default function NorthboundPageConfig() {
         setSnmpEnabled((prev) => ({ ...prev, [row.key]: previous }));
         void message.error(nt(`${displayName} SNMP 启停状态保存失败`));
       })
-      .finally(() => setSnmpTargetSaving(row.key, false));
+      .finally(() => {
+        finishPageConfigMutation();
+        setSnmpTargetSaving(row.key, false);
+      });
   };
 
   const persistSocketEnabled = (row: SocketAlarmConfigRow, checked: boolean) => {
     const previous = Boolean(socketEnabled[row.key]);
     const accounts = getSocketAccounts(row);
+    beginPageConfigMutation();
+    setSocketConfigSaving(row.key, true);
     setSocketEnabled((prev) => ({ ...prev, [row.key]: checked }));
     void northboundPageConfigApi.updateSocketAlarmConfig(row.key, serializeSocketConfig(row, accounts, checked))
       .then((config) => {
@@ -7837,11 +7913,16 @@ export default function NorthboundPageConfig() {
       .catch(() => {
         setSocketEnabled((prev) => ({ ...prev, [row.key]: previous }));
         void message.error(nt(`${row.name} Socket 启停状态保存失败`));
+      })
+      .finally(() => {
+        finishPageConfigMutation();
+        setSocketConfigSaving(row.key, false);
       });
   };
 
   const persistAllApiEnabled = (checked: boolean) => {
     const previous = { ...apiEnabled };
+    beginPageConfigMutation();
     setApiSwitchSaving(true);
     setApiEnabled((prev) => ({
       ...prev,
@@ -7858,7 +7939,10 @@ export default function NorthboundPageConfig() {
         setApiEnabled(previous);
         void message.error(nt('北向 API 总开关保存失败'));
       })
-      .finally(() => setApiSwitchSaving(false));
+      .finally(() => {
+        finishPageConfigMutation();
+        setApiSwitchSaving(false);
+      });
   };
 
   const patchApiUser = (key: string, patch: Partial<ApiUserRow>) => {
@@ -7888,6 +7972,7 @@ export default function NorthboundPageConfig() {
 
   const saveApiUsers = () => {
     apiUserSavingRef.current = true;
+    beginPageConfigMutation();
     setApiUserSaving(true);
     void northboundPageConfigApi.replaceAPIUsers(serializeApiUsers(apiUsers))
       .then((resp) => {
@@ -7899,6 +7984,7 @@ export default function NorthboundPageConfig() {
         void message.error(nt('北向 API 用户保存失败'));
       })
       .finally(() => {
+        finishPageConfigMutation();
         apiUserSavingRef.current = false;
         setApiUserSaving(false);
       });
@@ -7947,6 +8033,8 @@ export default function NorthboundPageConfig() {
     const accounts = socketEditorAccounts;
     const deliveryRows = socketEditorDeliveryTargets;
     if (!validateDeliveryTargetsBeforeSave('socket', row.key, deliveryRows)) return;
+    beginPageConfigMutation();
+    setSocketConfigSaving(row.key, true);
     void Promise.all([
       northboundPageConfigApi.updateSocketAlarmConfig(row.key, serializeSocketConfig(row, accounts, enabled)),
       northboundPageConfigApi.replaceDeliveryTargets(
@@ -7967,17 +8055,22 @@ export default function NorthboundPageConfig() {
       })
       .catch(() => {
         void message.error(nt(`${row.name} Socket 配置保存失败`));
+      })
+      .finally(() => {
+        finishPageConfigMutation();
+        setSocketConfigSaving(row.key, false);
       });
   };
 
   const saveSnmpEditor = (row: SnmpAlarmTargetRow) => {
-    const enabled = Boolean(snmpEnabled[row.key]);
+    const enabled = snmpEditorEnabled;
     const displayName = snmpVersionLabel(row.version);
     const blocker = getSnmpConfigBlocker(row, enabled);
     if (blocker) {
       void message.warning(nt(`${displayName} ${blocker}`));
       return;
     }
+    beginPageConfigMutation();
     setSnmpTargetSaving(row.key, true);
     void northboundPageConfigApi.updateSNMPAlarmTarget(row.key, serializeSnmpTarget(row, enabled))
       .then((target) => {
@@ -7985,12 +8078,15 @@ export default function NorthboundPageConfig() {
         setSnmpTargets((rows) => rows.map((item) => (item.key === next.key ? next : item)));
         setSnmpEnabled((prev) => ({ ...prev, [next.key]: target.enabled }));
         void message.success(nt(`${snmpVersionLabel(next.version)} 已保存`));
-        setSnmpEditor(null);
+        closeSnmpEditor();
       })
       .catch(() => {
         void message.error(nt(`${displayName} SNMP 配置保存失败`));
       })
-      .finally(() => setSnmpTargetSaving(row.key, false));
+      .finally(() => {
+        finishPageConfigMutation();
+        setSnmpTargetSaving(row.key, false);
+      });
   };
 
   const scenarioColumns: ColumnsType<ScenarioRow> = [
@@ -8881,6 +8977,7 @@ export default function NorthboundPageConfig() {
             checked={socketEnabled[row.key]}
             checkedChildren="开"
             unCheckedChildren="关"
+            loading={Boolean(socketSaving[row.key])}
             onClick={(_, event) => event.stopPropagation()}
             onChange={(checked) => persistSocketEnabled(row, checked)}
           />
@@ -8988,7 +9085,7 @@ export default function NorthboundPageConfig() {
               onClick: ({ key, domEvent }) => {
                 domEvent.stopPropagation();
                 if (key === 'view') setSelectedSnmp(row);
-                if (key === 'edit') setSnmpEditor(row);
+                if (key === 'edit') openSnmpEditor(row);
                 if (key === 'report') showLatestEventReport('snmp', row.key, effectiveReportStatus(buildSnmpReportStatus(row), Boolean(snmpEnabled[row.key])));
                 if (key === 'test') testSnmpAlarm(row);
               },
@@ -9265,6 +9362,7 @@ export default function NorthboundPageConfig() {
         <Tabs
           className={styles.tabs}
           defaultActiveKey="file"
+          destroyOnHidden
           items={[
             { key: 'file', label: <span><FileTextOutlined />北向文件配置</span>, children: fileTab },
             { key: 'inventory', label: <span><DatabaseOutlined />Inventory 文件</span>, children: inventoryTab },
@@ -9281,7 +9379,7 @@ export default function NorthboundPageConfig() {
         onCancel={() => setDeliveryTestResult(null)}
         width={480}
         className={styles.deliveryTestModal}
-        destroyOnClose
+        destroyOnHidden
         footer={(
           <Button type="primary" onClick={() => setDeliveryTestResult(null)}>
             知道了
@@ -9368,7 +9466,7 @@ export default function NorthboundPageConfig() {
         }}
         size="large"
         rootClassName={styles.inventoryDrawer}
-        destroyOnClose
+        destroyOnHidden
         extra={selectedReportStatus ? (
           <Space>
             {selectedReportStatus.artifactType === 'message' && (
@@ -9500,7 +9598,7 @@ export default function NorthboundPageConfig() {
         onClose={() => setApiCatalogOpen(false)}
         size="large"
         rootClassName={styles.apiCatalogDrawer}
-        destroyOnClose
+        destroyOnHidden
         extra={(
           <Space>
             <Button
@@ -9540,7 +9638,7 @@ export default function NorthboundPageConfig() {
         onClose={() => setSelectedApi(null)}
         size="large"
         rootClassName={styles.inventoryDrawer}
-        destroyOnClose
+        destroyOnHidden
       >
         {selectedApi && (
           <Space orientation="vertical" size={16} className={styles.drawerBody}>
@@ -9603,13 +9701,14 @@ export default function NorthboundPageConfig() {
         onClose={() => setSelectedSocket(null)}
         size="large"
         rootClassName={styles.inventoryDrawer}
-        destroyOnClose
+        destroyOnHidden
         extra={selectedSocket ? (
           <Space>
             <Switch
               checked={socketEnabled[selectedSocket.key]}
               checkedChildren="开"
               unCheckedChildren="关"
+              loading={Boolean(socketSaving[selectedSocket.key])}
               onChange={(checked) => persistSocketEnabled(selectedSocket, checked)}
             />
             <Button
@@ -9702,10 +9801,11 @@ export default function NorthboundPageConfig() {
         onClose={closeSocketEditor}
         size="large"
         rootClassName={styles.inventoryDrawer}
-        destroyOnClose
+        destroyOnHidden
         extra={socketEditor ? (
           <Button
             type="primary"
+            loading={Boolean(socketSaving[socketEditor.key])}
             onClick={() => saveSocketEditor(socketEditor)}
           >
             保存
@@ -9731,6 +9831,7 @@ export default function NorthboundPageConfig() {
 	                      checked={socketEditorEnabled}
 	                      checkedChildren="开"
 	                      unCheckedChildren="关"
+                        loading={Boolean(socketSaving[socketEditor.key])}
 	                      onChange={setSocketEditorEnabled}
 	                    />
                   </Form.Item>
@@ -9849,7 +9950,7 @@ export default function NorthboundPageConfig() {
         onClose={() => setSelectedSnmp(null)}
         size="large"
         rootClassName={styles.inventoryDrawer}
-        destroyOnClose
+        destroyOnHidden
       >
         {selectedSnmp && (
           <Space orientation="vertical" size={16} className={styles.drawerBody}>
@@ -9929,10 +10030,10 @@ export default function NorthboundPageConfig() {
       <Drawer
         title={snmpEditor ? `编辑 ${snmpVersionLabel(snmpEditor.version)}` : '编辑 SNMP 告警'}
         open={Boolean(snmpEditor)}
-        onClose={() => setSnmpEditor(null)}
+        onClose={closeSnmpEditor}
         size="large"
         rootClassName={styles.inventoryDrawer}
-        destroyOnClose
+        destroyOnHidden
         extra={snmpEditor ? (
           <Button
             type="primary"
@@ -9951,18 +10052,18 @@ export default function NorthboundPageConfig() {
               </div>
               <Form layout="vertical" className={styles.compactForm}>
                 <div className={styles.inventoryFormGrid}>
-                  {Boolean(snmpEnabled[snmpEditor.key]) && (
+                  {snmpEditorEnabled && (
                     <Form.Item label="通知类型">
                       <Select value={snmpEditor.notificationType} options={[{ label: 'Trap', value: 'Trap' }, { label: 'Inform', value: 'Inform' }]} onChange={(notificationType) => setSnmpEditor((current) => (current ? { ...current, notificationType } : current))} />
                     </Form.Item>
                   )}
                   <Form.Item label="启用告警上报">
                     <Switch
-                      checked={snmpEnabled[snmpEditor.key]}
+                      checked={snmpEditorEnabled}
                       checkedChildren="开"
                       unCheckedChildren="关"
                       loading={Boolean(snmpSaving[snmpEditor.key])}
-                      onChange={(checked) => setSnmpEnabled((prev) => ({ ...prev, [snmpEditor.key]: checked }))}
+                      onChange={setSnmpEditorEnabled}
                     />
                   </Form.Item>
                   <Form.Item label="允许 MIB 查询">
@@ -9985,7 +10086,7 @@ export default function NorthboundPageConfig() {
                       </Form.Item>
                     </>
                   )}
-                  {Boolean(snmpEnabled[snmpEditor.key]) && (
+                  {snmpEditorEnabled && (
                     <>
                       <Form.Item label="目标 IP">
                         <Input value={snmpEditor.targetHost} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, targetHost: event.target.value } : current))} />
@@ -9999,14 +10100,14 @@ export default function NorthboundPageConfig() {
               </Form>
             </div>
 
-            {(Boolean(snmpEnabled[snmpEditor.key]) || snmpEditor.mibQueryEnabled) && (
+            {(snmpEditorEnabled || snmpEditor.mibQueryEnabled) && (
               <div className={styles.editorSection}>
                 <div className={styles.editorSectionHeader}>
                   <Typography.Text strong>安全与运行</Typography.Text>
                 </div>
                 <Form layout="vertical" className={styles.compactForm}>
                   <div className={styles.inventoryFormGrid}>
-                    {snmpEditor.version === 'v2' && (Boolean(snmpEnabled[snmpEditor.key]) || snmpEditor.mibQueryEnabled) && (
+                    {snmpEditor.version === 'v2' && (snmpEditorEnabled || snmpEditor.mibQueryEnabled) && (
                       <Form.Item label="Community">
                         <MaskedCredentialInput
                           value={snmpEditor.community === storedCredentialText ? storedCredentialText : (snmpEditor.community || snmpDefaultCommunity)}
@@ -10018,7 +10119,7 @@ export default function NorthboundPageConfig() {
                         />
                       </Form.Item>
                     )}
-                    {snmpEditor.version === 'v3' && (Boolean(snmpEnabled[snmpEditor.key]) || snmpEditor.mibQueryEnabled) && (
+                    {snmpEditor.version === 'v3' && (snmpEditorEnabled || snmpEditor.mibQueryEnabled) && (
                       <>
                         <Form.Item label="安全级别">
                           <Select
@@ -10068,12 +10169,12 @@ export default function NorthboundPageConfig() {
                         )}
                       </>
                     )}
-                    {Boolean(snmpEnabled[snmpEditor.key]) && (
+                    {snmpEditorEnabled && (
                       <Form.Item label="清除告警级别">
                         <Select value={snmpEditor.clearSeverityPolicy} options={[{ label: '保留原级别', value: '保留原级别' }, { label: '清除置 0', value: '清除置 0' }]} onChange={(clearSeverityPolicy) => setSnmpEditor((current) => (current ? { ...current, clearSeverityPolicy } : current))} />
                       </Form.Item>
                     )}
-                    {Boolean(snmpEnabled[snmpEditor.key]) && snmpEditor.notificationType === 'Inform' && (
+                    {snmpEditorEnabled && snmpEditor.notificationType === 'Inform' && (
                       <>
                         <Form.Item label="超时（秒）">
                           <InputNumber value={snmpEditor.timeoutSeconds} min={1} style={{ width: '100%' }} onChange={(timeoutSeconds) => setSnmpEditor((current) => (current ? { ...current, timeoutSeconds: Number(timeoutSeconds ?? 1) } : current))} />
@@ -10111,7 +10212,7 @@ export default function NorthboundPageConfig() {
         onClose={() => setViewInventoryType(null)}
         size="large"
         rootClassName={styles.inventoryDrawer}
-        destroyOnClose
+        destroyOnHidden
         extra={viewInventoryConfig ? (
           <Button
             aria-label={`编辑 ${viewInventoryConfig.objectCode} Inventory`}
@@ -10209,7 +10310,7 @@ export default function NorthboundPageConfig() {
         onClose={() => setInventoryEditorOpen(false)}
         size="large"
         rootClassName={styles.inventoryDrawer}
-        destroyOnClose
+        destroyOnHidden
         extra={
           <Space>
             <Button aria-label="取消编辑 Inventory" onClick={() => setInventoryEditorOpen(false)}>取消</Button>
@@ -10387,7 +10488,7 @@ export default function NorthboundPageConfig() {
         open={Boolean(selectedScenario)}
         onClose={() => setSelectedScenario(null)}
         size="large"
-        destroyOnClose
+        destroyOnHidden
         extra={selectedScenario ? (
           <Button
             aria-label={`编辑 ${selectedScenario.code}`}
@@ -10547,7 +10648,7 @@ export default function NorthboundPageConfig() {
         open={editorOpen}
         onClose={() => setEditorOpen(false)}
         size="large"
-        destroyOnClose
+        destroyOnHidden
         extra={
           <Space>
             <Button aria-label="取消编辑" onClick={() => setEditorOpen(false)}>取消</Button>
