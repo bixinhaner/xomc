@@ -317,18 +317,46 @@ func (s *PgPolicyStore) DeleteDraft(ctx context.Context, versionID string) error
 	if err != nil {
 		return fmt.Errorf("parse policy version id: %w", err)
 	}
-	query, args, err := storage.Psql.Delete("device_access_policy_versions").
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin policy draft delete: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+
+	detachedAt := time.Now().UTC()
+	query, args, err := storage.Psql.Update("device_access_import_batches").
+		Set("snapshot", sq.Expr(`snapshot || jsonb_build_object(
+			'detached_target_policy_version_id', target_policy_version_id::text,
+			'detached_target_rule_id', target_rule_id::text,
+			'detached_target_at', ?::timestamptz
+		)`, detachedAt)).
+		Set("target_policy_version_id", nil).
+		Set("target_rule_id", nil).
+		Set("updated_at", detachedAt).
+		Where(sq.Eq{"target_policy_version_id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build policy draft import audit detach: %w", err)
+	}
+	if _, err := tx.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("detach policy draft import audit: %w", err)
+	}
+
+	query, args, err = storage.Psql.Delete("device_access_policy_versions").
 		Where(sq.Eq{"id": id, "status": PolicyVersionDraft}).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build policy draft delete: %w", err)
 	}
-	tag, err := s.db.Exec(ctx, query, args...)
+	tag, err := tx.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("delete policy draft row: %w", err)
 	}
 	if tag.RowsAffected() != 1 {
 		return ErrPolicyVersionImmutable
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit policy draft delete: %w", err)
 	}
 	return nil
 }

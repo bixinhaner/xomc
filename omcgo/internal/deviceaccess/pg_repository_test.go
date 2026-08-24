@@ -66,7 +66,9 @@ type repositoryTestTx struct {
 	pgx.Tx
 	queryRow   func(string, ...any) pgx.Row
 	execSQL    []string
+	execArgs   [][]any
 	failAt     int
+	zeroRowsAt int
 	committed  bool
 	rolledBack bool
 }
@@ -75,10 +77,14 @@ func (tx *repositoryTestTx) QueryRow(_ context.Context, query string, args ...an
 	return tx.queryRow(query, args...)
 }
 
-func (tx *repositoryTestTx) Exec(_ context.Context, query string, _ ...any) (pgconn.CommandTag, error) {
+func (tx *repositoryTestTx) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
 	tx.execSQL = append(tx.execSQL, query)
+	tx.execArgs = append(tx.execArgs, append([]any(nil), args...))
 	if tx.failAt > 0 && len(tx.execSQL) == tx.failAt {
 		return pgconn.CommandTag{}, errors.New("forced transaction write failure")
+	}
+	if tx.zeroRowsAt > 0 && len(tx.execSQL) == tx.zeroRowsAt {
+		return pgconn.NewCommandTag("DELETE 0"), nil
 	}
 	return pgconn.NewCommandTag("INSERT 0 1"), nil
 }
