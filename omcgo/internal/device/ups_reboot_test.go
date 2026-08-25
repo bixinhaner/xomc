@@ -2,6 +2,7 @@ package device
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -64,4 +65,29 @@ func TestRebootDevice_NonUPSUsesDefaultTaskExpiry(t *testing.T) {
 	assert.Equal(t, "RADIO-SN-001", taskSvc.lastReq.DeviceSN)
 	assert.Equal(t, "Reboot", taskSvc.lastReq.Method)
 	assert.Equal(t, 0, taskSvc.lastReq.ExpiresIn)
+}
+
+func TestRebootDevice_WithTargetPersistsTargetInTaskParams(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	deviceID := uuid.New()
+	devRepo := NewMockDeviceRepository(ctrl)
+	taskSvc := &stubSuccessTaskSvc{taskID: "ims-core-web-reboot-task-1"}
+	svc := NewDeviceService(devRepo, nil, nil, nil, zap.NewNop())
+	svc.taskSvc = taskSvc
+
+	devRepo.EXPECT().GetByID(gomock.Any(), deviceID).Return(&model.Device{
+		ID:           deviceID,
+		SerialNumber: "IMSCORE-SN-001",
+		ProductClass: "IMSCORE",
+	}, nil)
+
+	err := svc.RebootDevice(context.Background(), deviceID, 3)
+
+	require.NoError(t, err)
+	require.NotNil(t, taskSvc.lastReq)
+	var params map[string]int
+	require.NoError(t, json.Unmarshal(taskSvc.lastReq.Params, &params))
+	assert.Equal(t, map[string]int{"reboot_target": 3}, params)
 }

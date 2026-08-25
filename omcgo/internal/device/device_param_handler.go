@@ -357,6 +357,7 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 
 	// Mapping-based validation（T-0098 P5-01：已无 dmRegistry 兜底，未命中即跳过）。
 	var rebootRequired bool
+	var rebootTarget int
 	if writeModel := h.resolveParameterWriteModel(c.Request.Context(), dev); writeModel != nil {
 		validation := validateParameterWrites(writeModel, req.Parameters)
 		if len(validation.Errors) > 0 {
@@ -366,6 +367,7 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 			return
 		}
 		rebootRequired = validation.RebootRequired
+		rebootTarget = validation.RebootTarget
 	}
 
 	taskID, err := h.deviceService.SetParameters(c.Request.Context(), id, req.Parameters, admin.UserIDStringFromCtx(c))
@@ -378,6 +380,7 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 		"message":         "set parameter values command queued",
 		"parameters":      len(req.Parameters),
 		"reboot_required": rebootRequired,
+		"reboot_target":   rebootTarget,
 		"task_id":         taskID, // T-0146:前端用 useTaskStatus 轮询真实 CPE 应答状态
 	})
 }
@@ -1428,6 +1431,7 @@ func (h *ParameterTreeHandler) AddObject(c *gin.Context) {
 			return
 		}
 	}
+	rebootRequired, rebootTarget := objectRebootRequirement(h.resolveMappingValidator(c.Request.Context(), dev), req.ObjectPath)
 
 	addParams, _ := json.Marshal(map[string]interface{}{
 		"object_name": req.ObjectPath,
@@ -1454,8 +1458,10 @@ func (h *ParameterTreeHandler) AddObject(c *gin.Context) {
 
 	// T-0157 C7: 返回 task_id 让前端 useAddObject 走 useDeviceTaskStatus 状态机
 	response.OKWithStatus(c, http.StatusAccepted, gin.H{
-		"task_id": createdTask.ID,
-		"message": "add object command queued",
+		"task_id":         createdTask.ID,
+		"message":         "add object command queued",
+		"reboot_required": rebootRequired,
+		"reboot_target":   rebootTarget,
 	})
 }
 
@@ -1500,6 +1506,7 @@ func (h *ParameterTreeHandler) DeleteObject(c *gin.Context) {
 			}
 		}
 	}
+	rebootRequired, rebootTarget := objectRebootRequirement(h.resolveMappingValidator(c.Request.Context(), dev), parentPath)
 
 	delParams, _ := json.Marshal(map[string]interface{}{
 		"object_name": req.ObjectPath,
@@ -1525,9 +1532,22 @@ func (h *ParameterTreeHandler) DeleteObject(c *gin.Context) {
 	}
 
 	response.OKWithStatus(c, http.StatusAccepted, gin.H{
-		"task_id": createdTask.ID,
-		"message": "delete object command queued",
+		"task_id":         createdTask.ID,
+		"message":         "delete object command queued",
+		"reboot_required": rebootRequired,
+		"reboot_target":   rebootTarget,
 	})
+}
+
+func objectRebootRequirement(validator *parammodel.MappingValidator, path string) (bool, int) {
+	if validator == nil {
+		return false, 0
+	}
+	mapping := validator.LookupObject(path)
+	if mapping == nil || (mapping.ChangeApplies != "RebootRequired" && mapping.ChangeApplies != "NotifyRequired") {
+		return false, 0
+	}
+	return true, rebootTargetForPath(path)
 }
 
 // countInstances counts the number of distinct instances under an object path prefix.

@@ -161,6 +161,7 @@ interface BackendUpdateResponse {
   message: string;
   parameters: number;
   reboot_required: boolean;
+  reboot_target?: number;
   task_id?: string; // T-0146:后端任务 ID,前端用 useTaskStatus 轮询真实 CPE 应答状态
 }
 
@@ -401,6 +402,7 @@ export const deviceParameterApi = {
       message: data.message,
       parameters: data.parameters,
       rebootRequired: data.reboot_required,
+      rebootTarget: data.reboot_target,
       taskId: data.task_id,
     };
   },
@@ -591,20 +593,20 @@ export const deviceParameterApi = {
   },
 
   // T-0157 C7: 后端改为返回 task_id，前端透传供 useDeviceTaskStatus 轮询状态机使用
-  async addObject(deviceId: string, objectPath: string): Promise<{ taskId: string }> {
-    const { data } = await http.post<{ task_id: string; message: string }>(
+  async addObject(deviceId: string, objectPath: string): Promise<{ taskId: string; rebootRequired?: boolean; rebootTarget?: number }> {
+    const { data } = await http.post<{ task_id: string; message: string; reboot_required?: boolean; reboot_target?: number }>(
       `/devices/${deviceId}/objects/add`,
       { object_path: objectPath },
     );
-    return { taskId: data.task_id };
+    return { taskId: data.task_id, rebootRequired: data.reboot_required, rebootTarget: data.reboot_target };
   },
 
-  async deleteObject(deviceId: string, objectPath: string): Promise<{ taskId: string }> {
-    const { data } = await http.post<{ task_id: string; message: string }>(
+  async deleteObject(deviceId: string, objectPath: string): Promise<{ taskId: string; rebootRequired?: boolean; rebootTarget?: number }> {
+    const { data } = await http.post<{ task_id: string; message: string; reboot_required?: boolean; reboot_target?: number }>(
       `/devices/${deviceId}/objects/delete`,
       { object_path: objectPath },
     );
-    return { taskId: data.task_id };
+    return { taskId: data.task_id, rebootRequired: data.reboot_required, rebootTarget: data.reboot_target };
   },
 
   // 同步配置文件 - 创建 filetype=11 的 Upload RPC 任务

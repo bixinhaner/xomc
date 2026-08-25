@@ -46,6 +46,7 @@ import {
   type PlmnRow,
 } from './plmnList';
 import { AddRowButton } from './AddRowButton';
+import { quickSettingsRebootNotice } from './rebootNotice';
 import {
   canApplySubmittedReadback,
   ParameterReadbackTimeoutError,
@@ -2109,6 +2110,9 @@ export default function CellParameterForm({
         content: t('device.cell.saveSuccessMsg', { count: updates.length }),
         duration: 6,
       });
+      if (result.rebootRequired && result.rebootTarget) {
+        message.warning({ content: quickSettingsRebootNotice(t, result.rebootTarget), duration: 8 });
+      }
       setFeedback(fbKey, {
         kind: 'cell',
         submitStatus: 'queued',

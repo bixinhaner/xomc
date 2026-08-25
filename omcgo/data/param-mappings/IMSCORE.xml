@@ -13,10 +13,10 @@
         <object name="Device.ImsCore.SipTrunkConfig.{i}." standardPath="Device.ImsCore.SipTrunkConfig.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.ImsCore.SecurityUserConfig.{i}." standardPath="Device.ImsCore.SecurityUserConfig.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.ImsCore.TalInfoConfig.{i}." standardPath="Device.ImsCore.TalInfoConfig.{i}." access="READ_WRITE" changeApplies="RebootRequired"/>
-        <object name="Device.ImsCore.MultiApnConfig.{i}." standardPath="Device.ImsCore.MultiApnConfig.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.ImsCore.MultiApnConfig.{i}." standardPath="Device.ImsCore.MultiApnConfig.{i}." access="READ_WRITE" changeApplies="RebootRequired"/>
         <object name="Device.ImsCore.GroupIDConfig.{i}." standardPath="Device.ImsCore.GroupIDConfig.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.ImsCore.ChargingGroupConfig.{i}." standardPath="Device.ImsCore.ChargingGroupConfig.{i}." access="READ_WRITE" changeApplies="Immediate"/>
-        <object name="Device.ImsCore.CoreInfoConfig.{i}." standardPath="Device.ImsCore.CoreInfoConfig.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.ImsCore.CoreInfoConfig.{i}." standardPath="Device.ImsCore.CoreInfoConfig.{i}." access="READ_WRITE" changeApplies="RebootRequired"/>
         <object name="Device.ImsCore.QosActionConfig.{i}." standardPath="Device.ImsCore.QosActionConfig.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.ImsCore.VolumnThresholdConfig.{i}." standardPath="Device.ImsCore.VolumnThresholdConfig.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.ImsCore.SpecTimeConfig.{i}." standardPath="Device.ImsCore.SpecTimeConfig.{i}." access="READ_WRITE" changeApplies="Immediate"/>
@@ -90,7 +90,7 @@
         <param name="Device.ImsCore.BaseConfig.OAM_STATUS_FLAG" standardPath="Device.ImsCore.BaseConfig.OAM_STATUS_FLAG" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.ImsCore.BaseConfig.OAM_IP" standardPath="Device.ImsCore.BaseConfig.OAM_IP" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="15"/>
         <param name="Device.ImsCore.BaseConfig.WEB_SERV_PORT" standardPath="Device.ImsCore.BaseConfig.WEB_SERV_PORT" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired" max="65535" defaultValue="8082"/>
-        <param name="Device.ImsCore.BaseConfig.WEB_LOG_LEVEL" standardPath="Device.ImsCore.BaseConfig.WEB_LOG_LEVEL" access="READ_WRITE" type="U_INT" changeApplies="Immediate" defaultValue="1"/>
+        <param name="Device.ImsCore.BaseConfig.WEB_LOG_LEVEL" standardPath="Device.ImsCore.BaseConfig.WEB_LOG_LEVEL" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired" defaultValue="1"/>
         <param name="Device.ImsCore.BaseConfig.SYN_SERVER" standardPath="Device.ImsCore.BaseConfig.SYN_SERVER" access="READ_WRITE" type="STRING" changeApplies="RebootRequired"/>
         <param name="Device.ImsCore.BaseConfig.IMEI_POOL_FLAG" standardPath="Device.ImsCore.BaseConfig.IMEI_POOL_FLAG" access="READ_WRITE" type="U_INT" changeApplies="Immediate" defaultValue="0"/>
         <param name="Device.ImsCore.BaseConfig.APN_SYN_FLAG" standardPath="Device.ImsCore.BaseConfig.APN_SYN_FLAG" access="READ_WRITE" type="U_INT" changeApplies="Immediate" defaultValue="0"/>
@@ -173,34 +173,34 @@
         <param name="Device.ImsCore.TalInfoConfig.{i}.MSC_IP" standardPath="Device.ImsCore.TalInfoConfig.{i}.MSC_IP" access="READ_WRITE" type="STRING" changeApplies="RebootRequired"/>
         <param name="Device.ImsCore.TalInfoConfig.{i}.AGENT_IP" standardPath="Device.ImsCore.TalInfoConfig.{i}.AGENT_IP" access="READ_WRITE" type="STRING" changeApplies="RebootRequired"/>
         <param name="Device.ImsCore.TalInfoConfig.{i}.AGENT_PORT" standardPath="Device.ImsCore.TalInfoConfig.{i}.AGENT_PORT" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.ApnName" standardPath="Device.ImsCore.MultiApnConfig.{i}.ApnName" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.Qci" standardPath="Device.ImsCore.MultiApnConfig.{i}.Qci" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.ArpPriorityLevel" standardPath="Device.ImsCore.MultiApnConfig.{i}.ArpPriorityLevel" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.ArpPci" standardPath="Device.ImsCore.MultiApnConfig.{i}.ArpPci" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.ArpPvi" standardPath="Device.ImsCore.MultiApnConfig.{i}.ArpPvi" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.PdnType" standardPath="Device.ImsCore.MultiApnConfig.{i}.PdnType" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.Ipv4Pool" standardPath="Device.ImsCore.MultiApnConfig.{i}.Ipv4Pool" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.PrimaryDnsIpv4" standardPath="Device.ImsCore.MultiApnConfig.{i}.PrimaryDnsIpv4" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.SecondaryDnsIpv4" standardPath="Device.ImsCore.MultiApnConfig.{i}.SecondaryDnsIpv4" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.Ipv6Prefix" standardPath="Device.ImsCore.MultiApnConfig.{i}.Ipv6Prefix" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.PrimaryDnsIpv6" standardPath="Device.ImsCore.MultiApnConfig.{i}.PrimaryDnsIpv6" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.SecondaryDnsIpv6" standardPath="Device.ImsCore.MultiApnConfig.{i}.SecondaryDnsIpv6" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.Et3412" standardPath="Device.ImsCore.MultiApnConfig.{i}.Et3412" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.T3324" standardPath="Device.ImsCore.MultiApnConfig.{i}.T3324" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.EdrxPtw" standardPath="Device.ImsCore.MultiApnConfig.{i}.EdrxPtw" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.EdrxValue" standardPath="Device.ImsCore.MultiApnConfig.{i}.EdrxValue" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.VlanId" standardPath="Device.ImsCore.MultiApnConfig.{i}.VlanId" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.AmbrDl" standardPath="Device.ImsCore.MultiApnConfig.{i}.AmbrDl" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.AmbrUl" standardPath="Device.ImsCore.MultiApnConfig.{i}.AmbrUl" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.MultiApnConfig.{i}.ExternServerIp" standardPath="Device.ImsCore.MultiApnConfig.{i}.ExternServerIp" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.ApnName" standardPath="Device.ImsCore.MultiApnConfig.{i}.ApnName" access="READ_WRITE" type="STRING" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.Qci" standardPath="Device.ImsCore.MultiApnConfig.{i}.Qci" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.ArpPriorityLevel" standardPath="Device.ImsCore.MultiApnConfig.{i}.ArpPriorityLevel" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.ArpPci" standardPath="Device.ImsCore.MultiApnConfig.{i}.ArpPci" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.ArpPvi" standardPath="Device.ImsCore.MultiApnConfig.{i}.ArpPvi" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.PdnType" standardPath="Device.ImsCore.MultiApnConfig.{i}.PdnType" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.Ipv4Pool" standardPath="Device.ImsCore.MultiApnConfig.{i}.Ipv4Pool" access="READ_WRITE" type="STRING" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.PrimaryDnsIpv4" standardPath="Device.ImsCore.MultiApnConfig.{i}.PrimaryDnsIpv4" access="READ_WRITE" type="STRING" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.SecondaryDnsIpv4" standardPath="Device.ImsCore.MultiApnConfig.{i}.SecondaryDnsIpv4" access="READ_WRITE" type="STRING" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.Ipv6Prefix" standardPath="Device.ImsCore.MultiApnConfig.{i}.Ipv6Prefix" access="READ_WRITE" type="STRING" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.PrimaryDnsIpv6" standardPath="Device.ImsCore.MultiApnConfig.{i}.PrimaryDnsIpv6" access="READ_WRITE" type="STRING" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.SecondaryDnsIpv6" standardPath="Device.ImsCore.MultiApnConfig.{i}.SecondaryDnsIpv6" access="READ_WRITE" type="STRING" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.Et3412" standardPath="Device.ImsCore.MultiApnConfig.{i}.Et3412" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.T3324" standardPath="Device.ImsCore.MultiApnConfig.{i}.T3324" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.EdrxPtw" standardPath="Device.ImsCore.MultiApnConfig.{i}.EdrxPtw" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.EdrxValue" standardPath="Device.ImsCore.MultiApnConfig.{i}.EdrxValue" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.VlanId" standardPath="Device.ImsCore.MultiApnConfig.{i}.VlanId" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.AmbrDl" standardPath="Device.ImsCore.MultiApnConfig.{i}.AmbrDl" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.AmbrUl" standardPath="Device.ImsCore.MultiApnConfig.{i}.AmbrUl" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.MultiApnConfig.{i}.ExternServerIp" standardPath="Device.ImsCore.MultiApnConfig.{i}.ExternServerIp" access="READ_WRITE" type="STRING" changeApplies="RebootRequired"/>
         <param name="Device.ImsCore.GroupIDConfig.{i}.GROUP_ID" standardPath="Device.ImsCore.GroupIDConfig.{i}.GROUP_ID" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.ImsCore.GroupIDConfig.{i}.PREFIX" standardPath="Device.ImsCore.GroupIDConfig.{i}.PREFIX" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.ImsCore.ChargingGroupConfig.{i}.ID" standardPath="Device.ImsCore.ChargingGroupConfig.{i}.ID" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.ImsCore.ChargingGroupConfig.{i}.FLAG" standardPath="Device.ImsCore.ChargingGroupConfig.{i}.FLAG" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.CoreInfoConfig.{i}.CORE_SYN_IP" standardPath="Device.ImsCore.CoreInfoConfig.{i}.CORE_SYN_IP" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.CoreInfoConfig.{i}.S1_U_IP" standardPath="Device.ImsCore.CoreInfoConfig.{i}.S1_U_IP" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.CoreInfoConfig.{i}.MME_GROUP" standardPath="Device.ImsCore.CoreInfoConfig.{i}.MME_GROUP" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.ImsCore.CoreInfoConfig.{i}.MME_CODE" standardPath="Device.ImsCore.CoreInfoConfig.{i}.MME_CODE" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.ImsCore.CoreInfoConfig.{i}.CORE_SYN_IP" standardPath="Device.ImsCore.CoreInfoConfig.{i}.CORE_SYN_IP" access="READ_WRITE" type="STRING" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.CoreInfoConfig.{i}.S1_U_IP" standardPath="Device.ImsCore.CoreInfoConfig.{i}.S1_U_IP" access="READ_WRITE" type="STRING" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.CoreInfoConfig.{i}.MME_GROUP" standardPath="Device.ImsCore.CoreInfoConfig.{i}.MME_GROUP" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired"/>
+        <param name="Device.ImsCore.CoreInfoConfig.{i}.MME_CODE" standardPath="Device.ImsCore.CoreInfoConfig.{i}.MME_CODE" access="READ_WRITE" type="U_INT" changeApplies="RebootRequired"/>
         <param name="Device.ImsCore.QosActionConfig.{i}.QOS_ACTION_ID" standardPath="Device.ImsCore.QosActionConfig.{i}.QOS_ACTION_ID" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.ImsCore.VolumnThresholdConfig.{i}.QOS_ACTION_ID" standardPath="Device.ImsCore.VolumnThresholdConfig.{i}.QOS_ACTION_ID" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.ImsCore.SpecTimeConfig.{i}.QOS_ACTION_ID" standardPath="Device.ImsCore.SpecTimeConfig.{i}.QOS_ACTION_ID" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>

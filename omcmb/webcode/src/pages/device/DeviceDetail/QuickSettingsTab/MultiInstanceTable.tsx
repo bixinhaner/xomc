@@ -1,3 +1,4 @@
+import { quickSettingsRebootNotice } from './rebootNotice';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Button, Card, Input, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, EditOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
@@ -721,6 +722,9 @@ function PackedScalarNeighborTable({
           patchFeedback(fbKey, { syncedForTaskId: submittedTaskId });
         }
         message.success(opSuccessMsg);
+        if (result.rebootRequired && result.rebootTarget) {
+          message.warning({ content: quickSettingsRebootNotice(t, result.rebootTarget), duration: 8 });
+        }
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         if (!submittedTaskId) {
@@ -2381,6 +2385,11 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         });
       }
     };
+    let rebootTarget: number | undefined;
+    const recordRebootTarget = (result: { rebootRequired?: boolean; rebootTarget?: number }) => {
+      if (!result.rebootRequired || !result.rebootTarget) return;
+      rebootTarget = rebootTarget === undefined ? result.rebootTarget : 3;
+    };
 
     const requireCompletedTask = async (taskId: string, phase: IpsecSubmissionPhase) => {
       const task = await waitForTaskTerminal(taskId);
@@ -2406,6 +2415,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       });
       submittedExpectedReadback[ipsecGlobalEnablePath] = parameterValue;
       recordTask(result.taskId);
+      recordRebootTarget(result);
       if (result.taskId) {
         await requireCompletedTask(result.taskId, phase);
       }
@@ -2415,6 +2425,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       for (const instId of deletedInstIds) {
         try {
           const result = await deleteMutation.mutateAsync({ deviceId, objectPath: `${objectPath}${instId}.` });
+          recordRebootTarget(result);
           recordTask(result.taskId);
           if (isIpsecGroup && result.taskId) {
             await requireCompletedTask(result.taskId, 'apply-tunnels');
@@ -2451,6 +2462,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       if (editUpdates.length > 0) {
         const result = await updateMutation.mutateAsync({ deviceId, parameters: editUpdates });
         recordTask(result.taskId);
+        recordRebootTarget(result);
         editUpdates.forEach((update) => {
           submittedExpectedReadback[update.parameterPath] = update.parameterValue;
         });
@@ -2466,6 +2478,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       for (const row of addRows) {
         currentAddTempId = row.tempId;
         const addResult = await addMutation.mutateAsync({ deviceId, objectPath });
+        recordRebootTarget(addResult);
         recordTask(addResult.taskId);
         const addTask = await waitForTaskTerminal(addResult.taskId);
         if (addTask.status !== 'completed') {
@@ -2490,6 +2503,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         if (updates.length > 0) {
           const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
           recordTask(result.taskId);
+          recordRebootTarget(result);
           updates.forEach((update) => {
             submittedExpectedReadback[update.parameterPath] = update.parameterValue;
           });
@@ -2641,6 +2655,9 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
           at: Date.now(),
         });
         message.success({ content: submittedDetail, duration: 4 });
+        if (rebootTarget !== undefined) {
+          message.warning({ content: quickSettingsRebootNotice(t, rebootTarget), duration: 8 });
+        }
       } else {
         setFeedback(fbKey, {
           kind: 'multi',
@@ -2658,6 +2675,9 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
           at: Date.now(),
         });
         message.success({ content: submittedDetail, duration: 4 });
+        if (rebootTarget !== undefined) {
+          message.warning({ content: quickSettingsRebootNotice(t, rebootTarget), duration: 8 });
+        }
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);

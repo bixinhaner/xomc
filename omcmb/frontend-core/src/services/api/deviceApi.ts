@@ -1286,8 +1286,10 @@ export const deviceApi = {
     return data;
   },
 
-  async reboot(id: string): Promise<void> {
-    await http.post(`/devices/${id}/reboot`);
+  async reboot(id: string, options?: { rebootTarget?: 1 | 2 | 3 }): Promise<void> {
+    await http.post(`/devices/${id}/reboot`, options?.rebootTarget === undefined
+      ? undefined
+      : { reboot_target: options.rebootTarget });
   },
 
   // 手动触发 durable paramsync 参数同步（reason="manual"）。

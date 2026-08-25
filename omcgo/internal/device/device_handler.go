@@ -596,6 +596,10 @@ func (h *Handler) GetStats(c *gin.Context) {
 }
 
 // RebootDevice handles POST /api/v1/devices/:id/reboot.
+type RebootDeviceRequest struct {
+	RebootTarget *int `json:"reboot_target"`
+}
+
 func (h *Handler) RebootDevice(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -603,7 +607,19 @@ func (h *Handler) RebootDevice(c *gin.Context) {
 		return
 	}
 
-	rebootErr := h.service.RebootDevice(c.Request.Context(), id)
+	var rebootTarget []int
+	if c.Request.Body != nil && c.Request.ContentLength != 0 {
+		var req RebootDeviceRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+			return
+		}
+		if req.RebootTarget != nil {
+			rebootTarget = append(rebootTarget, *req.RebootTarget)
+		}
+	}
+
+	rebootErr := h.service.RebootDevice(c.Request.Context(), id, rebootTarget...)
 
 	// Cross-module audit: ActionReboot / category 4 of 5 (W3.G.2).
 	entry := admin.AuditContextFromGin(c)

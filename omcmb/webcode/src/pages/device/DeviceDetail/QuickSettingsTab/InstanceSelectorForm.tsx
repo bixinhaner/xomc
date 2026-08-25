@@ -31,6 +31,7 @@ import {
   SyncOutlined,
 } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
+import { useT } from '@/hooks/useT';
 import {
   useAddObject,
   useDeleteObject,
@@ -47,6 +48,7 @@ import {
   type MultiFeedback,
 } from '@core/store/quickSettingsFeedbackStore';
 import type { ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
+import { quickSettingsRebootNotice } from './rebootNotice';
 import { isDeviceTaskTerminal, type DeviceTaskStatus } from '@core/types/deviceTask';
 import type { QuickSettingsGroup, QuickSettingsParam } from '@core/types/quicksettings';
 import {
@@ -457,6 +459,7 @@ export default function InstanceSelectorForm({
   instanceContext,
   locale,
 }: InstanceSelectorFormProps) {
+  const t = useT();
   const objectPath = useMemo(() => {
     const resolved = applyInstanceContext(selectorGroup.objectPath || '', instanceContext, {
       preserveTrailingInstance: true,
@@ -861,8 +864,10 @@ export default function InstanceSelectorForm({
     }
 
     let newInstanceId: string | undefined;
+    let addRebootTarget: number | undefined;
     try {
       const addResult = await addMutation.mutateAsync({ deviceId, objectPath });
+      if (addResult.rebootRequired) addRebootTarget = addResult.rebootTarget;
       const addTask = await waitForTaskTerminal(addResult.taskId);
       if (addTask.status !== 'completed') {
         throw new Error(addTask.errorMessage || (locale === 'zh-CN' ? `新增实例失败(${addTask.status})` : `Add instance failed(${addTask.status})`));
@@ -920,6 +925,9 @@ export default function InstanceSelectorForm({
 
     if (updates.length === 0) {
       message.success({ content: `已新增实例 ${newInstanceId}`, duration: 4 });
+      if (addRebootTarget !== undefined) {
+        message.warning({ content: quickSettingsRebootNotice(t, addRebootTarget), duration: 8 });
+      }
       setAddModal(null);
       setSelectedInstId(newInstanceId);
       return;
@@ -943,6 +951,9 @@ export default function InstanceSelectorForm({
         content: `已新增实例 ${newInstanceId},并下发 ${updates.length} 项变更`,
         duration: 6,
       });
+      if (result.rebootRequired && result.rebootTarget) {
+        message.warning({ content: quickSettingsRebootNotice(t, result.rebootTarget), duration: 8 });
+      }
       setAddModal(null);
       setSelectedInstId(newInstanceId);
     } catch (err) {
@@ -975,6 +986,7 @@ export default function InstanceSelectorForm({
     queryClient,
     refetch,
     setFeedback,
+    t,
     updateMutation,
     waitForTaskTerminal,
   ]);
@@ -991,6 +1003,9 @@ export default function InstanceSelectorForm({
         content: `已下发 DeleteObject(${instanceId}),请在右上角铃铛查看任务结果`,
         duration: 6,
       });
+      if (result.rebootRequired && result.rebootTarget) {
+        message.warning({ content: quickSettingsRebootNotice(t, result.rebootTarget), duration: 8 });
+      }
       setFeedback(fbKey, {
         kind: 'multi',
         action: 'delete',
@@ -1021,7 +1036,7 @@ export default function InstanceSelectorForm({
     } finally {
       void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
     }
-  }, [deleteMutation, deviceId, fbKey, selectorGroup.titleZh, objectPath, queryClient, refetch, selectedInstId, setFeedback]);
+  }, [deleteMutation, deviceId, fbKey, selectorGroup.titleZh, objectPath, queryClient, refetch, selectedInstId, setFeedback, t]);
 
   const handleSave = useCallback(async () => {
     if (!selectedInstId) return;
@@ -1076,6 +1091,9 @@ export default function InstanceSelectorForm({
         content: `已下发 ${updates.length} 项变更,正在等待基站应答(Tag 会自动刷新)`,
         duration: 6,
       });
+      if (result.rebootRequired && result.rebootTarget) {
+        message.warning({ content: quickSettingsRebootNotice(t, result.rebootTarget), duration: 8 });
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       notification.error({
@@ -1104,6 +1122,7 @@ export default function InstanceSelectorForm({
     paramByLeaf,
     selectedInstId,
     setFeedback,
+    t,
     updateMutation,
   ]);
 
@@ -1115,6 +1134,9 @@ export default function InstanceSelectorForm({
       try {
         const result = await addMutation.mutateAsync({ deviceId, objectPath: subPath });
         message.success({ content: `已下发 AddObject(${subObject})`, duration: 4 });
+        if (result.rebootRequired && result.rebootTarget) {
+          message.warning({ content: quickSettingsRebootNotice(t, result.rebootTarget), duration: 8 });
+        }
         setFeedback(fbKey, {
           kind: 'multi',
           action: 'add',
@@ -1144,7 +1166,7 @@ export default function InstanceSelectorForm({
         void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
       }
     },
-    [addMutation, deviceId, fbKey, objectPath, queryClient, refetch, selectedInstId, setFeedback, subInstanceIds],
+    [addMutation, deviceId, fbKey, objectPath, queryClient, refetch, selectedInstId, setFeedback, subInstanceIds, t],
   );
 
   const handleNrWanAdd = useCallback(async () => {
@@ -1198,6 +1220,9 @@ export default function InstanceSelectorForm({
         detail: `VLAN ${vlanInstance}`, at: Date.now(),
       });
       message.success({ content: locale === 'zh-CN' ? 'WAN/VLAN 对象已创建并下发' : 'WAN/VLAN object created and queued', duration: 6 });
+            if (updateResult.rebootRequired && updateResult.rebootTarget) {
+              message.warning({ content: quickSettingsRebootNotice(t, updateResult.rebootTarget), duration: 8 });
+            }
       setNrWanAdd(null);
       void refetch();
     } catch (err) {
@@ -1207,7 +1232,7 @@ export default function InstanceSelectorForm({
         duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
     }
-  }, [addMutation, deviceId, fbKey, locale, nrWanAdd, objectPath, refetch, selectedInstId, setFeedback, subInstanceIds, updateMutation, waitForTaskTerminal]);
+  }, [addMutation, deviceId, fbKey, locale, nrWanAdd, objectPath, refetch, selectedInstId, setFeedback, subInstanceIds, t, updateMutation, waitForTaskTerminal]);
 
   const openVlanEdit = useCallback((rowId: number) => {
     if (!selectedInstId) return;
@@ -1250,6 +1275,9 @@ export default function InstanceSelectorForm({
       });
       setVlanEdit(null);
       message.success({ content: locale === 'zh-CN' ? 'VLAN 修改已下发' : 'VLAN update queued', duration: 5 });
+      if (result.rebootRequired && result.rebootTarget) {
+        message.warning({ content: quickSettingsRebootNotice(t, result.rebootTarget), duration: 8 });
+      }
       void refetch();
     } catch (err) {
       notification.error({
@@ -1258,7 +1286,7 @@ export default function InstanceSelectorForm({
         duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
     }
-  }, [deviceId, fbKey, locale, objectPath, refetch, selectedInstId, setFeedback, updateMutation, vlanEdit]);
+  }, [deviceId, fbKey, locale, objectPath, refetch, selectedInstId, setFeedback, t, updateMutation, vlanEdit]);
 
   /** 子表行级 DeleteObject。 */
   const handleSubDelete = useCallback(
@@ -1271,6 +1299,9 @@ export default function InstanceSelectorForm({
           content: `已下发 DeleteObject(${subObject}.${rowIdx})`,
           duration: 4,
         });
+        if (result.rebootRequired && result.rebootTarget) {
+          message.warning({ content: quickSettingsRebootNotice(t, result.rebootTarget), duration: 8 });
+        }
         setFeedback(fbKey, {
           kind: 'multi',
           action: 'delete',
@@ -1300,7 +1331,7 @@ export default function InstanceSelectorForm({
         void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
       }
     },
-    [deleteMutation, deviceId, fbKey, objectPath, queryClient, refetch, selectedInstId, setFeedback],
+    [deleteMutation, deviceId, fbKey, objectPath, queryClient, refetch, selectedInstId, setFeedback, t],
   );
 
   const title = locale === 'zh-CN' ? selectorGroup.titleZh : selectorGroup.titleEn;

@@ -309,8 +309,8 @@ export function useSyncDeviceParams() {
 export function useBatchRebootDevices() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (ids: string[]) => {
-      const results = await Promise.allSettled(ids.map((id) => api.reboot(id)));
+    mutationFn: async ({ ids, rebootTarget }: { ids: string[]; rebootTarget?: 1 | 2 | 3 }) => {
+      const results = await Promise.allSettled(ids.map((id) => api.reboot(id, { rebootTarget })));
       const failed = results.filter((r) => r.status === 'rejected');
       if (failed.length > 0) {
         throw new Error(`${failed.length}/${ids.length} devices failed to reboot`);

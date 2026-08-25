@@ -11,6 +11,7 @@ import type { QuickSettingsGroup, QuickSettingsParam } from '@core/types/quickse
 import { formatEnumDisplayValue, resolveQuickSettingsParameterType, validateValue } from './validators';
 import { useT } from '@/hooks/useT';
 import { refreshQuickSettingsRelatedLists } from './quickSettingsTerminalRefresh';
+import { quickSettingsRebootNotice } from './rebootNotice';
 import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import {
   ParameterReadbackTimeoutError,
@@ -298,6 +299,9 @@ export default function FixedScalarSettingsTable({
       });
       setEditState(null);
       message.success(locale === 'zh-CN' ? '配置已提交' : 'Configuration submitted');
+      if (result.rebootRequired && result.rebootTarget) {
+        message.warning({ content: quickSettingsRebootNotice(t, result.rebootTarget), duration: 8 });
+      }
     } catch (error) {
       message.error(String(error));
     }

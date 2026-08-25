@@ -204,6 +204,13 @@ func TestRebootHandler(t *testing.T) {
 	// TR-069 §A.3.2.10: 子元素 unqualified（参考 templates.go rebootXML 注释）
 	assert.Contains(t, body, "<CommandKey>reboot-key-1</CommandKey>")
 	assert.NotContains(t, body, "<cwmp:CommandKey>")
+	assert.NotContains(t, body, "X_BaiCells_ImsCore_RebootTarget")
+
+	cmd.Params = json.RawMessage(`{"reboot_target":3}`)
+	result, err = d.BuildRequest(cmd, "cwmp-id-5-targeted")
+	require.NoError(t, err)
+	body = string(result)
+	assert.Contains(t, body, "<X_BaiCells_ImsCore_RebootTarget>3</X_BaiCells_ImsCore_RebootTarget>")
 }
 
 func TestFactoryResetHandler(t *testing.T) {

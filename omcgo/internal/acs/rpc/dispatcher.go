@@ -456,6 +456,15 @@ type RebootHandler struct{}
 
 func (h *RebootHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	data := soap.RebootData{ID: cmd.CWMPID, CommandKey: cmd.CommandKey}
+	if len(cmd.Params) > 0 {
+		var params struct {
+			RebootTarget int `json:"reboot_target"`
+		}
+		if err := json.Unmarshal(cmd.Params, &params); err != nil {
+			return nil, fmt.Errorf("parse Reboot params: %w", err)
+		}
+		data.RebootTarget = params.RebootTarget
+	}
 	return soap.RenderResponse(soap.RebootTmpl, data)
 }
 
