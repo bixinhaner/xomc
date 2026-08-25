@@ -97,6 +97,7 @@ const exportDeviceApi = createApiSwitch(deviceService as unknown as typeof devic
 // DataTable tableId,导出时据此读取"列设置"localStorage(须与 <DataTable tableId> 一致)。
 const DEVICE_LIST_TABLE_ID = 'device-list-table';
 const UPS_DEVICE_LIST_TABLE_ID = 'device-list-ups-table';
+const CORE_NETWORK_DEVICE_LIST_TABLE_ID = 'device-list-core-network-table';
 const UPS_OFFLINE_DURATION_DEFAULT_HIDDEN_MIGRATION_KEY = `${UPS_DEVICE_LIST_TABLE_ID}:offline-duration-hidden:v1`;
 const UPS_UPTIME_AFTER_IP_ORDER_MIGRATION_KEY = `${UPS_DEVICE_LIST_TABLE_ID}:uptime-after-ip-order:v1`;
 const DEVICE_LIST_TAB_PARAM = 'deviceType';
@@ -255,7 +256,7 @@ const URL_ARRAY_FIELDS = new Set<string>([
   'controlPhase',
 ]);
 
-type DeviceListTabKey = 'BASE_STATION' | 'UPS';
+type DeviceListTabKey = 'BASE_STATION' | 'CORE_NETWORK' | 'UPS';
 
 const DEVICE_LIST_DEFAULT_TAB: DeviceListTabKey = 'BASE_STATION';
 const UPS_ONLY_COLUMN_KEYS = new Set<string>([
@@ -309,23 +310,28 @@ const UPS_FILTER_FIELD_KEYS = new Set<string>([
   'searchText',
   'isOnline',
 ]);
+const CORE_NETWORK_FILTER_FIELD_KEYS = UPS_FILTER_FIELD_KEYS;
 
 function parseUrlValue(key: string, value: string): unknown {
   return URL_ARRAY_FIELDS.has(key) ? value.split(',').filter(Boolean) : value;
 }
 
 function parseDeviceListTab(value: string | null | undefined): DeviceListTabKey {
-  return String(value || '').toUpperCase() === 'UPS' ? 'UPS' : DEVICE_LIST_DEFAULT_TAB;
+  const normalized = String(value || '').toUpperCase();
+  if (normalized === 'UPS') return 'UPS';
+  if (normalized === 'CORE_NETWORK' || normalized === 'CORENETWORK' || normalized === 'IMSCORE') return 'CORE_NETWORK';
+  return DEVICE_LIST_DEFAULT_TAB;
 }
 
 function sanitizeDeviceListFiltersForTab(
   params: Record<string, unknown>,
   tab: DeviceListTabKey,
 ): Record<string, unknown> {
-  if (tab !== 'UPS') return params;
+  if (tab === 'BASE_STATION') return params;
   const next: Record<string, unknown> = {};
+  const allowedKeys = tab === 'CORE_NETWORK' ? CORE_NETWORK_FILTER_FIELD_KEYS : UPS_FILTER_FIELD_KEYS;
   Object.entries(params).forEach(([key, value]) => {
-    if (UPS_FILTER_FIELD_KEYS.has(key)) {
+    if (allowedKeys.has(key)) {
       next[key] = value;
     }
   });
@@ -813,7 +819,11 @@ export default function DeviceList() {
   );
   const total = data?.total ?? 0;
   const stats = useMemo(() => data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0, online_count: 0, offline_count: 0 }, [data?.stats]);
-  const currentTableId = activeDeviceTab === 'UPS' ? UPS_DEVICE_LIST_TABLE_ID : DEVICE_LIST_TABLE_ID;
+  const currentTableId = activeDeviceTab === 'UPS'
+    ? UPS_DEVICE_LIST_TABLE_ID
+    : activeDeviceTab === 'CORE_NETWORK'
+      ? CORE_NETWORK_DEVICE_LIST_TABLE_ID
+      : DEVICE_LIST_TABLE_ID;
 
   useEffect(() => {
     if (periodicSyncWatchUntil <= Date.now()) return;
@@ -1192,6 +1202,7 @@ export default function DeviceList() {
     () =>
       filterFields.filter((f) => {
         if (activeDeviceTab === 'UPS' && !UPS_FILTER_FIELD_KEYS.has(f.name)) return false;
+        if (activeDeviceTab === 'CORE_NETWORK' && !CORE_NETWORK_FILTER_FIELD_KEYS.has(f.name)) return false;
         const colKey = FILTER_COLUMN_MAP[f.name];
         return !colKey || !hiddenColumnKeys.includes(colKey);
       }),
@@ -1323,7 +1334,7 @@ export default function DeviceList() {
 
   const handleDeviceTabChange = useCallback((key: string) => {
     const nextTab = parseDeviceListTab(key);
-    if (!isDeviceStandardValueVisibleByLicense(nextTab, systemLicense, systemLicenseLoading)) {
+    if (nextTab !== 'CORE_NETWORK' && !isDeviceStandardValueVisibleByLicense(nextTab, systemLicense, systemLicenseLoading)) {
       return;
     }
     const nextFilters = sanitizeDeviceListFiltersForTab(filterParams, nextTab);
@@ -2676,6 +2687,9 @@ export default function DeviceList() {
         if (activeDeviceTab === 'UPS') {
           return !BASE_STATION_ONLY_COLUMN_KEYS.has(column.key);
         }
+        if (activeDeviceTab === 'CORE_NETWORK') {
+          return !BASE_STATION_ONLY_COLUMN_KEYS.has(column.key) && !UPS_ONLY_COLUMN_KEYS.has(column.key);
+        }
         return !UPS_ONLY_COLUMN_KEYS.has(column.key);
       });
     },
@@ -3066,6 +3080,7 @@ export default function DeviceList() {
             onChange={handleDeviceTabChange}
             items={[
               { key: 'BASE_STATION', label: t('device.tab.baseStation') },
+              { key: 'CORE_NETWORK', label: t('device.tab.coreNetwork') },
               ...(showUPSTab ? [{ key: 'UPS', label: t('device.tab.ups') }] : []),
             ]}
             style={{ marginBottom: 8 }}
@@ -3118,7 +3133,7 @@ export default function DeviceList() {
               }}
               batchActions={batchActions}
               onRefresh={handleManualRefresh}
-              extraToolbarAfterBatch={activeDeviceTab !== 'UPS' ? (
+              extraToolbarAfterBatch={activeDeviceTab === 'BASE_STATION' ? (
                 <Button
                   size="small"
                   icon={<ClockCircleOutlined />}

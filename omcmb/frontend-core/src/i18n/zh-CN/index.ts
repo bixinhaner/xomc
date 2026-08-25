@@ -1765,7 +1765,7 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Device labels
   // -------------------------------------------------------------------------
-  'device.group.station':       '基站信息',
+  'device.group.station':       '设备信息',
   'device.group.cell':          '小区信息',
   'device.group.status':        '状态信息',
   'device.group.other':         '其他信息',
@@ -2062,6 +2062,7 @@ const messages: Record<string, string> = {
   'device.type.UPS':        'UPS设备',
   'device.type.all':        '全部',
   'device.tab.baseStation': '基站设备',
+  'device.tab.coreNetwork': '核心网设备',
   'device.tab.ups':         'UPS设备',
   'device.connStatus':      '连接状态',
   'device.lastParamSyncAt': '上次同步时间',

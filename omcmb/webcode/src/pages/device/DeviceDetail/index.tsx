@@ -106,6 +106,7 @@ const SEVERITY_COLOR: Record<string, string> = {
 };
 
 const UPS_UNSUPPORTED_DETAIL_TABS = new Set(['control', 'parameters', 'quickSettings', 'performance', 'license', 'password']);
+const CORE_NETWORK_UNSUPPORTED_DETAIL_TABS = new Set(['parameters', 'performance', 'license', 'password']);
 
 const passwordTaskStorageKey = (deviceSn: string) => `xomc:device-password-task:${deviceSn}`;
 
@@ -116,6 +117,13 @@ function isUPSDeviceLike(device?: Pick<Device, 'deviceType' | 'networkType' | 'p
         || device.networkType === 'UPS'
         || device.productClass?.startsWith('UPS')),
   );
+}
+
+function isCoreNetworkDeviceLike(device?: Pick<Device, 'deviceType' | 'networkType' | 'productClass'> | null): boolean {
+  if (!device) return false;
+  return device.deviceType === 'CORE_NETWORK'
+    || device.networkType === 'CORE_NETWORK'
+    || device.productClass?.trim().toUpperCase() === 'IMSCORE';
 }
 
 function passwordTaskStatusTagSpec(status: DeviceTaskStatus | undefined): {
@@ -1937,6 +1945,7 @@ export default function DeviceDetail() {
     };
   }, [appLocale, detailComposite?.info, device, deviceGroupsData?.groups]);
   const isUPSDetailDevice = isUPSDeviceLike(displayDevice);
+  const isCoreNetworkDetailDevice = isCoreNetworkDeviceLike(displayDevice);
   const alarmRefreshPending = alarmRefreshState?.deviceSn === displayDevice?.sn;
 
   useEffect(() => {
@@ -2035,7 +2044,11 @@ export default function DeviceDetail() {
   }, [device?.id, device?.macAddress, queryClient]);
 
   const handleBackToList = useCallback(() => {
-    const listPath = isUPSDetailDevice ? '/device/list?deviceType=UPS' : '/device/list';
+    const listPath = isUPSDetailDevice
+      ? '/device/list?deviceType=UPS'
+      : isCoreNetworkDetailDevice
+        ? '/device/list?deviceType=CORE_NETWORK'
+        : '/device/list';
     openTab({
       key: 'device-list',
       label: 'nav.device.list',
@@ -2045,7 +2058,7 @@ export default function DeviceDetail() {
     });
     closeTab(detailTabKey);
     void navigate(listPath);
-  }, [closeTab, detailTabKey, isUPSDetailDevice, navigate, openTab]);
+  }, [closeTab, detailTabKey, isCoreNetworkDetailDevice, isUPSDetailDevice, navigate, openTab]);
 
   // 内部 tab 以 URL ?tab= 作为单一真相源 ——
   // 1) 离开详情页（组件卸载）再切回时，能从 URL 还原内部 tab，不丢状态；
@@ -2062,13 +2075,18 @@ export default function DeviceDetail() {
     }, { replace: true });
   }, [setSearchParams, urlTab]);
   useEffect(() => {
-    if (!isUPSDetailDevice || !UPS_UNSUPPORTED_DETAIL_TABS.has(urlTab)) return;
+    const unsupportedTabs = isUPSDetailDevice
+      ? UPS_UNSUPPORTED_DETAIL_TABS
+      : isCoreNetworkDetailDevice
+        ? CORE_NETWORK_UNSUPPORTED_DETAIL_TABS
+        : undefined;
+    if (!unsupportedTabs?.has(urlTab)) return;
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('tab', 'basic');
       return next;
     }, { replace: true });
-  }, [isUPSDetailDevice, setSearchParams, urlTab]);
+  }, [isCoreNetworkDetailDevice, isUPSDetailDevice, setSearchParams, urlTab]);
 
   // 将设备详情页注册为按 SN 唯一的 TabBar 项。
   // 同一设备复用同 key，并用 path 刷新当前 ?tab=alarm/gps 等深链接；
@@ -2621,22 +2639,22 @@ export default function DeviceDetail() {
       renderDeviceNetworkType,
       appLocale,
     )];
-    if (!detailResolved.isBSC) {
+    if (!detailResolved.isBSC && !isCoreNetworkDetailDevice) {
       groups.push(getStatusFields(t, networkType));
     }
     groups.push(getOtherFields(t, networkType, displayDevice, handleOpenLocationSourceEditor));
     return groups;
-  }, [appLocale, detailResolved.isBSC, displayDevice, handleOpenLocationSourceEditor, handleOpenOMCNameEditor, handleResolveNameSync, renderDeviceNetworkType, t]);
+  }, [appLocale, detailResolved.isBSC, displayDevice, handleOpenLocationSourceEditor, handleOpenOMCNameEditor, handleResolveNameSync, isCoreNetworkDetailDevice, renderDeviceNetworkType, t]);
 
   const cellGroup = useMemo((): FieldGroup | null => {
-    if (!displayDevice) return null;
+    if (!displayDevice || isCoreNetworkDetailDevice) return null;
     const networkType = isBmProduct && activeBmTech === 'GSM'
       ? 'GSM'
       : normalizeNetworkType(displayDevice.networkType);
     // BSC（独立 GSM 设备）按需求隐藏「小区信息」表；BTS 与 BM 产品里的 GSM 小区视图均保留。
     if (detailResolved.isBSC) return null;
     return getCellFields(t, networkType, isBtsProduct);
-  }, [activeBmTech, detailResolved.isBSC, displayDevice, isBmProduct, isBtsProduct, t]);
+  }, [activeBmTech, detailResolved.isBSC, displayDevice, isBmProduct, isBtsProduct, isCoreNetworkDetailDevice, t]);
 
   const displayCellNetworkType = useMemo(() => {
     if (isBmProduct) {
@@ -2785,7 +2803,7 @@ export default function DeviceDetail() {
             )}
           </div>
           <Space>
-            {!isUPSDetailDevice && passwordTaskTag}
+            {!isUPSDetailDevice && !isCoreNetworkDetailDevice && passwordTaskTag}
             {/* parameters tab 自带全量同步入口；quickSettings/license 使用页头刷新触发同一套参数同步。 */}
             {activeTab !== 'parameters' && activeTab !== 'password' && activeTab !== 'control' && (
               <Button
@@ -2905,7 +2923,7 @@ export default function DeviceDetail() {
                   ),
                 }]
               : []),
-            ...(!isUPSDetailDevice
+            ...(!isUPSDetailDevice && !isCoreNetworkDetailDevice
               ? [{
                   key: 'control',
                   label: (
@@ -3001,7 +3019,7 @@ export default function DeviceDetail() {
                 </div>
               ),
             },
-            ...(!isUPSDetailDevice
+            ...(!isUPSDetailDevice && !isCoreNetworkDetailDevice
               ? [
                   {
                     key: 'performance',

@@ -1756,6 +1756,7 @@ func recycleBinSelectColumns() []string {
 		"FALSE AS param_sync_running",     // Placeholder for shared DeviceWithInfo scanner
 		"NULL::int AS active_alarm_count", // Placeholder for compatibility
 		`CASE
+			WHEN UPPER(COALESCE(d.product_class, '')) = 'IMSCORE' THEN 'CORE_NETWORK'
 			WHEN COALESCE(d.product_class, '') LIKE 'UPS%' THEN 'UPS'
 			ELSE 'BASE_STATION'
 		END AS device_type`,

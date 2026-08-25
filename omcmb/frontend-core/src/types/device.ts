@@ -27,7 +27,7 @@ export type CarrierCode = 'cmcc' | 'ctcc' | 'cucc';
 // 制式 — 与后端 model.Technology 对齐（lte/nr）。
 export type DeviceTechnology = 'lte' | 'nr';
 
-export type DeviceListDeviceType = 'BASE_STATION' | 'UPS' | 'ALL';
+export type DeviceListDeviceType = 'BASE_STATION' | 'CORE_NETWORK' | 'UPS' | 'ALL';
 
 // 手动注册设备入参（与后端 device.CreateDeviceRequest 一一对应）。
 // 字段语义：
