@@ -3,6 +3,7 @@ package pm
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -33,7 +34,7 @@ type DeviceQueryService interface {
 
 	// ListMetricObjects 列出一批设备在最细原始表 pm_metrics 里实际出现过的
 	// distinct object_ldn（按 technology 可选过滤），每项解析出 cell_id / plmn。
-	ListMetricObjects(ctx context.Context, deviceSNs, technologies []string) ([]MetricObject, error)
+	ListMetricObjects(ctx context.Context, deviceSNs, technologies []string, startTime, endTime time.Time) ([]MetricObject, error)
 
 	// DeviceGroupIDs 读取单个设备所属的设备组 id 列表（device_group_members）。
 	// #64：PM handler 在请求显式带 device_id 时预检其是否落在调用者可见分组内，
@@ -90,8 +91,8 @@ func (s *pgDeviceQueryService) DeviceGroupIDs(ctx context.Context, deviceID uuid
 }
 
 // ListMetricObjects 查询设备小区/PLMN 清单。
-func (s *pgDeviceQueryService) ListMetricObjects(ctx context.Context, deviceSNs, technologies []string) ([]MetricObject, error) {
-	q, args := buildObjectsQuery(deviceSNs, technologies)
+func (s *pgDeviceQueryService) ListMetricObjects(ctx context.Context, deviceSNs, technologies []string, startTime, endTime time.Time) ([]MetricObject, error) {
+	q, args := buildObjectsQuery(deviceSNs, technologies, startTime, endTime)
 	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query metric objects: %w", err)
@@ -117,22 +118,37 @@ func (s *pgDeviceQueryService) ListMetricObjects(ctx context.Context, deviceSNs,
 //
 //   - $1 = device_sns（TEXT[]）
 //   - 制式过滤（technologies 非空时）照 applyCommonFilters 范式：
-//     (device_oui, device_sn) IN (SELECT oui, serial_number FROM device_dim WHERE technology = ANY($2))
+//     d.technology = ANY($n)
 //     （查询跑在 TsPool，devices 用本库影子表 device_dim）
 //
 // 抽出便于单测断言（device 过滤 + 制式过滤 + distinct）。
-func buildObjectsQuery(deviceSNs, technologies []string) (string, []any) {
-	q := `SELECT DISTINCT object_ldn
-FROM pm_measurement_anchors a
-JOIN device_dim d ON d.id=a.device_dim_id
-WHERE d.serial_number = ANY($1)
-  AND a.granularity = '15min'
-  AND a.object_ldn <> ''`
+func buildObjectsQuery(deviceSNs, technologies []string, startTime, endTime time.Time) (string, []any) {
+	q := `WITH target_devices AS MATERIALIZED (
+  SELECT id
+  FROM device_dim
+  WHERE serial_number = ANY($1)`
 	args := []any{deviceSNs}
 	if len(technologies) > 0 {
-		q += `
-  AND d.technology = ANY($2)`
 		args = append(args, technologies)
+		q += fmt.Sprintf(`
+    AND technology = ANY($%d)`, len(args))
+	}
+	q += `
+)
+SELECT DISTINCT object_ldn
+FROM target_devices d
+JOIN pm_measurement_anchors a ON a.device_dim_id=d.id
+WHERE a.granularity = '15min'
+  AND a.object_ldn <> ''`
+	if !startTime.IsZero() {
+		args = append(args, startTime)
+		q += fmt.Sprintf(`
+  AND a."time" >= $%d`, len(args))
+	}
+	if !endTime.IsZero() {
+		args = append(args, endTime)
+		q += fmt.Sprintf(`
+  AND a."time" < $%d`, len(args))
 	}
 	q += `
 ORDER BY object_ldn`

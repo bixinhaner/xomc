@@ -242,6 +242,9 @@ CREATE INDEX IF NOT EXISTS idx_pm_anchors_15min_device_object_time
     ON public.pm_measurement_anchors (device_dim_id, object_ldn, "time" DESC)
     WHERE granularity = '15min';
 
+CREATE INDEX IF NOT EXISTS idx_pm_metric_values_anchor_metric_time
+    ON public.pm_metric_values (anchor_id, metric_id, "time" DESC);
+
 CREATE INDEX IF NOT EXISTS idx_pm_aggregation_results_device_view
     ON public.pm_aggregation_results (
         granularity,
@@ -249,6 +252,18 @@ CREATE INDEX IF NOT EXISTS idx_pm_aggregation_results_device_view
         window_start DESC,
         object_ldn,
         metric_path,
+        task_version_id,
+        revision
+    )
+    WHERE dimension = 'device';
+
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_results_device_metric_time
+    ON public.pm_aggregation_results (
+        granularity,
+        dimension_key,
+        metric_path,
+        window_start DESC,
+        object_ldn,
         task_version_id,
         revision
     )

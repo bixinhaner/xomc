@@ -9,7 +9,7 @@ import { useQuery, useMutation, useQueryClient, useQueries } from '@tanstack/rea
 import { useAppStore } from '../../store/appStore';
 import { pmQueryApi } from '../../services/api/pmQueryApi';
 import { pmDashboardApi } from '../../services/api/pmDashboardApi';
-import { pmObjectsApi, pmObjectsMock } from '../../services/api/pmObjectsApi';
+import { pmObjectsApi, pmObjectsMock, type MetricObjectsTimeRange } from '../../services/api/pmObjectsApi';
 import { createApiSwitch } from '../../services/apiSwitch';
 import type {
   ListTemplateParams,
@@ -123,10 +123,10 @@ export function useAggregatedMetricsByDevices(
  * - enabled 仅当 deviceSns 非空（空设备不发请求，向后兼容「不下钻」语义）。
  * - 查询键层级式 ['pm','metricObjects',{deviceSns,technology}]——设备/制式变化即重取。
  */
-export function useMetricObjects(deviceSns: string[], technology?: string) {
+export function useMetricObjects(deviceSns: string[], technology?: string, timeRange?: MetricObjectsTimeRange) {
   return useQuery({
-    queryKey: ['pm', 'metricObjects', { deviceSns, technology }] as const,
-    queryFn: () => objectsApi.listMetricObjects(deviceSns, technology),
+    queryKey: ['pm', 'metricObjects', { deviceSns, technology, timeRange }] as const,
+    queryFn: () => objectsApi.listMetricObjects(deviceSns, technology, timeRange),
     enabled: deviceSns.length > 0,
     staleTime: 30_000,
   });
@@ -137,11 +137,15 @@ export function useMetricObjects(deviceSns: string[], technology?: string) {
  * 所以两层「设备→小区」必须每设备一查），合并成 Record<deviceSn, MetricObject[]>。
  * 单设备并发 N 次（N=选中设备数，通常 1~10）。
  */
-export function useMetricObjectsByDevices(deviceSns: string[], technology?: string) {
+export function useMetricObjectsByDevices(
+  deviceSns: string[],
+  technology?: string,
+  timeRange?: MetricObjectsTimeRange,
+) {
   const queries = useQueries({
     queries: deviceSns.map((sn) => ({
-      queryKey: ['pm', 'metricObjects', { deviceSns: [sn], technology }] as const,
-      queryFn: () => objectsApi.listMetricObjects([sn], technology),
+      queryKey: ['pm', 'metricObjects', { deviceSns: [sn], technology, timeRange }] as const,
+      queryFn: () => objectsApi.listMetricObjects([sn], technology, timeRange),
       enabled: deviceSns.length > 0,
       staleTime: 30_000,
     })),

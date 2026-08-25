@@ -85,8 +85,12 @@ func TestPMDeviceViewQueryIndexesMigrationContract(t *testing.T) {
 		require.Contains(t, sql, "ON public.pm_measurement_anchors (device_dim_id, object_ldn)")
 		require.Contains(t, sql, "idx_pm_anchors_15min_device_object_time")
 		require.Contains(t, sql, "ON public.pm_measurement_anchors (device_dim_id, object_ldn, \"time\" DESC)")
+		require.Contains(t, sql, "idx_pm_metric_values_anchor_metric_time")
+		require.Contains(t, sql, "ON public.pm_metric_values (anchor_id, metric_id, \"time\" DESC)")
 		require.Contains(t, sql, "idx_pm_aggregation_results_device_view")
 		require.Contains(t, sql, "granularity,\n        dimension_key,\n        window_start DESC,\n        object_ldn,\n        metric_path,\n        task_version_id,\n        revision")
+		require.Contains(t, sql, "idx_pm_aggregation_results_device_metric_time")
+		require.Contains(t, sql, "granularity,\n        dimension_key,\n        metric_path,\n        window_start DESC,\n        object_ldn,\n        task_version_id,\n        revision")
 		require.Contains(t, sql, "WHERE dimension = 'device'")
 	}
 }

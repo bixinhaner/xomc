@@ -19,6 +19,8 @@ import type {
 import { mapBackendAggregatedMeta, mapBackendAggregatedRow } from '../../types/pmDashboard';
 import { serializeRepeatedParams } from '../../utils/queryParams';
 
+const aggregatedQueryTimeoutMs = 60_000;
+
 // ── 真实 API 服务对象 ────────────────────────────────────────────────
 
 export const pmDashboardApi = {
@@ -66,6 +68,7 @@ export const pmDashboardApi = {
       '/pm/metrics/aggregated',
       {
         params: qp,
+        timeout: aggregatedQueryTimeoutMs,
         // 数组按重复键序列化（object_ldns=a&object_ldns=b），标量原样——保留 LDN 值内逗号。
         paramsSerializer: (p: Record<string, unknown>) => serializeRepeatedParams(p),
       },

@@ -3,6 +3,7 @@ package pm
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
@@ -45,7 +46,9 @@ func (h *Handler) ListMetricObjects(c *gin.Context) {
 		technologies = []string{tech}
 	}
 
-	objs, err := h.deviceQuery.ListMetricObjects(c.Request.Context(), deviceSNs, technologies)
+	startTime, endTime := parseOptionalObjectTimeRange(c)
+
+	objs, err := h.deviceQuery.ListMetricObjects(c.Request.Context(), deviceSNs, technologies, startTime, endTime)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
@@ -56,6 +59,21 @@ func (h *Handler) ListMetricObjects(c *gin.Context) {
 		items = append(items, objectItem{ObjectLDN: o.ObjectLDN, CellID: o.CellID, PLMN: o.PLMN})
 	}
 	response.OK(c, gin.H{"items": items, "total": len(items)})
+}
+
+func parseOptionalObjectTimeRange(c *gin.Context) (time.Time, time.Time) {
+	var startTime, endTime time.Time
+	if v := c.Query("start_time"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			startTime = t
+		}
+	}
+	if v := c.Query("end_time"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			endTime = t
+		}
+	}
+	return startTime, endTime
 }
 
 // parseCSVQuery 取一个可逗号分隔或重复出现的 query 参数，拆成去空去重的字符串切片。

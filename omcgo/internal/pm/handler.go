@@ -3,6 +3,7 @@ package pm
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -30,8 +31,9 @@ import (
 )
 
 const (
-	maxAggregatedMetricDeviceSNs = 50
-	maxAggregatedMetricPaths     = 50
+	maxAggregatedMetricDeviceSNs  = 50
+	maxAggregatedMetricPaths      = 50
+	aggregatedMetricsQueryTimeout = 60 * time.Second
 )
 
 // Handler provides REST API endpoints for PM data.
@@ -511,6 +513,9 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		}
 	}
 
+	queryCtx, queryCancel := context.WithTimeout(c.Request.Context(), aggregatedMetricsQueryTimeout)
+	defer queryCancel()
+
 	timing := aggregatedMetricsTiming{startedAt: time.Now()}
 	defer func() {
 		h.logAggregatedMetricsTiming(c, req, &timing)
@@ -524,35 +529,35 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	objectLDNsDiscovered := false
 	if fillEmpty && req.PageByPivotRow && aggregator.CanAutoDiscoverObjectSkeletonRequest(req) {
 		stageStarted := time.Now()
-		objectLDNs, err := h.aggr.DiscoverObjectLDNs(c.Request.Context(), req)
+		objectLDNs, err := h.aggr.DiscoverObjectLDNs(queryCtx, req)
 		timing.discoverObjectLDNs = time.Since(stageStarted)
 		timing.discoverObjectLDNRuns++
 		timing.discoveredObjects = len(objectLDNs)
 		objectLDNsDiscovered = true
 		if err != nil {
-			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			h.abortAggregatedMetricsQueryError(c, queryCtx, err)
 			return
 		}
 		req.ObjectLDNs = objectLDNs
 	}
 	if fillEmpty && req.PageByPivotRow && aggregator.IsExplicitObjectSkeletonRequest(req) {
 		stageStarted := time.Now()
-		pivotKeys, err := h.aggr.DevicePivotRowKeys(c.Request.Context(), req)
+		pivotKeys, err := h.aggr.DevicePivotRowKeys(queryCtx, req)
 		timing.devicePivotRowKeys = time.Since(stageStarted)
 		timing.pivotKeys = len(pivotKeys)
 		if err != nil {
-			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			h.abortAggregatedMetricsQueryError(c, queryCtx, err)
 			return
 		}
 		req.PivotRowKeys = pivotKeys
 	}
 
 	stageStarted := time.Now()
-	rows, err := h.aggr.Query(c.Request.Context(), req)
+	rows, err := h.aggr.Query(queryCtx, req)
 	timing.query = time.Since(stageStarted)
 	timing.queryRows = len(rows)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		h.abortAggregatedMetricsQueryError(c, queryCtx, err)
 		return
 	}
 	var truncated bool
@@ -566,13 +571,13 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	if fillEmpty {
 		if !objectLDNsDiscovered && aggregator.CanAutoDiscoverObjectSkeletonRequest(req) {
 			stageStarted := time.Now()
-			objectLDNs, err := h.aggr.DiscoverObjectLDNs(c.Request.Context(), req)
+			objectLDNs, err := h.aggr.DiscoverObjectLDNs(queryCtx, req)
 			timing.discoverObjectLDNs += time.Since(stageStarted)
 			timing.discoverObjectLDNRuns++
 			timing.discoveredObjects = len(objectLDNs)
 			objectLDNsDiscovered = true
 			if err != nil {
-				commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+				h.abortAggregatedMetricsQueryError(c, queryCtx, err)
 				return
 			}
 			req.ObjectLDNs = objectLDNs
@@ -585,7 +590,7 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		// 只从真实行收集）；整体按指标库再回填一次，使占位行与真实行同口径取名，避免透视表列头
 		// 退化成裸编号（查不到名的合成计数器仍回退编号本身，行为不变）。
 		stageStarted = time.Now()
-		h.aggr.BackfillDisplayNames(c.Request.Context(), rows)
+		h.aggr.BackfillDisplayNames(queryCtx, rows)
 		timing.backfillDisplayNames = time.Since(stageStarted)
 	}
 	total := len(rows)
@@ -599,8 +604,11 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 			countReq.MetricType = nil
 		}
 		stageStarted := time.Now()
-		if n, err := h.aggr.Count(c.Request.Context(), countReq); err == nil {
+		if n, err := h.aggr.Count(queryCtx, countReq); err == nil {
 			total = n
+		} else if errors.Is(err, context.DeadlineExceeded) || errors.Is(queryCtx.Err(), context.DeadlineExceeded) {
+			h.abortAggregatedMetricsQueryError(c, queryCtx, err)
+			return
 		}
 		timing.count = time.Since(stageStarted)
 	}
@@ -615,6 +623,15 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		result["timezone"] = win.Timezone
 	}
 	response.OK(c, result)
+}
+
+func (h *Handler) abortAggregatedMetricsQueryError(c *gin.Context, queryCtx context.Context, err error) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(queryCtx.Err(), context.DeadlineExceeded) {
+		timeoutErr := fmt.Errorf("pm aggregated metrics query exceeded %s: %w", aggregatedMetricsQueryTimeout, commonerrors.ErrTimeout)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(timeoutErr), timeoutErr)
+		return
+	}
+	commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 }
 
 type aggregatedMetricsTiming struct {

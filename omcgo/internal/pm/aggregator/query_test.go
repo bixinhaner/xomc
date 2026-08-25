@@ -626,6 +626,7 @@ func Test_buildDeviceTableSQL_PageByPivotRowUsesPrecomputedKeys(t *testing.T) {
 
 func Test_buildDeviceTableSQL_PageByPivotRowExplicitSkeletonUsesLatestAnchorsAndRequestedMetrics(t *testing.T) {
 	keyTime := time.Date(2026, 7, 23, 8, 30, 0, 0, time.UTC)
+	nextKeyTime := time.Date(2026, 7, 23, 13, 30, 0, 0, time.UTC)
 	start := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
 	sql, args, err := buildDeviceTableSQL("pm_metrics", QueryRequest{
@@ -643,23 +644,39 @@ func Test_buildDeviceTableSQL_PageByPivotRowExplicitSkeletonUsesLatestAnchorsAnd
 			ObjectLDN:   "Cellid=1",
 			Granularity: metrics.Granularity15Min,
 			Time:        keyTime,
+		}, {
+			DeviceOUI:   "0019C0",
+			DeviceSN:    "SN-1",
+			ObjectLDN:   "Cellid=1",
+			Granularity: metrics.Granularity15Min,
+			Time:        nextKeyTime,
 		}},
 	})
 	require.NoError(t, err)
 
 	assert.Contains(t, sql, "latest_anchors AS")
 	assert.Contains(t, sql, "requested_metrics AS")
+	assert.Contains(t, sql, "value_keys AS MATERIALIZED")
+	assert.Contains(t, sql, "values_for_anchors AS MATERIALIZED")
 	assert.Contains(t, sql, "DISTINCT ON (dev.oui, dev.serial_number, a.granularity, a.\"time\", a.object_ldn)")
 	assert.Contains(t, sql, "AND a.granularity = '15min'")
+	assert.Contains(t, sql, `a."time" >= $`)
+	assert.Contains(t, sql, `a."time" < $`)
 	assert.NotContains(t, sql, "a.granularity = pk.granularity")
 	assert.Contains(t, sql, "JOIN requested_metrics d ON TRUE")
-	assert.Contains(t, sql, "LEFT JOIN LATERAL (")
-	assert.Contains(t, sql, "FROM pm_metric_values v")
-	assert.Contains(t, sql, `WHERE v."time"=a."time"`)
-	assert.Contains(t, sql, "AND v.anchor_id=a.anchor_id")
-	assert.Contains(t, sql, "ON v.metric_id=d.metric_id")
+	assert.Contains(t, sql, "JOIN pm_metric_values v")
+	assert.Contains(t, sql, "v.anchor_id=k.anchor_id")
+	assert.Contains(t, sql, "v.metric_id=k.metric_id")
+	assert.Contains(t, sql, `v."time"=k."time"`)
+	assert.Contains(t, sql, `WHERE k."time" >= $`)
+	assert.Contains(t, sql, `AND k."time" < $`)
 	assert.Contains(t, sql, `v."time" >= $`)
 	assert.Contains(t, sql, `v."time" < $`)
+	assert.Contains(t, sql, "UNION ALL")
+	assert.Contains(t, sql, "LEFT JOIN values_for_anchors v")
+	assert.Contains(t, sql, "AND v.metric_id=d.metric_id")
+	assert.NotContains(t, sql, "LEFT JOIN LATERAL")
+	assert.NotContains(t, sql, "\nJOIN values_for_anchors v", "missing metric values must not filter skeleton rows")
 	assert.NotContains(t, sql, "pm_metric_sets")
 	assert.NotContains(t, sql, "d.metric_id=ANY")
 	assert.NotContains(t, sql, "pm_files")
@@ -673,6 +690,66 @@ func Test_buildDeviceTableSQL_PageByPivotRowExplicitSkeletonUsesLatestAnchorsAnd
 	assert.Contains(t, args, "K2")
 	assert.Contains(t, args, start)
 	assert.Contains(t, args, end)
+	assert.Contains(t, args, keyTime)
+	assert.Contains(t, args, nextKeyTime.Add(15*time.Minute))
+}
+
+func Test_metricValueLookupRange_PrefersCurrentPivotPage(t *testing.T) {
+	requestStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	requestEnd := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	pageStart := time.Date(2026, 8, 23, 8, 15, 0, 0, time.UTC)
+	pageEnd := time.Date(2026, 8, 23, 12, 45, 0, 0, time.UTC)
+
+	start, end := metricValueLookupRange(QueryRequest{
+		StartTime: requestStart,
+		EndTime:   requestEnd,
+		PivotRowKeys: []PivotRowKey{{
+			Time: pageEnd,
+		}, {
+			Time: pageStart,
+		}},
+	})
+
+	assert.Equal(t, pageStart, start)
+	assert.Equal(t, pageEnd.Add(15*time.Minute), end)
+
+	fallbackStart, fallbackEnd := metricValueLookupRange(QueryRequest{
+		StartTime: requestStart,
+		EndTime:   requestEnd,
+	})
+	assert.Equal(t, requestStart, fallbackStart)
+	assert.Equal(t, requestEnd, fallbackEnd)
+}
+
+func Test_metricValueLookupSegments_SplitsByFourHourBoundaries(t *testing.T) {
+	start := time.Date(2026, 8, 22, 17, 15, 0, 0, time.UTC)
+	end := time.Date(2026, 8, 23, 1, 30, 0, 0, time.UTC)
+
+	got := metricValueLookupSegments(start, end)
+
+	require.Len(t, got, 3)
+	assert.Equal(t, timeRange{
+		start: start,
+		end:   time.Date(2026, 8, 22, 20, 0, 0, 0, time.UTC),
+	}, got[0])
+	assert.Equal(t, timeRange{
+		start: time.Date(2026, 8, 22, 20, 0, 0, 0, time.UTC),
+		end:   time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC),
+	}, got[1])
+	assert.Equal(t, timeRange{
+		start: time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC),
+		end:   end,
+	}, got[2])
+
+	alignedStart := time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC)
+	alignedEnd := alignedStart.Add(4 * time.Hour)
+	assert.Equal(t, []timeRange{{start: alignedStart, end: alignedEnd}},
+		metricValueLookupSegments(alignedStart, alignedEnd))
+
+	dayEnd := alignedStart.Add(24 * time.Hour)
+	require.Len(t, metricValueLookupSegments(alignedStart, dayEnd), 6)
+	assert.Nil(t, metricValueLookupSegments(alignedStart, alignedStart))
+	assert.Nil(t, metricValueLookupSegments(alignedEnd, alignedStart))
 }
 
 func Test_buildDeviceTableSQL_PageByPivotRowPrecomputedKeysPrunesMetricValueTime(t *testing.T) {
@@ -715,12 +792,34 @@ func Test_buildDeviceTableSQL_RolledUpPivotSkeletonReadsAggregationResults(t *te
 	})
 	require.NoError(t, err)
 
-	pageKeysAt := strings.Index(sql, "page_keys AS")
-	require.NotEqual(t, -1, pageKeysAt)
-	pageKeySQL := sql[pageKeysAt:]
-	assert.Contains(t, pageKeySQL, "FROM pm_aggregation_results r")
-	assert.Contains(t, pageKeySQL, "dimension =")
-	assert.NotContains(t, pageKeySQL, "FROM pm_metrics_daily")
+	assert.Contains(t, sql, "candidate_results AS MATERIALIZED")
+	assert.Contains(t, sql, "FROM pm_aggregation_results r")
+	assert.Contains(t, sql, "r.dimension =")
+	assert.Contains(t, sql, "JOIN pm_aggregation_publications published_revision")
+	assert.Contains(t, sql, "page_keys AS")
+	assert.NotContains(t, sql, "FROM pm_metrics_daily")
+}
+
+func Test_buildDeviceTableSQL_RolledUpGroupsInferredMetricTypesForIndex(t *testing.T) {
+	sql, args, err := buildDeviceTableSQL("pm_metrics_hourly", QueryRequest{
+		Granularity:    metrics.GranularityHourly,
+		DeviceSNs:      []string{"SN-1"},
+		Technologies:   []string{"lte"},
+		MetricPaths:    []string{"K900010015", "K900010016"},
+		StartTime:      time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC),
+		EndTime:        time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC),
+		PageByPivotRow: true,
+		Limit:          5000,
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, sql, "r.metric_type =")
+	assert.Contains(t, sql, "r.metric_path IN")
+	assert.NotContains(t, sql, "(r.metric_path =")
+	assert.Contains(t, sql, "d.granularity")
+	assert.Contains(t, args, "kpi")
+	assert.Contains(t, args, "K900010015")
+	assert.Contains(t, args, "K900010016")
 }
 
 func Test_SelectTable_UnknownGranularity(t *testing.T) {

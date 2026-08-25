@@ -16,11 +16,13 @@
 import { useIntl } from 'react-intl';
 import { Alert, Checkbox, Collapse, Empty, Space, Spin, Tag, Typography } from 'antd';
 import { useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery';
+import type { MetricObjectsTimeRange } from '@core/services/api/pmObjectsApi';
 import { getNrRecommendedDefaultSelectedObjectLdns, type CellSelection } from './cellDrilldownUtils';
 
 interface CellDrilldownSelectorProps {
   deviceSns: string[];
   technology?: string;
+  timeRange?: MetricObjectsTimeRange;
   useNrRecommendedDefault?: boolean;
   value: CellSelection;
   onChange: (next: CellSelection) => void;
@@ -29,12 +31,13 @@ interface CellDrilldownSelectorProps {
 export default function CellDrilldownSelector({
   deviceSns,
   technology,
+  timeRange,
   useNrRecommendedDefault = false,
   value,
   onChange,
 }: CellDrilldownSelectorProps) {
   const intl = useIntl();
-  const { byDevice, isLoading } = useMetricObjectsByDevices(deviceSns, technology);
+  const { byDevice, isLoading } = useMetricObjectsByDevices(deviceSns, technology, timeRange);
 
   if (deviceSns.length === 0) {
     return (

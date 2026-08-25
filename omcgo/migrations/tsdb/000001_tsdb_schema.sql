@@ -250,6 +250,7 @@ CREATE TABLE public.pm_metric_values (
     CONSTRAINT uq_pm_metric_values UNIQUE ("time", anchor_id, metric_id)
 );
 CREATE INDEX idx_pm_metric_values_metric_time ON public.pm_metric_values (metric_id, "time" DESC, anchor_id);
+CREATE INDEX idx_pm_metric_values_anchor_metric_time ON public.pm_metric_values (anchor_id, metric_id, "time" DESC);
 
 -- 小时桶按 building/active/superseded/failed 整桶发布。
 CREATE TABLE public.pm_hourly_bucket_versions (
@@ -1179,6 +1180,17 @@ CREATE INDEX IF NOT EXISTS idx_pm_aggregation_results_device_view
         window_start DESC,
         object_ldn,
         metric_path,
+        task_version_id,
+        revision
+    )
+    WHERE dimension = 'device';
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_results_device_metric_time
+    ON public.pm_aggregation_results (
+        granularity,
+        dimension_key,
+        metric_path,
+        window_start DESC,
+        object_ldn,
         task_version_id,
         revision
     )
