@@ -8,7 +8,6 @@ export type AlarmExportFieldKey =
   | 'alarmIdentifier'
   | 'severity'
   | 'possibleCause'
-  | 'specificProblem'
   | 'neType'
   | 'equipInfo'
   | 'eventType'
@@ -86,11 +85,6 @@ export function buildAlarmExportFieldDefinitions(
       key: 'possibleCause',
       label: t('alarm.possibleCause'),
       getValue: (alarm) => alarm.probableCause || '',
-    },
-    {
-      key: 'specificProblem',
-      label: t('alarm.specificProblem'),
-      getValue: (alarm) => alarm.specificProblem || alarm.description || '',
     },
     {
       key: 'neType',

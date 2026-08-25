@@ -141,13 +141,7 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
             <Descriptions.Item label={t('alarm.possibleCause')}>
               {resolvedAlarm.probableCause || '-'}
             </Descriptions.Item>
-            {/* 3. 具体故障 */}
-            <Descriptions.Item label={t('alarm.specificProblem')}>
-              <Paragraph style={LONG_TEXT_STYLE}>
-                {resolvedAlarm.specificProblem || resolvedAlarm.description || '-'}
-              </Paragraph>
-            </Descriptions.Item>
-            {/* 4. 严重程度 */}
+            {/* 3. 严重程度 */}
             <Descriptions.Item label={t('alarm.severity')}>
               <Tag
                 style={{

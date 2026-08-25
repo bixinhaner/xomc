@@ -516,6 +516,13 @@ export default function HistoricalAlarms() {
         mono: true,
       },
       {
+        key: 'description',
+        title: t('alarm.content'),
+        dataIndex: 'description',
+        width: 200,
+        ellipsis: true,
+      },
+      {
         key: 'alarmName',
         title: t('alarm.possibleCause'),
         dataIndex: 'alarmName',
@@ -565,20 +572,6 @@ export default function HistoricalAlarms() {
         dataIndex: 'clearTime',
         width: 150,
         render: (v) => v ? formatSystemTime(String(v)) : '-',
-      },
-      {
-        key: 'specificProblem',
-        title: t('alarm.specificProblem'),
-        dataIndex: 'specificProblem',
-        width: 150,
-        ellipsis: true,
-      },
-      {
-        key: 'description',
-        title: t('alarm.content'),
-        dataIndex: 'description',
-        width: 200,
-        ellipsis: true,
       },
       {
         key: 'alarmCount',

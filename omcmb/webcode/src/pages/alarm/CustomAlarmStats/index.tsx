@@ -850,13 +850,6 @@ export default function CustomAlarmStats() {
       render: (v) => (v ? formatSystemTime(String(v)) : '-'),
     },
     {
-      key: 'specificProblem',
-      title: t('alarm.specificProblem'),
-      dataIndex: 'specificProblem',
-      width: 150,
-      ellipsis: true,
-    },
-    {
       key: 'alarmCount',
       title: t('alarm.alarmCount'),
       dataIndex: 'alarmCount',
