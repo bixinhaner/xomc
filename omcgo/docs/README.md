@@ -74,6 +74,12 @@ omcgo/doc/
 | [interface-topology.md](architecture/interface-topology.md) | 南向/北向/直连接口拓扑关系、协议栈、数据流向 |
 | [backend-design.md](architecture/backend-design.md) | **Go 后端架构设计**：技术栈选型、模块分解、ACS 引擎、数据存储、扩展性设计（10万→100万） |
 
+### 技术设计
+
+| 文件 | 说明 |
+|------|------|
+| [0026-compose-watchdog-design.md](design/0026-compose-watchdog-design.md) | **Docker Compose Watchdog 开发设计**：探针能力边界、故障门限、可热加载配置、Docker API、自愈策略、Prometheus 分工与 Watchdog 自保护 |
+
 ### 规范清单
 
 | 文件 | 说明 |
