@@ -70,6 +70,7 @@ export interface UnifiedFileTransferTask {
   categoryLabel: string;
   typeCode: string;
   typeDisplayName: string;
+  fileType: string;
   firmwareId?: string;
   targetVersion?: string;
   productType?: string;

@@ -24,13 +24,14 @@ var paramFileColumns = []string{
 	"file_size",
 	"description",
 	"uploaded_by",
+	"device_sn",
 	"created_at",
 	"updated_at",
 }
 
 // Repository 是参数文件库的持久化接口。
 type Repository interface {
-	// Upsert 按 (param_type, file_name) upsert：同名同类型文件重新上传 = 覆盖更新，
+	// Upsert 按 (param_type, file_name, device_sn) upsert；手动上传的空 SN 归为同一组。
 	// 行 ID 保持稳定（下发任务引用的历史 ID 继续有效）。
 	Upsert(ctx context.Context, file *ParamFile) error
 	GetByID(ctx context.Context, id uuid.UUID) (*ParamFile, error)
@@ -63,19 +64,20 @@ func (r *PgRepository) Upsert(ctx context.Context, file *ParamFile) error {
 	query, args, err := storage.Psql.Insert("ims_param_files").
 		Columns(
 			"param_type", "file_name", "object_bucket", "object_path",
-			"md5", "file_size", "description", "uploaded_by",
+			"md5", "file_size", "description", "uploaded_by", "device_sn",
 		).
 		Values(
 			file.ParamType, file.FileName, file.ObjectBucket, file.ObjectPath,
-			file.MD5, file.FileSize, file.Description, file.UploadedBy,
+			file.MD5, file.FileSize, file.Description, file.UploadedBy, nullIfEmpty(file.DeviceSN),
 		).
-		Suffix(`ON CONFLICT (param_type, file_name) DO UPDATE SET
+		Suffix(`ON CONFLICT (param_type, file_name, COALESCE(device_sn, '')) DO UPDATE SET
 			object_bucket = EXCLUDED.object_bucket,
 			object_path   = EXCLUDED.object_path,
 			md5           = EXCLUDED.md5,
 			file_size     = EXCLUDED.file_size,
 			description   = COALESCE(EXCLUDED.description, ims_param_files.description),
 			uploaded_by   = COALESCE(EXCLUDED.uploaded_by, ims_param_files.uploaded_by),
+			device_sn     = COALESCE(EXCLUDED.device_sn, ims_param_files.device_sn),
 			updated_at    = NOW()
 			RETURNING id, created_at, updated_at`).
 		ToSql()
@@ -121,6 +123,9 @@ func (r *PgRepository) List(ctx context.Context, filter ParamFileFilter) ([]Para
 		}
 		if filter.UploadedBy != "" {
 			q = q.Where(sq.ILike{"uploaded_by": "%" + filter.UploadedBy + "%"})
+		}
+		if filter.DeviceSN != "" {
+			q = q.Where(sq.ILike{"device_sn": "%" + filter.DeviceSN + "%"})
 		}
 		return q
 	}
@@ -215,12 +220,24 @@ func (r *PgRepository) BatchDelete(ctx context.Context, ids []uuid.UUID) ([]uuid
 
 func scanParamFile(row pgx.Row) (*ParamFile, error) {
 	var f ParamFile
+	var deviceSN *string
 	if err := row.Scan(
 		&f.ID, &f.ParamType, &f.FileName, &f.ObjectBucket, &f.ObjectPath,
 		&f.MD5, &f.FileSize, &f.Description, &f.UploadedBy,
+		&deviceSN,
 		&f.CreatedAt, &f.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
+	if deviceSN != nil {
+		f.DeviceSN = *deviceSN
+	}
 	return &f, nil
+}
+
+func nullIfEmpty(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }

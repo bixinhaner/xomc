@@ -23475,6 +23475,7 @@ CREATE TABLE IF NOT EXISTS public.ims_param_files (
     file_size bigint DEFAULT 0 NOT NULL,
     description text,
     uploaded_by character varying(64),
+    device_sn character varying(64),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ims_param_files_pkey PRIMARY KEY (id),
@@ -23486,6 +23487,8 @@ CREATE TABLE IF NOT EXISTS public.ims_param_files (
 -- 不重建表。先 DROP 旧 CHECK 再回填数据（旧 P 值 → FT_ImsCore 值），最后 ADD 新 CHECK，
 -- 全程幂等。
 ALTER TABLE public.ims_param_files ALTER COLUMN param_type TYPE character varying(64);
+ALTER TABLE public.ims_param_files ADD COLUMN IF NOT EXISTS device_sn character varying(64);
+ALTER TABLE public.ims_param_files DROP CONSTRAINT IF EXISTS ims_param_files_param_type_file_name_key;
 ALTER TABLE public.ims_param_files DROP CONSTRAINT IF EXISTS ims_param_files_param_type_check;
 UPDATE public.ims_param_files SET param_type = CASE param_type
     WHEN 'P1' THEN 'FT_ImsCore_Pcrf_Policy_Setting_UD'
@@ -23514,9 +23517,22 @@ ALTER TABLE public.ims_param_files ADD CONSTRAINT ims_param_files_param_type_che
         'FT_ImsCore_Ue_Route_Setting_UD',
         'FT_ImsCore_Pcrf_Policy_Setting_UD',
         'FT_ImsCore_Upload_License_D',
-        'FT_ImsCore_Recovery_D'
+        'FT_ImsCore_Recovery_D',
+        'FT_ImsCore_User_Location_Info_U',
+        'FT_ImsCore_eNBgNB_Location_Info_U',
+        'FT_ImsCore_Signaling_Events_U',
+        'FT_ImsCore_Sip_Events_U',
+        'FT_ImsCore_Cdr_U',
+        'FT_ImsCore_Operation_Logs_U',
+        'FT_ImsCore_Download_Auth_U',
+        'FT_ImsCore_Backups_U',
+        'FT_ImsCore_Core_Logs_U',
+        'FT_ImsCore_Web_Logs_U'
     )
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ims_param_files_type_name_device
+    ON public.ims_param_files USING btree (param_type, file_name, COALESCE(device_sn, ''));
 
 CREATE INDEX IF NOT EXISTS idx_ims_param_collect_sub_tasks_command_key
     ON public.ims_param_collect_sub_tasks USING btree (command_key) WHERE (command_key IS NOT NULL);
@@ -23534,6 +23550,8 @@ CREATE INDEX IF NOT EXISTS idx_ims_param_files_created_at
     ON public.ims_param_files USING btree (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ims_param_files_param_type
     ON public.ims_param_files USING btree (param_type);
+CREATE INDEX IF NOT EXISTS idx_ims_param_files_device_sn
+    ON public.ims_param_files USING btree (device_sn);
 
 DROP TRIGGER IF EXISTS trigger_ims_param_collect_sub_tasks_updated_at ON public.ims_param_collect_sub_tasks;
 CREATE TRIGGER trigger_ims_param_collect_sub_tasks_updated_at BEFORE UPDATE ON public.ims_param_collect_sub_tasks FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();

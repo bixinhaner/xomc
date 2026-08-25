@@ -1260,6 +1260,8 @@ func (s *SoftwareService) handleTCBody(ctx context.Context, commandKey string, f
 	// Find sub-task by command key
 	subTask, err := s.subTaskRepo.GetByCommandKey(ctx, commandKey)
 	if err != nil {
+		s.logger.Warn("TransferComplete command key did not match a sub-task",
+			zap.String("command_key", commandKey), zap.Error(err))
 		return nil // Not our task
 	}
 

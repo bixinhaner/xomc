@@ -70,6 +70,7 @@ type BackendParamFile struct {
 	FileSize    int64   `json:"file_size"`
 	Description *string `json:"description"`
 	UploadedBy  *string `json:"uploaded_by"`
+	DeviceSN    string  `json:"device_sn,omitempty"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
 }
@@ -81,6 +82,7 @@ func (h *Handler) ListFiles(c *gin.Context) {
 		ParamType:  c.Query("param_type"),
 		FileName:   c.Query("file_name"),
 		UploadedBy: c.Query("uploaded_by"),
+		DeviceSN:   c.Query("device_sn"),
 		Page:       page,
 		PageSize:   pageSize,
 		SortBy:     c.Query("sort_by"),
@@ -102,6 +104,7 @@ func (h *Handler) ListFiles(c *gin.Context) {
 			FileSize:    item.FileSize,
 			Description: item.Description,
 			UploadedBy:  item.UploadedBy,
+			DeviceSN:    item.DeviceSN,
 			CreatedAt:   item.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 			UpdatedAt:   item.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		})

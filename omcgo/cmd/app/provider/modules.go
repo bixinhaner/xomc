@@ -1104,6 +1104,9 @@ func initBackupModule(c *Container) error {
 	if c.miscDeps.softwareService != nil {
 		filePathRecorder.SetFileLandedNotifier(c.miscDeps.softwareService)
 	}
+	if c.miscDeps.imsParamService != nil {
+		filePathRecorder.SetParamFileLandedRecorder(c.miscDeps.imsParamService)
+	}
 	// T-0164 B6: ConfigSnapshot 子系统装配（独立 bucket / 表 / Service / Handler）。
 	// 历史数据不回填（用户确认 2026-05-22），表上线后从首次新备份或导入开始累积。
 	snapshotRepo := backup.NewPgSnapshotRepository(c.PgPool)
@@ -2870,6 +2873,7 @@ type miscDeps struct {
 
 	// ImsParam（核心网参数文件库）
 	imsParamHandler *imsparam.Handler
+	imsParamService *imsparam.Service
 
 	// StationLog
 	stationlogHandler *stationlog.Handler

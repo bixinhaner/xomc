@@ -487,6 +487,7 @@ let tasks: UnifiedFileTransferTask[] = [
     categoryLabel: DEFAULT_CATEGORY_LABELS.enb_upgrade,
     typeCode: 'ENB_IMG_UPGRADE',
     typeDisplayName: '4G 基站软件升级',
+    fileType: 'Firmware Upgrade Image',
     status: 'in_progress',
     progress: 68,
     totalCount: 25,
@@ -505,6 +506,7 @@ let tasks: UnifiedFileTransferTask[] = [
     categoryLabel: DEFAULT_CATEGORY_LABELS.gnb_upgrade,
     typeCode: 'GNB_IMG_UPGRADE',
     typeDisplayName: '5G 基站软件升级',
+    fileType: 'Firmware Upgrade Image',
     status: 'in_progress',
     progress: 82,
     totalCount: 12,
@@ -524,6 +526,7 @@ let tasks: UnifiedFileTransferTask[] = [
     categoryLabel: DEFAULT_CATEGORY_LABELS.station_log,
     typeCode: 'RUNTIME_LOG_COLLECT',
     typeDisplayName: '运行日志采集',
+    fileType: '运行日志文件',
     status: 'ended',
     result: 'success',
     progress: 100,
@@ -543,6 +546,7 @@ let tasks: UnifiedFileTransferTask[] = [
     categoryLabel: DEFAULT_CATEGORY_LABELS.version_rollback,
     typeCode: 'VERSION_ROLLBACK',
     typeDisplayName: '基站版本回退',
+    fileType: 'Firmware Upgrade Image',
     status: 'pending',
     progress: 12,
     totalCount: 16,
@@ -562,6 +566,7 @@ let tasks: UnifiedFileTransferTask[] = [
     categoryLabel: DEFAULT_CATEGORY_LABELS.config_backup,
     typeCode: 'CFG_ARCHIVE_PULL',
     typeDisplayName: '配置归档采集',
+    fileType: '配置文件',
     status: 'suspended',
     progress: 24,
     totalCount: 40,
@@ -580,6 +585,7 @@ let tasks: UnifiedFileTransferTask[] = [
     categoryLabel: DEFAULT_CATEGORY_LABELS.config_restore,
     typeCode: 'CONFIG_RESTORE',
     typeDisplayName: '配置恢复',
+    fileType: '配置文件',
     status: 'in_progress',
     progress: 54,
     totalCount: 20,
@@ -787,6 +793,7 @@ export const unifiedFileTransferService = {
       filtered = filtered.filter((item) =>
         item.taskName.toLowerCase().includes(keyword) ||
         item.typeDisplayName.toLowerCase().includes(keyword) ||
+        item.fileType.toLowerCase().includes(keyword) ||
         item.operatorScope.toLowerCase().includes(keyword),
       );
     }
@@ -863,6 +870,7 @@ export const unifiedFileTransferService = {
       categoryLabel: typeDef?.categoryLabel ?? getCategoryLabel('enb_upgrade'),
       typeCode: input.typeCode,
       typeDisplayName: typeDef?.displayName ?? input.typeCode,
+      fileType: input.paramType ?? typeDef?.fileTypeLabel ?? typeDef?.fileType ?? input.typeCode,
       firmwareId: firmware?.id,
       targetVersion: firmware?.versionCode ?? typeDef?.fileNameTemplate ?? typeDef?.targetFileNameTemplate ?? typeDef?.fileTypeLabel,
       productType: firmware?.deviceType ?? typeDef?.platformScope?.[0],

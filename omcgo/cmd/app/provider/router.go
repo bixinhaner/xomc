@@ -149,7 +149,7 @@ func Setup(r *gin.Engine, c *Container) error {
 		// 时 backup 跑得比 software 早，softwareService 还是 nil，hook 永远拿不到通知。
 		// 依赖 ufte (T-0164)：backup.RestoreService 反向注入到 ufte.Service 作为
 		// CONFIG_RESTORE 派发器；ufte 必须先就绪。
-		Depends: []string{"software", "ufte", "misc"},
+		Depends: []string{"software", "ufte", "misc", "imsparam"},
 		Init:    func() error { return initBackupModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{

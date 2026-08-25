@@ -544,7 +544,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// 不匹配 backup-{taskId8}-{sn}.{ext} 模板时 parseBackupFilename 失效，
 		// 此时回退到 URL query 兜底是唯一可靠路径。
 		h.publishBackupFileReceivedEvent(ctx, bucket, objectPath, filename, info.Size, info.ETag,
-			r.URL.Query().Get("sn"), queryTaskID)
+			r.URL.Query().Get("sn"), queryTaskID, r.URL.Query().Get("paramType"))
 	}
 
 	// 6.3. For station log uploads (FileType "6" running log, "8" fault log),
@@ -558,7 +558,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if (ft == tr069.FileTypeRunningLog || ft == tr069.FileTypeFaultLog) && h.eventBus != nil {
 		h.publishLogFileReceivedEvent(ctx, bucket, objectPath, filename, string(ft), info.Size, querySN, queryTaskID)
 		h.publishBackupFileReceivedEvent(ctx, bucket, objectPath, filename, info.Size, info.ETag,
-			r.URL.Query().Get("sn"), queryTaskID)
+			r.URL.Query().Get("sn"), queryTaskID, r.URL.Query().Get("paramType"))
 	}
 
 	// 6.3.1 核心网参数文件（IMS_PARAM）：同 LOG 链路发 backup.file.received ——
@@ -568,7 +568,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 参数（FT1~12）/ 日志（FT13/18/19）/ License（FT15）/ 恢复（FT17）四类同链路。
 	if isImsCoreUpload(ft) && h.eventBus != nil {
 		h.publishBackupFileReceivedEvent(ctx, bucket, objectPath, filename, info.Size, info.ETag,
-			r.URL.Query().Get("sn"), queryTaskID)
+			r.URL.Query().Get("sn"), queryTaskID, r.URL.Query().Get("paramType"))
 	}
 
 	// 6.4. T-0164 G1 真机闭环修复点：FileType=PM (4) 文件入库后发 pm.file.received，
@@ -954,7 +954,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 // 下 ETag = MD5(hex)；multipart 上传时 ETag 带 `-N` 后缀，订阅者据此过滤。
 func (h *Handler) publishBackupFileReceivedEvent(
 	ctx context.Context, bucket, objectPath, filename string, fileSize int64, etag string,
-	queryDeviceSN, queryTaskID string,
+	queryDeviceSN, queryTaskID, paramType string,
 ) {
 	taskIDPrefix, deviceSN := parseBackupFilename(filename)
 	// Fallback 1：filename 不符合 backup-{taskId8}-{sn}.{ext} 模板时（如设备用了
@@ -989,6 +989,7 @@ func (h *Handler) publishBackupFileReceivedEvent(
 		"device_sn":             deviceSN,
 		"file_size":             fileSize,
 		"md5":                   md5,
+		"param_type":            paramType,
 	}
 
 	evt, err := event.NewEvent(event.SubjectBackupFileReceived, payload)

@@ -33,6 +33,7 @@ export default function ImsParamLibraryPage() {
   const [pageSize, setPageSize] = useState(20);
   const [paramTypeFilter, setParamTypeFilter] = useState<string>();
   const [fileNameFilter, setFileNameFilter] = useState('');
+  const [deviceSnFilter, setDeviceSnFilter] = useState('');
   const [uploadOpen, setUploadOpen] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
 
@@ -42,8 +43,9 @@ export default function ImsParamLibraryPage() {
       pageSize,
       paramType: paramTypeFilter || undefined,
       fileName: fileNameFilter.trim() || undefined,
+      deviceSn: deviceSnFilter.trim() || undefined,
     }),
-    [page, pageSize, paramTypeFilter, fileNameFilter],
+    [page, pageSize, paramTypeFilter, fileNameFilter, deviceSnFilter],
   );
 
   const { data, isLoading, refetch } = useImsParamFiles(queryParams);
@@ -75,6 +77,14 @@ export default function ImsParamLibraryPage() {
       render: (v) => <Tag color="geekblue">{paramTypeLabel(String(v))}</Tag>,
     },
     { key: 'fileName', title: t('transfer.imsParamLib.col.fileName'), dataIndex: 'fileName', width: 280, mono: true, copyable: true },
+    {
+      key: 'deviceSn',
+      title: t('transfer.imsParamLib.col.deviceSn'),
+      dataIndex: 'deviceSn',
+      width: 170,
+      mono: true,
+      render: (v) => v ? String(v) : <span style={{ color: '#999' }}>—</span>,
+    },
     {
       key: 'fileSize',
       title: t('transfer.imsParamLib.col.size'),
@@ -180,6 +190,13 @@ export default function ImsParamLibraryPage() {
             value={fileNameFilter}
             onChange={(e) => setFileNameFilter(e.target.value)}
             style={{ width: 220 }}
+          />
+          <Input
+            placeholder={t('transfer.imsParamLib.filter.deviceSn')}
+            allowClear
+            value={deviceSnFilter}
+            onChange={(e) => setDeviceSnFilter(e.target.value)}
+            style={{ width: 180 }}
           />
           <Button icon={<ReloadOutlined />} onClick={() => refetch()}>{t('transfer.imsParamLib.action.refresh')}</Button>
         </Space>

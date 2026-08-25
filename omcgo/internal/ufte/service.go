@@ -1128,6 +1128,15 @@ func (s *Service) createImsParamDistributeTask(
 	if req.FileID == nil || *req.FileID == uuid.Nil {
 		return nil, fmt.Errorf("%w: fileId is required for %s", commonerrors.ErrInvalidInput, typeDef.TypeCode)
 	}
+	previewName, previewParamType, err := s.imsParamDispatcher.PreviewImsParamFile(ctx, *req.FileID)
+	if err != nil {
+		return nil, fmt.Errorf("preview %s file: %w", typeDef.TypeCode, err)
+	}
+	paramDef, ok = imsparam.Lookup(previewParamType)
+	if !ok || paramDef.Code != imsparam.NormalizeParamType(req.ParamType) {
+		return nil, fmt.Errorf("%w: file %s (type %s) does not match selected param type %s",
+			commonerrors.ErrInvalidInput, previewName, previewParamType, req.ParamType)
+	}
 
 	sns := make([]string, 0, len(req.DeviceIDs))
 	for _, did := range req.DeviceIDs {
@@ -1154,25 +1163,13 @@ func (s *Service) createImsParamDistributeTask(
 		return nil, fmt.Errorf("create %s placeholder: %w", typeDef.TypeCode, phErr)
 	}
 
-	// 1.5) 预览目标文件名（校验文件仍存在 + 类型与模板匹配），写到
+	// 1.5) 预览目标文件名（文件存在性和类型已在创建占位任务前校验），写到
 	// sub_task.dest_version 让挂起 / 定时任务在派发前也能看到"目标文件"。
-	if previewName, previewParamType, prevErr := s.imsParamDispatcher.PreviewImsParamFile(ctx, *req.FileID); prevErr == nil {
-		if def, ok := imsparam.Lookup(previewParamType); ok {
-			// 所选文件的类型必须与任务所选文件类型一致（防文件库与任务表单错配）。
-			if def.Code != imsparam.NormalizeParamType(req.ParamType) {
-				return nil, fmt.Errorf("%w: file %s (type %s) does not match selected param type %s",
-					commonerrors.ErrInvalidInput, previewName, def.Code, req.ParamType)
-			}
-		}
-		previewFiles := make(map[string]string, len(sns))
-		for _, sn := range sns {
-			previewFiles[sn] = previewName
-		}
-		s.persistDispatchedFiles(ctx, typeDef.TypeCode, placeholder.ID, previewFiles)
-	} else {
-		s.logger.Warn("preview IMS file failed; dest_version stays empty",
-			zap.String("task_id", placeholder.ID.String()), zap.Error(prevErr))
+	previewFiles := make(map[string]string, len(sns))
+	for _, sn := range sns {
+		previewFiles[sn] = previewName
 	}
+	s.persistDispatchedFiles(ctx, typeDef.TypeCode, placeholder.ID, previewFiles)
 
 	// 2) Suspended / scheduled：到此结束；等用户点"开始"或 scheduler 到点触发。
 	if createSuspended || (scheduledAt != nil && scheduledAt.After(time.Now())) {
@@ -1830,9 +1827,11 @@ func (s *Service) mapTask(ctx context.Context, catalog []TaskType, task *softwar
 	// IMS 任务把 ParamType 附加到类型展示名（"核心网参数采集（P3 IMS用户设置）"），
 	// 让任务列表无需新列即可区分同模板不同参数类型的具体任务。
 	typeDisplayName := typeDef.DisplayName
+	fileType := typeDef.FileTypeLabel
 	if typeDef.Category == "ims_core" {
 		if pt := imsParamTypeFromStoredFileType(task.DownloadFileType); pt != "" {
-			typeDisplayName = fmt.Sprintf("%s（%s）", typeDef.DisplayName, imsparam.DisplayName(pt))
+			fileType = imsparam.DisplayName(pt)
+			typeDisplayName = fmt.Sprintf("%s（%s）", typeDef.DisplayName, fileType)
 		}
 	}
 	return &Task{
@@ -1842,6 +1841,7 @@ func (s *Service) mapTask(ctx context.Context, catalog []TaskType, task *softwar
 		CategoryLabel:   typeDef.CategoryLabel,
 		TypeCode:        typeDef.TypeCode,
 		TypeDisplayName: typeDisplayName,
+		FileType:        fileType,
 		FirmwareID:      firmwareID,
 		TargetVersion:   taskTargetVersion,
 		ProductType:     task.ProductClass,
@@ -2213,7 +2213,8 @@ func matchesTaskFilter(item Task, filter TaskListFilter) bool {
 		needle := strings.ToLower(strings.TrimSpace(filter.Keyword))
 		if !strings.Contains(strings.ToLower(item.TaskName), needle) &&
 			!strings.Contains(strings.ToLower(item.TypeDisplayName), needle) &&
-			!strings.Contains(strings.ToLower(item.ProductType), needle) {
+			!strings.Contains(strings.ToLower(item.ProductType), needle) &&
+			!strings.Contains(strings.ToLower(item.FileType), needle) {
 			return false
 		}
 	}

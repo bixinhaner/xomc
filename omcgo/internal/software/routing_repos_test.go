@@ -133,6 +133,22 @@ func TestRoutingSubTaskRepository_ListAll_PagesBeyond100(t *testing.T) {
 	}
 }
 
+func TestRoutingSubTaskRepository_DirectDispatchCommandKeyUsesFallback(t *testing.T) {
+	fallback := &pagedSubTaskFallback{}
+	router := &TransferRepoRouter{
+		ConfigBackup:      TransferRepoSet{SubTask: fallback},
+		RuntimeLogCollect: TransferRepoSet{SubTask: fallback},
+		FaultLogCollect:   TransferRepoSet{SubTask: fallback},
+		ImsParamCollect:   TransferRepoSet{SubTask: fallback},
+	}
+	repo := NewRoutingSubTaskRepository(router, fallback)
+
+	candidates := repo.candidatesByCommandKey("IMS_PARAM_DISTRIBUTE_3d594e25_SN001")
+	if len(candidates) != 1 || candidates[0] != fallback {
+		t.Fatalf("direct-dispatch candidates = %d, want only fallback repository", len(candidates))
+	}
+}
+
 // TestRoutingSubTaskRepository_ListAll_EmptyShortCircuit fallback 全空时不应该
 // 死循环；翻页提前 break。
 func TestRoutingSubTaskRepository_ListAll_EmptyShortCircuit(t *testing.T) {
