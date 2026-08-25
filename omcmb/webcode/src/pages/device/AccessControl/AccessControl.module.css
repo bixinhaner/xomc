@@ -39,3 +39,7 @@
   gap: 2px;
   white-space: nowrap;
 }
+
+.deepLinkedRow :global(.ant-table-cell) {
+  background: var(--ant-color-fill-tertiary, rgba(22, 119, 255, 0.08));
+}

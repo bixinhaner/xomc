@@ -55,3 +55,29 @@ func TestActionFiltersCoverResultPolicyAndTime(t *testing.T) {
 	require.Contains(t, query, "decision.policy_version_id")
 	require.Contains(t, args, policyVersionID.String())
 }
+
+func TestCandidateAttentionFiltersUseExactIDPendingExpiryAndStableOrder(t *testing.T) {
+	candidateID := uuid.New()
+	now := time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC)
+	filter := ManagementFilter{
+		CandidateID: &candidateID, Status: "pending", ExpiresAfter: &now,
+		SortBy: "first_seen_at", SortDir: "asc",
+	}
+
+	query, args, err := storage.Psql.Select("c.id").From("device_access_candidates c").
+		Where(candidateFilters(filter)).OrderBy(candidateOrderBy(filter)...).ToSql()
+
+	require.NoError(t, err)
+	require.Contains(t, query, "c.id = $1")
+	require.Contains(t, query, "c.review_status = $2")
+	require.Contains(t, query, "c.device_id IS NULL")
+	require.Contains(t, query, "c.expires_at > $3")
+	require.Contains(t, query, "ORDER BY c.first_seen_at ASC, c.id ASC")
+	require.Equal(t, []any{candidateID.String(), "pending", now}, args)
+}
+
+func TestCandidateAttentionOrderingUsesAllowlist(t *testing.T) {
+	require.Equal(t, []string{"c.last_seen_at DESC", "c.id ASC"}, candidateOrderBy(ManagementFilter{
+		SortBy: "last_seen_at; DROP TABLE device_access_candidates", SortDir: "asc",
+	}))
+}

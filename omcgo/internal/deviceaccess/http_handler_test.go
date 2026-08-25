@@ -20,12 +20,56 @@ type actorResolverStub struct {
 
 type managementStoreStub struct{}
 
+type capturingCandidateManagementStore struct {
+	managementStoreStub
+	filter ManagementFilter
+	calls  int
+}
+
+func (s *capturingCandidateManagementStore) ListCandidates(_ context.Context, filter ManagementFilter) ([]CandidateItem, int64, error) {
+	s.filter = filter
+	s.calls++
+	return []CandidateItem{}, 0, nil
+}
+
 func (managementStoreStub) ListStates(context.Context, ManagementFilter) ([]AccessStateItem, int64, error) {
 	return []AccessStateItem{}, 0, nil
 }
 
+func (managementStoreStub) SummarizeStates(context.Context, ManagementFilter) (AccessStateSummary, error) {
+	return AccessStateSummary{}, nil
+}
+
 func (managementStoreStub) GetDetail(context.Context, ManagementFilter) (AccessDetail, error) {
 	return AccessDetail{}, nil
+}
+
+func (managementStoreStub) ListDecisions(context.Context, ManagementFilter) ([]DecisionItem, int64, error) {
+	return nil, 0, nil
+}
+
+func (managementStoreStub) ListIdentitySnapshots(context.Context, ManagementFilter) ([]IdentitySnapshot, int64, error) {
+	return nil, 0, nil
+}
+
+func (managementStoreStub) ListEvidence(context.Context, ManagementFilter) ([]EvidenceItem, int64, error) {
+	return nil, 0, nil
+}
+
+func (managementStoreStub) ListNotifications(context.Context, ManagementFilter) ([]AccessNotificationItem, int64, error) {
+	return nil, 0, nil
+}
+
+func (managementStoreStub) ListManualOperations(context.Context, ManagementFilter) ([]AccessManualOperationItem, int64, error) {
+	return nil, 0, nil
+}
+
+func (managementStoreStub) ArchiveDecision(context.Context, string, uuid.UUID, uuid.UUID, []uuid.UUID, string) error {
+	return nil
+}
+
+func (managementStoreStub) RestoreDecision(context.Context, string, uuid.UUID, uuid.UUID, []uuid.UUID) error {
+	return nil
 }
 
 func (managementStoreStub) ListPolicyVersions(context.Context, ManagementFilter) ([]PolicyVersionSummary, int64, error) {
@@ -106,6 +150,46 @@ func TestApplyManagementAuditQueryRejectsInvalidUUIDAndTime(t *testing.T) {
 			require.Error(t, applyManagementAuditQuery(ctx, &ManagementFilter{}))
 		})
 	}
+}
+
+func TestPolicyHTTPHandlerListCandidatesParsesExactCandidateID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	candidateID := uuid.New()
+	groupID := uuid.New()
+	store := &capturingCandidateManagementStore{}
+	handler := NewPolicyHTTPHandler(nil, nil, actorResolverStub{actor: PolicyActor{
+		Carrier: "cmcc", VisibleGroups: []uuid.UUID{groupID},
+	}})
+	handler.SetManagementStore(store)
+	router := gin.New()
+	router.GET("/candidates", handler.ListCandidates)
+
+	request := httptest.NewRequest(http.MethodGet, "/candidates?candidate_id="+candidateID.String()+"&review_status=pending", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, 1, store.calls)
+	require.NotNil(t, store.filter.CandidateID)
+	require.Equal(t, candidateID, *store.filter.CandidateID)
+	require.Equal(t, "pending", store.filter.Status)
+	require.Equal(t, []uuid.UUID{groupID}, store.filter.VisibleGroups)
+}
+
+func TestPolicyHTTPHandlerListCandidatesRejectsInvalidCandidateID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := &capturingCandidateManagementStore{}
+	handler := NewPolicyHTTPHandler(nil, nil, actorResolverStub{actor: PolicyActor{Carrier: "cmcc"}})
+	handler.SetManagementStore(store)
+	router := gin.New()
+	router.GET("/candidates", handler.ListCandidates)
+
+	request := httptest.NewRequest(http.MethodGet, "/candidates?candidate_id=not-a-uuid", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	require.Zero(t, store.calls)
 }
 
 func TestPolicyHTTPHandlerRejectsMissingActorResolver(t *testing.T) {

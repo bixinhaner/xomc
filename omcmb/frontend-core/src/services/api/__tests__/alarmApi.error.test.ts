@@ -1,7 +1,7 @@
 /**
  * alarmApi 失败路径 + 畸形载荷契约测试（#22 关键 API — alarm 域）：
  *   - 列表/统计接口错误码 401/429/500 原样抛（不吞错，hook 走 React Query 错误态）。
- *   - getById 错误吞错返 null（详情抽屉不崩，现行 catch 兜底）。
+ *   - getById 仅把 404 转为 null；403/500 必须保留权限和故障语义。
  *   - 畸形载荷不崩：severity 越界 → 'warning' 兜底；items 缺失 → 空列表；
  *     by_severity 缺键 → 0；空可能原因不跨字段回退；is_read 缺省 → unread='1'。
  *
@@ -52,17 +52,21 @@ describe('alarmApi — 错误码冒泡（不吞错）', () => {
   });
 });
 
-describe('alarmApi.getById — 错误吞错返 null', () => {
+describe('alarmApi.getById — 精准详情错误语义', () => {
   it('404 → null（详情抽屉不崩）', async () => {
     getMock.mockRejectedValue({ response: { status: 404 } });
     const out = await alarmApi.getById('missing');
     expect(out).toBeNull();
   });
 
-  it('500 → null（现行 catch 兜底）', async () => {
+  it('403 原样抛，页面不得退化成未过滤列表', async () => {
+    getMock.mockRejectedValue({ response: { status: 403 } });
+    await expect(alarmApi.getById('forbidden')).rejects.toEqual({ response: { status: 403 } });
+  });
+
+  it('500 原样抛，由页面进入标准错误态', async () => {
     getMock.mockRejectedValue({ response: { status: 500 } });
-    const out = await alarmApi.getById('x');
-    expect(out).toBeNull();
+    await expect(alarmApi.getById('x')).rejects.toEqual({ response: { status: 500 } });
   });
 });
 

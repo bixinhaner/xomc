@@ -113,6 +113,10 @@ vi.mock('./DashboardKPIModules', () => ({
   DashboardKPIModules: () => <div data-testid="dashboard-kpi-modules" />,
 }));
 
+vi.mock('./components/AttentionBar', () => ({
+  default: () => <div data-testid="dashboard-attention-bar" />,
+}));
+
 vi.mock('@core/hooks/api/useTechnologyDictionary', () => ({
   useTechnologyDictionary: () => ({ options: [] }),
 }));
@@ -271,6 +275,26 @@ describe('DashboardPage card snapshot integration', () => {
 
     expect(screen.queryByText('User A')).not.toBeInTheDocument();
     expect(screen.queryByText('dashboard.quickAccess')).not.toBeInTheDocument();
+  });
+
+  it('keeps the attention bar between the existing summary cards and KPI area', () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <DashboardPage />
+      </QueryClientProvider>,
+    );
+
+    const summaryCard = screen.getByTestId('kpi-dashboard.totalDevices');
+    const attentionBar = screen.getByTestId('dashboard-attention-bar');
+    const networkTechnology = screen.getByText(/dashboard\.networkTech/);
+    const kpiModules = screen.getByTestId('dashboard-kpi-modules');
+
+    expect(summaryCard.compareDocumentPosition(attentionBar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(attentionBar.compareDocumentPosition(networkTechnology) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(attentionBar.compareDocumentPosition(kpiModules) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
 	it('shows the latest persisted PM slot coverage for the selected technology', () => {

@@ -9,6 +9,7 @@ import type { AlarmSeverity } from '@core/types/common';
  */
 
 export const VALID_SEVERITIES: AlarmSeverity[] = ['critical', 'major', 'minor', 'warning'];
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type DrillDownTimeRange = '7days' | '30days' | 'custom';
 
@@ -20,6 +21,17 @@ export interface BuildDrillDownInput {
   customEndDate?: Dayjs | null;
   /** 注入「现在」便于测试；不传则取 dayjs()。 */
   now?: Dayjs;
+}
+
+export function parseAlarmId(search: URLSearchParams): string | undefined {
+  const alarmId = search.get('alarmId')?.trim();
+  return alarmId && UUID_PATTERN.test(alarmId) ? alarmId : undefined;
+}
+
+export function withoutAlarmId(search: URLSearchParams): URLSearchParams {
+  const next = new URLSearchParams(search);
+  next.delete('alarmId');
+  return next;
 }
 
 /** 统计页把当前筛选（级别/设备/时间范围）序列化成钻取 URL 的查询参数。 */

@@ -161,6 +161,7 @@ type AccessStateSummary struct {
 
 type ManagementFilter struct {
 	Carrier         string
+	CandidateID     *uuid.UUID
 	SerialNumber    string
 	ProductName     string
 	State           AccessState
@@ -174,7 +175,10 @@ type ManagementFilter struct {
 	MatchedRuleID   *uuid.UUID
 	StartedAt       *time.Time
 	EndedAt         *time.Time
+	ExpiresAfter    *time.Time
 	ArchiveStatus   string
+	SortBy          string
+	SortDir         string
 	Page            int
 	PageSize        int
 	VisibleGroups   []uuid.UUID
@@ -504,16 +508,7 @@ func (s *PgManagementStore) ListEntries(ctx context.Context, filter ManagementFi
 
 func (s *PgManagementStore) ListCandidates(ctx context.Context, filter ManagementFilter) ([]CandidateItem, int64, error) {
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
-	where := sq.And{sq.Eq{"c.carrier": strings.TrimSpace(filter.Carrier)}}
-	if filter.Status != "" {
-		where = append(where, sq.Eq{"c.review_status": filter.Status})
-		if filter.Status == "pending" {
-			where = append(where, sq.Expr("c.device_id IS NULL"))
-		}
-	}
-	if filter.SerialNumber != "" {
-		where = append(where, sq.ILike{"c.serial_number": "%" + strings.TrimSpace(filter.SerialNumber) + "%"})
-	}
+	where := candidateFilters(filter)
 	countBuilder := storage.Psql.Select("COUNT(*)").From("device_access_candidates c").Where(where)
 	countBuilder = applyAccessIdentityVisibility(countBuilder, "c.device_id", "c.carrier", "c.serial_number", filter.VisibleGroups)
 	countQuery, countArgs, err := countBuilder.ToSql()
@@ -528,7 +523,7 @@ func (s *PgManagementStore) ListCandidates(ctx context.Context, filter Managemen
 		"c.id", "c.carrier", "c.serial_number", "c.oui", "COALESCE(c.product_class, '')", "COALESCE(c.software_version, '')",
 		"COALESCE(host(c.observed_remote_ip), '')", "c.device_id", "c.first_seen_at", "c.last_seen_at", "c.inform_count",
 		"c.review_status", "c.reviewed_by", "c.reviewed_at", "c.expires_at",
-	).From("device_access_candidates c").Where(where).OrderBy("c.last_seen_at DESC").
+	).From("device_access_candidates c").Where(where).OrderBy(candidateOrderBy(filter)...).
 		Limit(uint64(pageSize)).Offset(uint64((page - 1) * pageSize))
 	listBuilder = applyAccessIdentityVisibility(listBuilder, "c.device_id", "c.carrier", "c.serial_number", filter.VisibleGroups)
 	query, args, err := listBuilder.ToSql()
@@ -554,6 +549,44 @@ func (s *PgManagementStore) ListCandidates(ctx context.Context, filter Managemen
 		return nil, 0, fmt.Errorf("iterate candidates: %w", err)
 	}
 	return items, total, nil
+}
+
+func candidateFilters(filter ManagementFilter) sq.And {
+	where := sq.And{}
+	if carrier := strings.TrimSpace(filter.Carrier); carrier != "" {
+		where = append(where, sq.Eq{"c.carrier": carrier})
+	}
+	if filter.CandidateID != nil {
+		where = append(where, sq.Eq{"c.id": *filter.CandidateID})
+	}
+	if filter.Status != "" {
+		where = append(where, sq.Eq{"c.review_status": filter.Status})
+		if filter.Status == "pending" {
+			where = append(where, sq.Expr("c.device_id IS NULL"))
+		}
+	}
+	if filter.SerialNumber != "" {
+		where = append(where, sq.ILike{"c.serial_number": "%" + strings.TrimSpace(filter.SerialNumber) + "%"})
+	}
+	if filter.ExpiresAfter != nil {
+		where = append(where, sq.Gt{"c.expires_at": *filter.ExpiresAfter})
+	}
+	return where
+}
+
+func candidateOrderBy(filter ManagementFilter) []string {
+	direction := "DESC"
+	if strings.EqualFold(filter.SortDir, "asc") {
+		direction = "ASC"
+	}
+	switch filter.SortBy {
+	case "first_seen_at":
+		return []string{"c.first_seen_at " + direction, "c.id ASC"}
+	case "last_seen_at", "":
+		return []string{"c.last_seen_at " + direction, "c.id ASC"}
+	default:
+		return []string{"c.last_seen_at DESC", "c.id ASC"}
+	}
 }
 
 func (s *PgManagementStore) ReviewCandidate(

@@ -899,6 +899,14 @@ func (h *PolicyHTTPHandler) ListCandidates(c *gin.Context) {
 	}
 	filter := managementFilter(c, actor)
 	filter.Status = c.Query("review_status")
+	if rawID := strings.TrimSpace(c.Query("candidate_id")); rawID != "" {
+		candidateID, err := uuid.Parse(rawID)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		filter.CandidateID = &candidateID
+	}
 	items, total, err := h.manage.ListCandidates(c.Request.Context(), filter)
 	writeManagementList(c, items, total, filter, err)
 }
