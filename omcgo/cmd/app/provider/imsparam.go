@@ -30,6 +30,7 @@ func initImsParamModule(c *Container) error {
 		logger,
 	)
 	service.SetStorageAdmission(c.StorageProtection)
+	c.miscDeps.imsParamService = service
 
 	// 运行时 ACS 下载配置（sys_configs 'acs_transfer'，前端"系统管理 → ACS 传输"维护），
 	// 与 software / backup 模块同款 Policy + 地址决策 resolver。

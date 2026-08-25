@@ -167,6 +167,11 @@ func (r *PgSubTaskRepo) UpdateStatusWithCode(ctx context.Context, id uuid.UUID, 
 	if code != "" && status == software.UpgradeFailed {
 		builder = builder.Set("failure_reason", string(code))
 	}
+	if status == software.UpgradeCompleted || status == software.UpgradeFailed || status == software.UpgradeTerminated {
+		builder = builder.Where(sq.NotEq{"status": []software.UpgradeState{
+			software.UpgradeCompleted, software.UpgradeFailed, software.UpgradeTerminated,
+		}})
+	}
 	if status == software.UpgradeDownloading || status == software.UpgradeUploading {
 		builder = builder.Set("started_at", time.Now())
 	}

@@ -18,6 +18,7 @@ type ParamFile struct {
 	FileSize     int64
 	Description  *string
 	UploadedBy   *string
+	DeviceSN     string // 设备采集文件的来源 SN；手动上传为空
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -27,6 +28,7 @@ type ParamFileFilter struct {
 	ParamType  string
 	FileName   string
 	UploadedBy string
+	DeviceSN   string
 	Page       int
 	PageSize   int
 	SortBy     string // created_at | updated_at

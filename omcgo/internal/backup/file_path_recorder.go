@@ -46,7 +46,8 @@ type BackupFileReceivedPayload struct {
 	// 返回的 ETag。单块 PutObject (未启用 multipart) 下 ETag = MD5(hex)；
 	// 备份配置文件一般远小于 multipart 阈值 (5MiB)，因此在实际场景
 	// 中 ETag 可靠。遇到 multipart ETag (带 -N 后缀) 时消费者应忽略。
-	MD5 string `json:"md5,omitempty"`
+	MD5       string `json:"md5,omitempty"`
+	ParamType string `json:"param_type,omitempty"`
 }
 
 // FilePathRecorder subscribes to SubjectBackupFileReceived and writes the
@@ -71,7 +72,8 @@ type FilePathRecorder struct {
 	// FilePathRecorder 已经独占，再加 software 端 subscribe 会被 NATS 拒
 	// ("filtered consumer not unique on workqueue stream")。所以让已经收到
 	// 事件的 FilePathRecorder 转手通知上层。
-	notifier FileLandedNotifier
+	notifier          FileLandedNotifier
+	paramFileRecorder ParamFileLandedRecorder
 
 	// snapshotPromoter 可选 hook（T-0164 / B3）：每次本 SN 的备份文件成功落
 	// MinIO + backup_tasks/backup_restore_file 完成写入后，把该文件 server-side
@@ -118,9 +120,17 @@ type FileLandedNotifier interface {
 	OnLogFileLanded(ctx context.Context, deviceSN, taskID string)
 }
 
+type ParamFileLandedRecorder interface {
+	RecordCollectedFile(ctx context.Context, paramType, deviceSN, fileName, objectBucket, objectPath string, fileSize int64, md5Value string) error
+}
+
 // SetFileLandedNotifier 注入 hook。nil 表示禁用（向后兼容）。
 func (r *FilePathRecorder) SetFileLandedNotifier(n FileLandedNotifier) {
 	r.notifier = n
+}
+
+func (r *FilePathRecorder) SetParamFileLandedRecorder(recorder ParamFileLandedRecorder) {
+	r.paramFileRecorder = recorder
 }
 
 // NewFilePathRecorder constructs a FilePathRecorder. metrics may be nil
@@ -194,6 +204,14 @@ func (r *FilePathRecorder) handleFileReceived(ctx context.Context, evt event.Eve
 	// 此时 OperatorCode 留空。
 	metadata := r.upsertFileMetadata(ctx, nil, p, fullPath)
 	r.enforceLogFileQuota(ctx, metadata)
+	if r.paramFileRecorder != nil && p.ParamType != "" && p.DeviceSN != "" {
+		if err := r.paramFileRecorder.RecordCollectedFile(
+			ctx, p.ParamType, p.DeviceSN, p.Filename, p.Bucket, p.ObjectPath, p.FileSize, p.MD5,
+		); err != nil {
+			r.logger.Warn("record collected core file failed",
+				zap.String("device_sn", p.DeviceSN), zap.String("filename", p.Filename), zap.Error(err))
+		}
+	}
 
 	// T-0164 关键：promote 必须在 backup_tasks 匹配**之前**触发，因为现网真实链路
 	// 大多走 UFTE 的 CONFIG_BACKUP_XML / CONFIG_BACKUP_NV —— 主任务在

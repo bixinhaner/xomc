@@ -1033,6 +1033,13 @@ export default function FileTransferCenter() {
           render: (_, record) => renderEllipsisCell(record.taskName, { strong: true }),
         },
         {
+          title: t('ufte.col.fileType'),
+          dataIndex: 'fileType',
+          key: 'fileType',
+          width: 180,
+          render: (value: string) => renderEllipsisCell(value || '-'),
+        },
+        {
           title: t('ufte.col.operator'),
           dataIndex: 'createUser',
           key: 'createUser',
@@ -1132,6 +1139,13 @@ export default function FileTransferCenter() {
         key: 'taskName',
         width: 280,
         render: (_, record) => renderEllipsisCell(record.taskName, { strong: true }),
+      },
+      {
+        title: t('ufte.col.fileType'),
+        dataIndex: 'fileType',
+        key: 'fileType',
+        width: 180,
+        render: (value: string) => renderEllipsisCell(value || '-'),
       },
       {
         title: t('ufte.col.executor'),
@@ -2342,6 +2356,7 @@ export default function FileTransferCenter() {
                 <Tooltip title={detailTask.taskName}>{detailTask.taskName}</Tooltip>
               </Descriptions.Item>
               <Descriptions.Item label={t('ufte.col.taskType')}>{localizeBuiltinTypeName(detailTask.typeCode, detailTask.typeDisplayName, t)}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.col.fileType')}>{detailTask.fileType || '-'}</Descriptions.Item>
               <Descriptions.Item label={t('common.status')}>{renderTaskStatus(detailTask.status, t)}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.col.result')}>
                 {detailTask.result

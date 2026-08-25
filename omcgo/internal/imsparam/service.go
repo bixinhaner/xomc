@@ -146,6 +146,45 @@ func (s *Service) ImportFromUpload(
 	return out, nil
 }
 
+// RecordCollectedFile records a file uploaded by a core-network device after
+// the ACS has already stored the object. Collected files then become visible
+// in the same library and can be selected for a later distribution task.
+func (s *Service) RecordCollectedFile(
+	ctx context.Context,
+	paramType, deviceSN, fileName, objectBucket, objectPath string,
+	fileSize int64, md5Value string,
+) error {
+	def, ok := Lookup(paramType)
+	if !ok || !def.UploadSupported {
+		return fmt.Errorf("%w: unknown or non-uploadable param type %q", commonerrors.ErrInvalidInput, paramType)
+	}
+	fileName = filepath.Base(strings.TrimSpace(fileName))
+	deviceSN = strings.TrimSpace(deviceSN)
+	if fileName == "" || fileName == "." || fileName == ".." || strings.Contains(fileName, "..") {
+		return fmt.Errorf("%w: invalid collected file name %q", commonerrors.ErrInvalidInput, fileName)
+	}
+	if deviceSN == "" || strings.TrimSpace(objectBucket) == "" || strings.TrimSpace(objectPath) == "" {
+		return fmt.Errorf("%w: collected core file requires device SN and object location", commonerrors.ErrInvalidInput)
+	}
+	var md5Ptr *string
+	if md5Value != "" {
+		md5Ptr = &md5Value
+	}
+	file := &ParamFile{
+		ParamType:    NormalizeParamType(paramType),
+		FileName:     fileName,
+		ObjectBucket: strings.TrimSpace(objectBucket),
+		ObjectPath:   strings.TrimSpace(objectPath),
+		MD5:          md5Ptr,
+		FileSize:     fileSize,
+		DeviceSN:     deviceSN,
+	}
+	if err := s.repo.Upsert(ctx, file); err != nil {
+		return fmt.Errorf("record collected core file: %w", err)
+	}
+	return nil
+}
+
 func (s *Service) importOne(
 	ctx context.Context, paramType string, item ImportItem, uploadBy string,
 ) *ImportFailure {
@@ -268,7 +307,7 @@ func (s *Service) BatchDelete(ctx context.Context, ids []uuid.UUID) (succeeded, 
 // device_task 对齐 → TC 到达自动推进。传 uuid.Nil 时退化用一次性 dispatch ID。
 //
 // 返回 dispatchedFiles（sn → 下发文件名），供 UFTE 写回 sub_task.dest_version。
-// 设备查不到等逐台跳过仅记日志（skipped 不阻断整体）。
+// 任一设备查不到或入队失败都会返回错误，避免调用方按目标总数错误推进占位任务。
 func (s *Service) DispatchByFileID(
 	ctx context.Context, targetDeviceSNs []string, fileID uuid.UUID, createUser string, upgradeTaskID uuid.UUID,
 ) (uuid.UUID, map[string]string, error) {
@@ -329,6 +368,12 @@ func (s *Service) DispatchByFileID(
 		zap.Int("enqueued", enqueued),
 		zap.Int("skipped", len(skipped)),
 	)
+	if len(skipped) > 0 {
+		return dispatchID, dispatchedFiles, fmt.Errorf(
+			"%w: failed to dispatch IMS parameter file to %d of %d device(s): %v",
+			commonerrors.ErrInternal, len(skipped), len(targetDeviceSNs), skipped,
+		)
+	}
 	return dispatchID, dispatchedFiles, nil
 }
 

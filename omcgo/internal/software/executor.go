@@ -1724,6 +1724,7 @@ func (e *UpgradeExecutor) failSubTask(ctx context.Context, subTask *UpgradeSubTa
 func (e *UpgradeExecutor) failSubTaskWithLockRelease(ctx context.Context, subTask *UpgradeSubTask, reason string, code FailureCode, releaseLock bool) {
 	if err := e.subTaskRepo.UpdateStatusWithCode(ctx, subTask.ID, UpgradeFailed, reason, code); err != nil {
 		e.logger.Error("fail sub-task", zap.String("sub_task_id", subTask.ID.String()), zap.Error(err))
+		return
 	}
 	if releaseLock && subTask.DeviceSN != "" {
 		e.releaseDeviceLock(ctx, subTask.DeviceSN, subTask.ID)
@@ -1769,6 +1770,7 @@ func (e *UpgradeExecutor) describeDeviceLockHolder(ctx context.Context, deviceSN
 func (e *UpgradeExecutor) completeSubTask(ctx context.Context, subTask *UpgradeSubTask, deviceSN string) {
 	if err := e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeCompleted, ""); err != nil {
 		e.logger.Error("complete sub-task", zap.String("sub_task_id", subTask.ID.String()), zap.Error(err))
+		return
 	}
 
 	// qa-614 #371: 完成后回填"目标版本"(dest_version)。手动回退/升级时 OMC 事先不知道

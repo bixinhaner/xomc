@@ -30,6 +30,7 @@ interface BackendImsParamFile {
   file_size: number;
   description?: string | null;
   uploaded_by?: string | null;
+  device_sn?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -65,6 +66,7 @@ export interface ImsParamFile {
   fileSize: number;
   description?: string;
   uploadedBy?: string;
+  deviceSn?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -73,6 +75,7 @@ export interface ImsParamListParams extends PageRequest {
   paramType?: string;
   fileName?: string;
   uploadedBy?: string;
+  deviceSn?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -89,6 +92,7 @@ function mapBackendFile(b: BackendImsParamFile): ImsParamFile {
     fileSize: b.file_size,
     description: b.description ?? undefined,
     uploadedBy: b.uploaded_by ?? undefined,
+    deviceSn: b.device_sn ?? undefined,
     createdAt: b.created_at,
     updatedAt: b.updated_at,
   };
@@ -108,6 +112,7 @@ export const imsParamApi = {
     if (params.paramType) query.param_type = params.paramType;
     if (params.fileName) query.file_name = params.fileName;
     if (params.uploadedBy) query.uploaded_by = params.uploadedBy;
+    if (params.deviceSn) query.device_sn = params.deviceSn;
     const { data } = await http.get<BackendListResponse>('/imsparam/param-files', { params: query });
     return {
       items: (data.items || []).map(mapBackendFile),

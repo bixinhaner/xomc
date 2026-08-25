@@ -72,6 +72,7 @@ type Task struct {
 	CategoryLabel   string `json:"categoryLabel"`
 	TypeCode        string `json:"typeCode"`
 	TypeDisplayName string `json:"typeDisplayName"`
+	FileType        string `json:"fileType"`
 	FirmwareID      string `json:"firmwareId,omitempty"`
 	TargetVersion   string `json:"targetVersion,omitempty"`
 	ProductType     string `json:"productType,omitempty"`

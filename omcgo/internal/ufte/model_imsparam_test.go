@@ -1,10 +1,50 @@
 package ufte
 
 import (
+	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/software"
+	"github.com/stretchr/testify/require"
+
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
+
+type previewErrorImsParamDispatcher struct {
+	err error
+}
+
+func (d *previewErrorImsParamDispatcher) DispatchImsParamByFileID(
+	context.Context, []string, uuid.UUID, string, uuid.UUID,
+) (uuid.UUID, map[string]string, error) {
+	return uuid.Nil, nil, nil
+}
+
+func (d *previewErrorImsParamDispatcher) PreviewImsParamFile(
+	context.Context, uuid.UUID,
+) (string, string, error) {
+	return "", "", d.err
+}
+
+func TestCreateImsParamDistributeTaskValidatesFileBeforePlaceholder(t *testing.T) {
+	typeDef, ok := findTaskTypeByCode(builtInTaskTypes(), "IMS_FILE_DISTRIBUTE")
+	require.True(t, ok)
+	fileID := uuid.New()
+	service := &Service{
+		imsParamDispatcher: &previewErrorImsParamDispatcher{err: commonerrors.ErrNotFound},
+	}
+
+	_, err := service.createImsParamDistributeTask(context.Background(), &typeDef, CreateTaskRequest{
+		TaskName:  "missing IMS file",
+		TypeCode:  typeDef.TypeCode,
+		DeviceIDs: []uuid.UUID{uuid.New()},
+		ParamType: "FT_ImsCore_User_Setting_UD",
+		FileID:    &fileID,
+	}, "tester", false, nil)
+
+	require.ErrorIs(t, err, commonerrors.ErrNotFound)
+}
 
 // resolveTaskType 必须能从带文件类型尾段的落库值回找 IMS 模板
 // （"Ims File:FT_ImsCore_*" → IMS_FILE_COLLECT，

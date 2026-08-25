@@ -281,6 +281,11 @@ func (r *RoutingSubTaskRepository) pickByHint(ctx context.Context) BasicSubTaskR
 // 不匹配 → 全部 5 张表 fan-out。
 func (r *RoutingSubTaskRepository) candidatesByCommandKey(commandKey string) []BasicSubTaskRepo {
 	switch {
+	case strings.HasPrefix(commandKey, "IMS_PARAM_DISTRIBUTE_") ||
+		strings.HasPrefix(commandKey, "CONFIG_RESTORE_") ||
+		strings.HasPrefix(commandKey, "LICENSE_UPGRADE_"):
+		// Direct-dispatch placeholder tasks are stored in the legacy table.
+		return []BasicSubTaskRepo{r.fallback}
 	case strings.HasPrefix(commandKey, "Collect NV") || strings.HasPrefix(commandKey, "Collect XML"):
 		if r.router.ConfigBackup.SubTask != nil {
 			return []BasicSubTaskRepo{r.router.ConfigBackup.SubTask}

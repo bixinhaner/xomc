@@ -236,6 +236,14 @@ func buildUpdateSubTaskStatusSQL(id uuid.UUID, status UpgradeState, errorMsg str
 	if code != "" && status == UpgradeFailed {
 		builder = builder.Set("failure_reason", string(code))
 	}
+	// Terminal callbacks can be delivered more than once (for example, an upload
+	// event followed by a late TransferComplete). Only the first transition may
+	// complete the sub-task; callers use RowsAffected to avoid double counting.
+	if status == UpgradeCompleted || status == UpgradeFailed || status == UpgradeTerminated {
+		builder = builder.Where(sq.NotEq{"status": []string{
+			string(UpgradeCompleted), string(UpgradeFailed), string(UpgradeTerminated),
+		}})
+	}
 	// 用 COALESCE(started_at, now()) 守卫：仅当 started_at 仍为 NULL 时写入，避免多次
 	// 状态翻转把先前已记录的开始时间覆盖。触发状态集见 shouldSetSubTaskStartedAt 注释。
 	if applyStartedAt && shouldSetSubTaskStartedAt(status) {
