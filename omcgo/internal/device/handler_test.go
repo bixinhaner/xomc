@@ -662,6 +662,13 @@ func TestHandler_ListDevices_DeviceTypeTabFilter(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, DeviceListDeviceTypeBaseStation, deviceRepo.lastListFilter.DeviceType)
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/devices?page=1&page_size=20&device_type=core_network", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, DeviceListDeviceTypeCoreNetwork, deviceRepo.lastListFilter.DeviceType)
 }
 
 func TestHandler_ListDevices_InvalidDeviceType(t *testing.T) {

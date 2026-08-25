@@ -9,10 +9,12 @@ import (
 const (
 	DeviceListDeviceTypeAll         = "ALL"
 	DeviceListDeviceTypeBaseStation = "BASE_STATION"
+	DeviceListDeviceTypeCoreNetwork = "CORE_NETWORK"
 	DeviceListDeviceTypeUPS         = "UPS"
 )
 
 const upsProductClassPredicate = `COALESCE(d.product_class, '') LIKE 'UPS%'`
+const coreNetworkProductClassPredicate = `UPPER(COALESCE(d.product_class, '')) = 'IMSCORE'`
 
 func normalizeDeviceListDeviceType(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
@@ -20,6 +22,8 @@ func normalizeDeviceListDeviceType(value string) string {
 		return DeviceListDeviceTypeAll
 	case "base_station", "basestation", "base-station", "radio", "station":
 		return DeviceListDeviceTypeBaseStation
+	case "core_network", "corenetwork", "core-network", "imscore", "core":
+		return DeviceListDeviceTypeCoreNetwork
 	case "ups":
 		return DeviceListDeviceTypeUPS
 	default:
@@ -31,8 +35,10 @@ func deviceListDeviceTypeFilterCond(value string) sq.Sqlizer {
 	switch normalizeDeviceListDeviceType(value) {
 	case DeviceListDeviceTypeUPS:
 		return sq.Expr(upsProductClassPredicate)
+	case DeviceListDeviceTypeCoreNetwork:
+		return sq.Expr(coreNetworkProductClassPredicate)
 	case DeviceListDeviceTypeBaseStation:
-		return sq.Expr("NOT (" + upsProductClassPredicate + ")")
+		return sq.Expr("NOT (" + upsProductClassPredicate + ") AND NOT (" + coreNetworkProductClassPredicate + ")")
 	default:
 		return nil
 	}
@@ -46,10 +52,18 @@ func applyDeviceListDeviceTypeFilter(b sq.SelectBuilder, value string) sq.Select
 }
 
 func deviceListDeviceTypeFromProductClass(productClass string) string {
+	if strings.EqualFold(strings.TrimSpace(productClass), "ImsCore") {
+		return DeviceListDeviceTypeCoreNetwork
+	}
 	if isUPSProductClass(productClass) {
 		return DeviceListDeviceTypeUPS
 	}
 	return DeviceListDeviceTypeBaseStation
+}
+
+// IsCoreNetworkProductClass is the shared ImsCore discriminator.
+func IsCoreNetworkProductClass(productClass string) bool {
+	return strings.EqualFold(strings.TrimSpace(productClass), "ImsCore")
 }
 
 // IsUPSProductClass is the shared UPS discriminator. UPS is intentionally

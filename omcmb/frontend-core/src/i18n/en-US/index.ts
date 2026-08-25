@@ -1763,7 +1763,7 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Device labels
   // -------------------------------------------------------------------------
-  'device.group.station':    'Station Info',
+  'device.group.station':    'Device Info',
   'device.group.cell':        'Cell Info',
   'device.group.status':      'Status Info',
   'device.group.other':       'Other Info',
@@ -2060,6 +2060,7 @@ const messages: Record<string, string> = {
   'device.type.UPS':        'UPS Device',
   'device.type.all':        'All Types',
   'device.tab.baseStation': 'Base Stations',
+  'device.tab.coreNetwork': 'Core Network Devices',
   'device.tab.ups':         'UPS Devices',
   'device.connStatus':      'Connection Status',
   'device.lastParamSyncAt': 'Last Sync Time',

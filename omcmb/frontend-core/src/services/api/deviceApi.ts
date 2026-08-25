@@ -621,8 +621,16 @@ function mapBackendDevice(bd: BackendDevice): Device {
     offlineMinutes = totalMinutes % 60;
   }
 
-  const deviceType = bd.device_type || (bd.product_class?.startsWith('UPS') ? 'UPS' : 'BASE_STATION');
-  const networkType = deviceType === 'UPS' ? 'UPS' : toRadioMode(bd.technology);
+  const normalizedProductClass = (bd.product_class ?? '').trim().toUpperCase();
+  const deviceType = bd.device_type
+    || (normalizedProductClass === 'IMSCORE'
+      ? 'CORE_NETWORK'
+      : (normalizedProductClass.startsWith('UPS') ? 'UPS' : 'BASE_STATION'));
+  const networkType = deviceType === 'UPS'
+    ? 'UPS'
+    : deviceType === 'CORE_NETWORK'
+      ? 'CORE_NETWORK'
+      : toRadioMode(bd.technology);
   // 基站沿用 devices.device_name 口径；UPS 没有设备侧改名/同步流程，
   // 优先使用后端从 device_ups_info 透出的 info_device_name 作为本地运维展示名。
   const friendlyName = deviceType === 'UPS'
