@@ -197,6 +197,7 @@ export interface ParameterUpdateResponse {
   message: string;
   parameters: number;
   rebootRequired: boolean;
+  rebootTarget?: number;
   /** T-0146:后端任务 ID,前端用 useTaskStatus 轮询真实 CPE 应答状态 */
   taskId?: string;
 }

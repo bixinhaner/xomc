@@ -176,6 +176,7 @@ type UploadData struct {
 type RebootData struct {
 	ID             string
 	CommandKey     string
+	RebootTarget   int
 	NoMoreRequests int // 0=more requests coming, 1=last request
 }
 
@@ -353,6 +354,7 @@ const uploadXML = soapEnvelopeOpen +
 const rebootXML = soapEnvelopeOpen +
 	`<cwmp:Reboot>` +
 	`<CommandKey>{{.CommandKey}}</CommandKey>` +
+	`{{- if .RebootTarget}}<X_BaiCells_ImsCore_RebootTarget>{{.RebootTarget}}</X_BaiCells_ImsCore_RebootTarget>{{end}}` +
 	`</cwmp:Reboot>` + soapEnvelopeClose
 
 const factoryResetXML = soapEnvelopeOpen +

@@ -351,7 +351,7 @@ func (s *DeviceService) SetProductBinder(b ProductBinder) {
 }
 
 // RebootDevice queues a Reboot command for the given device via the ACS command queue.
-func (s *DeviceService) RebootDevice(ctx context.Context, id uuid.UUID) error {
+func (s *DeviceService) RebootDevice(ctx context.Context, id uuid.UUID, rebootTarget ...int) error {
 	device, err := s.deviceRepo.GetByID(ctx, id)
 	if err != nil {
 		return fmt.Errorf("get device for reboot: %w", err)
@@ -363,11 +363,22 @@ func (s *DeviceService) RebootDevice(ctx context.Context, id uuid.UUID) error {
 	if s.taskSvc == nil {
 		return fmt.Errorf("task service not configured")
 	}
+	if len(rebootTarget) > 1 || (len(rebootTarget) == 1 && (rebootTarget[0] < 1 || rebootTarget[0] > 3)) {
+		return commonerrors.ErrInvalidInput
+	}
 
 	commandKey := uuid.New().String()
+	var params json.RawMessage
+	if len(rebootTarget) == 1 {
+		params, err = json.Marshal(map[string]int{"reboot_target": rebootTarget[0]})
+		if err != nil {
+			return fmt.Errorf("marshal reboot target: %w", err)
+		}
+	}
 	created, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
 		DeviceSN:   device.SerialNumber,
 		Method:     "Reboot",
+		Params:     params,
 		Priority:   0, // highest priority
 		ExpiresIn:  rebootTaskExpiresIn(device),
 		CommandKey: commandKey,

@@ -114,3 +114,15 @@ func TestParameterWriteValidationDetectsTranslatedRebootRequirement(t *testing.T
 	require.Empty(t, result.Errors)
 	assert.True(t, result.RebootRequired)
 }
+
+func TestRebootTargetForIMSCorePaths(t *testing.T) {
+	assert.Equal(t, 1, rebootTargetForPath("Device.ImsCore.BaseConfig.HOST_IPv4"))
+	assert.Equal(t, 2, rebootTargetForPath("Device.ImsCore.BaseConfig.WEB_LOG_LEVEL"))
+	assert.Equal(t, 3, rebootTargetForPath("Device.ImsCore.CoreInfoConfig.1.CORE_SYN_IP"))
+}
+
+func TestMergeRebootTarget(t *testing.T) {
+	assert.Equal(t, 1, mergeRebootTarget(0, 1))
+	assert.Equal(t, 3, mergeRebootTarget(1, 2))
+	assert.Equal(t, 2, mergeRebootTarget(2, 2))
+}

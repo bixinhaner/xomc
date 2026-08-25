@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { App, Badge, Button, Card, Checkbox, Drawer, Form, Input, InputNumber, Modal, Popover, Progress, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
+import { Alert, App, Badge, Button, Card, Checkbox, Drawer, Form, Input, InputNumber, Modal, Popover, Progress, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   AlertOutlined,
@@ -175,6 +175,52 @@ const FILTER_COLUMN_MAP: Record<string, string> = {
 };
 
 type TFn = (id: string, values?: Record<string, string | number>) => string;
+
+interface CoreNetworkRebootSelection {
+  core: boolean;
+  web: boolean;
+}
+
+function CoreNetworkRebootOptions({
+  description,
+  coreLabel,
+  webLabel,
+  selection,
+}: {
+  description: string;
+  coreLabel: string;
+  webLabel: string;
+  selection: CoreNetworkRebootSelection;
+}) {
+  const [coreChecked, setCoreChecked] = useState(true);
+  const [webChecked, setWebChecked] = useState(true);
+
+  const handleCoreChange = (checked: boolean) => {
+    if (!checked && !webChecked) return;
+    selection.core = checked;
+    setCoreChecked(checked);
+  };
+
+  const handleWebChange = (checked: boolean) => {
+    if (!checked && !coreChecked) return;
+    selection.web = checked;
+    setWebChecked(checked);
+  };
+
+  return (
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Alert type="warning" showIcon message={description} />
+      <Space direction="vertical" size={8}>
+        <Checkbox checked={coreChecked} onChange={(event) => handleCoreChange(event.target.checked)}>
+          {coreLabel}
+        </Checkbox>
+        <Checkbox checked={webChecked} onChange={(event) => handleWebChange(event.target.checked)}>
+          {webLabel}
+        </Checkbox>
+      </Space>
+    </Space>
+  );
+}
 
 function formatCellIdentifier(value: string | null | undefined): string {
   if (!value) return '';
@@ -1356,9 +1402,18 @@ export default function DeviceList() {
         void message.warning(t('task.status.running'));
         return;
       }
+      const isCoreNetworkReboot = actionKey === 'batch-reboot' && activeDeviceTab === 'CORE_NETWORK';
+      const rebootSelection: CoreNetworkRebootSelection = { core: true, web: true };
       modal.confirm({
-        title: t('common.confirm'),
-        content: t('device.batch.actionConfirm', { action: actionLabel, count: ids.length }),
+        title: isCoreNetworkReboot ? t('device.coreNetwork.rebootTitle') : t('common.confirm'),
+        content: isCoreNetworkReboot ? (
+          <CoreNetworkRebootOptions
+            description={t('device.coreNetwork.rebootDescription', { count: ids.length })}
+            coreLabel={t('device.coreNetwork.rebootCore')}
+            webLabel={t('device.coreNetwork.rebootWeb')}
+            selection={rebootSelection}
+          />
+        ) : t('device.batch.actionConfirm', { action: actionLabel, count: ids.length }),
         okText: t('common.confirm'),
         cancelText: t('common.cancel'),
         onOk: () => {
@@ -1511,8 +1566,27 @@ export default function DeviceList() {
 
             if (actionKey === 'batch-reboot') {
               try {
-                await batchReboot.mutateAsync(ids.map(String));
-                void message.success(t('device.rebootQueued'));
+                const rebootTarget: 1 | 2 | 3 | undefined = isCoreNetworkReboot
+                  ? rebootSelection.core && rebootSelection.web
+                    ? 3
+                    : rebootSelection.core
+                      ? 1
+                      : 2
+                  : undefined;
+                await batchReboot.mutateAsync({
+                  ids: ids.map(String),
+                  rebootTarget,
+                });
+                if (isCoreNetworkReboot) {
+                  const targetLabel = rebootTarget === 1
+                    ? t('device.coreNetwork.rebootCore')
+                    : rebootTarget === 2
+                      ? t('device.coreNetwork.rebootWeb')
+                      : t('device.coreNetwork.rebootCoreWeb');
+                  void message.success(t('device.coreNetwork.rebootQueued', { target: targetLabel }));
+                } else {
+                  void message.success(t('device.rebootQueued'));
+                }
               } catch {
                 void message.error(t('common.operationFailed'));
               }
@@ -1766,6 +1840,7 @@ export default function DeviceList() {
       });
     },
     [
+      activeDeviceTab,
       appLocale,
       batchAlarmSyncRunning,
       batchParamSyncRunning,

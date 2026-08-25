@@ -2,6 +2,7 @@ package device
 
 import (
 	"context"
+	"strings"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -17,6 +18,7 @@ type parameterWriteModel struct {
 
 type parameterWriteValidationResult struct {
 	RebootRequired bool
+	RebootTarget   int
 	Errors         []*parammodel.MappingValidationError
 }
 
@@ -70,7 +72,35 @@ func validateParameterWrites(
 		if mapping != nil &&
 			(mapping.ChangeApplies == "RebootRequired" || mapping.ChangeApplies == "NotifyRequired") {
 			result.RebootRequired = true
+			result.RebootTarget = mergeRebootTarget(result.RebootTarget, rebootTargetForPath(validationPath))
 		}
 	}
 	return result
+}
+
+func rebootTargetForPath(path string) int {
+	if !strings.HasPrefix(path, "Device.ImsCore.") {
+		return 0
+	}
+	if strings.HasPrefix(path, "Device.ImsCore.CoreInfoConfig.") {
+		return 3
+	}
+	if path == "Device.ImsCore.BaseConfig.WEB_LOG_LEVEL" ||
+		strings.HasPrefix(path, "Device.ImsCore.BaseConfig.WEB_SERV_PORT") ||
+		strings.HasPrefix(path, "Device.ImsCore.BaseConfig.SYN_SERVER") ||
+		strings.HasPrefix(path, "Device.ImsCore.BaseConfig.Web_HSS_IP") ||
+		strings.HasPrefix(path, "Device.ImsCore.BaseConfig.HTTPS_LOGIN_FLAG") {
+		return 2
+	}
+	return 1
+}
+
+func mergeRebootTarget(current, next int) int {
+	if current == 0 {
+		return next
+	}
+	if next == 0 || current == next {
+		return current
+	}
+	return 3
 }
