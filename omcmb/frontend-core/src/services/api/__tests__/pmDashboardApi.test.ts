@@ -50,6 +50,7 @@ describe('pmDashboardApi.queryAggregated', () => {
       page_by: 'pivot_row',
       count_mode: 'n_plus_one',
     });
+    expect(opts.timeout).toBe(60_000);
     expect(out.total).toBe(123);
     expect(out.truncated).toBe(false);
   });

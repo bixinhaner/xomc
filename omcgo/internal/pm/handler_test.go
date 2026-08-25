@@ -162,18 +162,25 @@ func pmHSetupRouterWithAggregatedBackend(backend aggregatedMetricsBackend) *gin.
 }
 
 type pmHAggregatedBackend struct {
-	queryRows     []aggregator.Row
-	discoverLDNs  []string
-	pivotRowKeys  []aggregator.PivotRowKey
-	queryReqs     []aggregator.QueryRequest
-	countReqs     []aggregator.QueryRequest
-	discoverReqs  []aggregator.QueryRequest
-	pivotKeyReqs  []aggregator.QueryRequest
-	backfillCalls int
+	queryRows        []aggregator.Row
+	discoverLDNs     []string
+	pivotRowKeys     []aggregator.PivotRowKey
+	queryReqs        []aggregator.QueryRequest
+	countReqs        []aggregator.QueryRequest
+	discoverReqs     []aggregator.QueryRequest
+	pivotKeyReqs     []aggregator.QueryRequest
+	backfillCalls    int
+	queryErr         error
+	queryDeadline    time.Time
+	queryHasDeadline bool
 }
 
-func (m *pmHAggregatedBackend) Query(_ context.Context, req aggregator.QueryRequest) ([]aggregator.Row, error) {
+func (m *pmHAggregatedBackend) Query(ctx context.Context, req aggregator.QueryRequest) ([]aggregator.Row, error) {
 	m.queryReqs = append(m.queryReqs, req)
+	m.queryDeadline, m.queryHasDeadline = ctx.Deadline()
+	if m.queryErr != nil {
+		return nil, m.queryErr
+	}
 	return m.queryRows, nil
 }
 
@@ -411,6 +418,40 @@ func TestHandler_ListAggregatedMetrics_EmptyAutoDiscoverDoesNotRepeatDiscovery(t
 	require.Len(t, backend.queryReqs, 1)
 	assert.Empty(t, backend.countReqs, "count_mode=n_plus_one must avoid exact Count")
 	assert.Equal(t, 1, backend.backfillCalls)
+}
+
+func TestHandler_ListAggregatedMetrics_UsesSixtySecondBackendDeadline(t *testing.T) {
+	backend := &pmHAggregatedBackend{}
+	router := pmHSetupRouterWithAggregatedBackend(backend)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(
+		http.MethodGet,
+		"/pm/metrics/aggregated?granularity=15min&device_sn=SN-1&metric_paths=K1&limit=1",
+		nil,
+	)
+	before := time.Now()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	require.True(t, backend.queryHasDeadline)
+	assert.Greater(t, backend.queryDeadline.Sub(before), 59*time.Second)
+	assert.LessOrEqual(t, backend.queryDeadline.Sub(before), 61*time.Second)
+}
+
+func TestHandler_ListAggregatedMetrics_MapsBackendDeadlineToGatewayTimeout(t *testing.T) {
+	backend := &pmHAggregatedBackend{queryErr: context.DeadlineExceeded}
+	router := pmHSetupRouterWithAggregatedBackend(backend)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(
+		http.MethodGet,
+		"/pm/metrics/aggregated?granularity=15min&device_sn=SN-1&metric_paths=K1&limit=1",
+		nil,
+	)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusGatewayTimeout, w.Code)
 }
 
 func TestTruncateAggregatedRows_NPlusOnePlainRows(t *testing.T) {

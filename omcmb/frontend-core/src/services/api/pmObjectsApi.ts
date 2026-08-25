@@ -20,6 +20,11 @@ interface ObjectsResponse {
   total: number;
 }
 
+export interface MetricObjectsTimeRange {
+  startTime?: string;
+  endTime?: string;
+}
+
 /** 把后端一项（snake_case）规整为前端 MetricObject；cell_id/plmn 缺时从 object_ldn 兜底拆解。 */
 function toMetricObject(it: BackendMetricObject): MetricObject {
   return {
@@ -38,6 +43,7 @@ export const pmObjectsApi = {
   async listMetricObjects(
     deviceSns: string[],
     technology?: string,
+    timeRange?: MetricObjectsTimeRange,
   ): Promise<MetricObject[]> {
     if (deviceSns.length === 0) return [];
     const params: Record<string, string> = {
@@ -45,6 +51,8 @@ export const pmObjectsApi = {
       device_sns: deviceSns.join(','),
     };
     if (technology) params.technology = technology;
+    if (timeRange?.startTime) params.start_time = timeRange.startTime;
+    if (timeRange?.endTime) params.end_time = timeRange.endTime;
     const { data } = await http.get<ObjectsResponse>('/pm/metrics/objects', { params });
     return (data.items ?? []).map(toMetricObject);
   },

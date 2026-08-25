@@ -67,6 +67,7 @@ import {
 } from './dashboardFilterUtils';
 import {
   actualRangeFromMeta,
+  buildDeviceViewRequestTimeWindow,
   defaultRangeForGranularity,
   toDeviceViewRequestRFC3339,
 } from './deviceListPaneTimeUtils';
@@ -328,12 +329,17 @@ export default function DeviceListPane() {
     );
   }, [cellSel, deviceSns, filter, granularity, metricPaths, metricsTouched, rangeTouched, refreshed, submitted, tech]);
 
+  const objectTimeRange = useMemo(
+    () => buildDeviceViewRequestTimeWindow(filter.range, systemTimezone),
+    [filter.range, systemTimezone],
+  );
+
   // 下钻选择器与有效白名单计算共用的「按设备小区清单」（react-query 与选择器内部同 key 去重，无额外请求）。
   const {
     byDevice: objectsByDevice,
     isLoading: objectsLoading,
     isFetching: objectsFetching,
-  } = useMetricObjectsByDevices(deviceSns, tech);
+  } = useMetricObjectsByDevices(deviceSns, tech, objectTimeRange);
   const objectsPending = objectsLoading || objectsFetching;
 
   const baseParams = useMemo(() => {
@@ -650,6 +656,7 @@ export default function DeviceListPane() {
                 <CellDrilldownSelector
                   deviceSns={deviceSns}
                   technology={tech}
+                  timeRange={objectTimeRange}
                   useNrRecommendedDefault
                   value={cellSel}
                   onChange={handleCellSelectionChange}
