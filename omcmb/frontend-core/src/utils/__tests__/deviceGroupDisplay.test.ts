@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildDeviceGroupDisplayName, withDeviceGroupDisplayName } from '../deviceGroupDisplay';
+import {
+  buildDeviceGroupDisplayName,
+  buildDeviceGroupPathName,
+  withDeviceGroupDisplayName,
+} from '../deviceGroupDisplay';
 import type { Device, DeviceGroup } from '../../types/device';
 
 function mkGroup(overrides: Partial<DeviceGroup>): DeviceGroup {
@@ -74,6 +78,16 @@ function mkDevice(overrides: Partial<Device>): Device {
 }
 
 describe('deviceGroupDisplay', () => {
+  it('为同名父子组生成可区分的层级路径', () => {
+    const groups = [
+      mkGroup({ id: 'root', name: '默认设备组' }),
+      mkGroup({ id: 'child', name: '默认设备组', parentId: 'root' }),
+    ];
+
+    expect(buildDeviceGroupPathName(groups[0], groups, 'zh-CN')).toBe('默认设备组');
+    expect(buildDeviceGroupPathName(groups[1], groups, 'zh-CN')).toBe('默认设备组 / 默认设备组');
+  });
+
   it('按 groupId 组装父子层级名称', () => {
     const groups = [
       mkGroup({ id: 'root', name: '默认设备组', nameI18n: { 'zh-CN': '默认设备组', 'en-US': 'Default Group' } }),

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
@@ -94,10 +95,7 @@ func (r *PgAlarmEmailReader) resolveDeviceScope(
 		}
 	}
 	if len(subscription.DeviceGroupIDs) > 0 {
-		query, args, err := storage.Psql.Select("DISTINCT device_id").
-			From("device_group_members").
-			Where(sq.Eq{"group_id": subscription.DeviceGroupIDs}).
-			ToSql()
+		query, args, err := buildAlarmEmailDeviceScopeQuery(subscription.DeviceGroupIDs)
 		if err != nil {
 			return nil, false, fmt.Errorf("build alarm email device-group query: %w", err)
 		}
@@ -123,6 +121,44 @@ func (r *PgAlarmEmailReader) resolveDeviceScope(
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
 	return ids, deviceScoped, nil
+}
+
+func buildAlarmEmailDeviceScopeQuery(selectedGroupIDs []uuid.UUID) (string, []any, error) {
+	// device_groups 受 chk_dg_level_parent 约束为两级树。订阅页允许选择任一级，
+	// 因此范围同时包含所选组自身及其直接子组，和页面树的选择语义保持一致。
+	groupIDs := sq.Select("id").
+		From("device_groups").
+		Where(sq.Or{
+			sq.Eq{"id": selectedGroupIDs},
+			sq.Eq{"parent_id": selectedGroupIDs},
+		})
+	memberDeviceIDs := sq.Select("device_id").
+		From("device_group_members").
+		Where(sq.Expr("group_id IN (?)", groupIDs))
+
+	clauses := sq.Or{sq.Expr("d.id IN (?)", memberDeviceIDs)}
+	if includesDefaultDeviceGroup(selectedGroupIDs) {
+		// 默认二级组是历史无 membership 设备的逻辑归属；选择默认一级组时
+		// 也会覆盖该子组，所以两种选择都必须兼容这批历史数据。
+		clauses = append(clauses, sq.Expr(
+			"NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id)",
+		))
+	}
+
+	return storage.Psql.Select("DISTINCT d.id").
+		From("devices d").
+		Where(clauses).
+		ToSql()
+}
+
+func includesDefaultDeviceGroup(groupIDs []uuid.UUID) bool {
+	for _, groupID := range groupIDs {
+		switch groupID.String() {
+		case global.DefaultLevel1GroupID, global.DefaultLevel2GroupID:
+			return true
+		}
+	}
+	return false
 }
 
 type alarmEmailQuery struct {
@@ -178,8 +214,8 @@ func buildAlarmEmailQuery(
 	if len(subscription.AlarmSources) > 0 {
 		qb = qb.Where(sq.Eq{"alarm_source": subscription.AlarmSources})
 	}
-	if len(subscription.EventTypes) > 0 {
-		qb = qb.Where(sq.Eq{"event_type": subscription.EventTypes})
+	if eventTypes := normalizedEventTypesExpr("event_type", subscription.EventTypes); eventTypes != nil {
+		qb = qb.Where(eventTypes)
 	}
 	if deviceScoped {
 		if len(deviceIDs) == 0 {
@@ -190,6 +226,23 @@ func buildAlarmEmailQuery(
 	}
 	query, args, err := qb.OrderBy("raised_at ASC", idColumn+" ASC").ToSql()
 	return alarmEmailQuery{sql: query, args: args, err: err}
+}
+
+func normalizedEventTypesExpr(column string, values []string) sq.Sqlizer {
+	conditions := make(sq.Or, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		conditions = append(conditions, normalizedEventTypeExpr(column, value))
+	}
+	if len(conditions) == 0 {
+		return nil
+	}
+	if len(conditions) == 1 {
+		return conditions[0]
+	}
+	return conditions
 }
 
 func (r *PgAlarmEmailReader) queryRows(ctx context.Context, pool *pgxpool.Pool, query alarmEmailQuery) ([]alarmEmailRow, error) {
