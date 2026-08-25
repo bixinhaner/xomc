@@ -26,13 +26,16 @@ import {
   useUpdateAlarmEmailSubscription,
 } from '@core/hooks/api/useAlarms';
 import { useAllAlarmDefinitions } from '@core/hooks/api/useAlarmDefinitions';
-import { useDeviceGroups, useDeviceList } from '@core/hooks/api/useDevices';
+import { useDeviceGroups, useDeviceList, useProductClasses } from '@core/hooks/api/useDevices';
 import type {
   AlarmEmailSubscription,
   AlarmEmailSubscriptionInput,
 } from '@core/services/api/alarmApi';
 import { useT } from '@/hooks/useT';
+import { useAppStore } from '@core/store/appStore';
 import { useUserStore } from '@core/store/userStore';
+import { buildDeviceGroupPathName } from '@core/utils/deviceGroupDisplay';
+import { ALARM_EMAIL_EVENT_TYPES, buildAlarmSourceOptions } from './options';
 
 const { Text } = Typography;
 const minuteOptions = [0, 10, 30, 60] as const;
@@ -69,6 +72,7 @@ function toFormValues(item?: AlarmEmailSubscription): SubscriptionFormValues {
 
 export default function AlarmEmailSubscriptions() {
   const t = useT();
+  const locale = useAppStore((state) => state.locale);
   const isSuperAdmin = useUserStore((state) => state.currentUser?.isSuperAdmin === true);
   const [settingForm] = Form.useForm<{ enabled: boolean; default_recipients_text: string }>();
   const [subscriptionForm] = Form.useForm<SubscriptionFormValues>();
@@ -85,6 +89,7 @@ export default function AlarmEmailSubscriptions() {
     searchText: deviceSearch || undefined,
   });
   const groupsQuery = useDeviceGroups();
+  const productClassesQuery = useProductClasses();
   const updateSetting = useUpdateAlarmEmailSetting();
   const createSubscription = useCreateAlarmEmailSubscription();
   const updateSubscription = useUpdateAlarmEmailSubscription();
@@ -113,6 +118,17 @@ export default function AlarmEmailSubscriptions() {
     })),
     [definitionsQuery.data?.items],
   );
+  const eventTypeOptions = useMemo(
+    () => ALARM_EMAIL_EVENT_TYPES.map((item) => ({
+      value: item.value,
+      label: t(item.labelKey),
+    })),
+    [t],
+  );
+  const alarmSourceOptions = useMemo(
+    () => buildAlarmSourceOptions(productClassesQuery.data, subscriptionsQuery.data),
+    [productClassesQuery.data, subscriptionsQuery.data],
+  );
   const deviceOptions = useMemo(
     () => (devicesQuery.data?.items ?? []).map((item) => ({
       value: item.id,
@@ -121,8 +137,14 @@ export default function AlarmEmailSubscriptions() {
     [devicesQuery.data?.items],
   );
   const groupOptions = useMemo(
-    () => (groupsQuery.data?.groups ?? []).map((item) => ({ value: item.id, label: item.name })),
-    [groupsQuery.data],
+    () => {
+      const groups = groupsQuery.data?.groups ?? [];
+      return groups.map((item) => ({
+        value: item.id,
+        label: buildDeviceGroupPathName(item, groups, locale),
+      }));
+    },
+    [groupsQuery.data, locale],
   );
 
   const openCreate = () => {
@@ -364,17 +386,33 @@ export default function AlarmEmailSubscriptions() {
               </Form.Item>
             </Col>
             <Col xs={24} md={8}>
-              <Form.Item name="event_types" label={t('alarm.email.eventTypes')}>
-                <Select mode="tags" />
+              <Form.Item
+                name="event_types"
+                label={t('alarm.email.eventTypes')}
+                extra={t('alarm.email.eventTypeHint')}
+              >
+                <Select mode="tags" options={eventTypeOptions} />
               </Form.Item>
             </Col>
             <Col xs={24} md={8}>
-              <Form.Item name="alarm_sources" label={t('alarm.email.alarmSources')}>
-                <Select mode="tags" />
+              <Form.Item
+                name="alarm_sources"
+                label={t('alarm.email.alarmSources')}
+                extra={t('alarm.email.alarmSourceHint')}
+              >
+                <Select
+                  mode="tags"
+                  loading={productClassesQuery.isLoading}
+                  options={alarmSourceOptions}
+                />
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item name="device_group_ids" label={t('alarm.email.deviceGroups')}>
+          <Form.Item
+            name="device_group_ids"
+            label={t('alarm.email.deviceGroups')}
+            extra={t('alarm.email.deviceGroupHint')}
+          >
             <Select mode="multiple" showSearch optionFilterProp="label" options={groupOptions} />
           </Form.Item>
           <Form.Item name="device_ids" label={t('alarm.email.devices')} extra={t('alarm.email.deviceLimitHint')}>
