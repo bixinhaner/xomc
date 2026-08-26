@@ -19,7 +19,7 @@
 3. 看基础依赖服务是否真的可用，包括 PostgreSQL、Redis、NATS、MinIO 等，必要时通过“创建测试数据、查询、删除”的方式验证读写链路；
 4. 看 Watchdog 自己是否还活着，Watchdog 由宿主机 systemd 托管，主循环卡死或进程退出时由 systemd 自动拉起。
 
-Watchdog 发现异常后不会立刻重启。它会按配置的周期持续检测，只有连续失败达到门限后才进入异常判断；同时会先判断是不是多个服务共同依赖出了问题。如果基础依赖本身异常，优先恢复基础依赖；如果基础依赖正常，但业务进程仍然报依赖错误，才认为可能是业务进程连接池、连接状态、内部循环或运行时状态异常，尝试重启对应业务容器。
+Watchdog 发现异常后不会立刻重启。默认 5 分钟检测一轮，连续 3 轮都失败后才进入恢复候选；同时会先判断是不是多个服务共同依赖出了问题。如果基础依赖本身异常，优先恢复基础依赖；如果基础依赖正常，但业务进程仍然报依赖错误，才认为可能是业务进程连接池、连接状态、内部循环或运行时状态异常，尝试重启对应业务容器。
 
 恢复动作也会受限制：重启期间有启动宽限期，这段时间的失败不累计；恢复后有冷却期，避免刚拉起又被重复重启；短时间内多次恢复仍失败会进入退避或隔离，只告警不继续自动重启，防止重启风暴。
 
@@ -265,10 +265,10 @@ Content-Type: application/json
 ```yaml
 healthcheck:
   test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:<metrics-port>/healthz"]
-  interval: 10s
+  interval: 1m
   timeout: 3s
   retries: 3
-  start_period: 30s
+  start_period: 1m
 ```
 
 `app`、`acs`、`worker` 分别替换为9091、9090、9092。该healthcheck只把状态写入Docker，Compose不会因为 `unhealthy` 自动重启；实际动作仍由Watchdog状态机决定。
@@ -278,10 +278,10 @@ healthcheck:
 ```yaml
 healthcheck:
   test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8090/stub_status"]
-  interval: 10s
+  interval: 1m
   timeout: 3s
   retries: 3
-  start_period: 30s
+  start_period: 1m
 ```
 
 #### 5.1.2 `/healthz=200` 能证明什么
@@ -306,14 +306,14 @@ healthcheck:
 
 #### 5.1.4 `/healthz` 失败门限和动作
 
-默认每10秒探测一次，HTTP总超时2秒：
+默认每5分钟探测一次，HTTP总超时2秒。自动恢复默认要求连续3轮失败，也就是覆盖约15分钟观察窗口：
 
 | 连续结果 | 状态 | 上报 | 自动动作 |
 |---|---|---|---|
-| 1次失败 | `SUSPECT` | 指标累加，不发告警 | 无 |
-| 2次失败 | `SUSPECT` | journald `warning` | 立即补充Docker状态、TCP和宿主资源门禁检查 |
-| 3次失败（约30秒） | `PROCESS_UNHEALTHY` | `OMCWatchdogProcessUnhealthy` warning事件 | 满足安全条件时恢复该单个容器 |
-| 持续2分钟 | `PROCESS_FAILED` | Prometheus critical告警 | 若仍在预算内继续有界恢复，否则隔离 |
+| 1轮失败 | `SUSPECT` | 指标累加，不发告警 | 无 |
+| 2轮失败（约10分钟观察窗口） | `SUSPECT` | journald `warning` | 补充Docker状态、TCP和宿主资源门禁检查 |
+| 3轮失败（约15分钟观察窗口） | `PROCESS_UNHEALTHY` | `OMCWatchdogProcessUnhealthy` warning事件 | 满足安全条件时恢复该单个容器 |
+| 6轮仍失败（约30分钟观察窗口） | `PROCESS_FAILED` | Prometheus critical告警 | 若仍在预算内继续有界恢复，否则隔离 |
 | 超出重启预算 | `QUARANTINED` | `OMCWatchdogTargetQuarantined` critical | 停止自动重启，等待人工处理 |
 
 一次连接失败、HTTP 500或2秒超时统一记为探测失败，但事件中必须保留分类：
@@ -377,16 +377,16 @@ connection_refused | timeout | dns_error | http_5xx | invalid_body | network_unr
 
 #### 5.2.5 `/readyz` 失败门限和动作
 
-默认每15秒探测一次，总超时6秒，略大于服务端5秒封口：
+默认每5分钟探测一次，总超时6秒，略大于服务端5秒封口。自动恢复相关判断默认要求连续3轮失败：
 
 | 连续结果 | 状态 | 上报 | 自动动作 |
 |---|---|---|---|
-| 1次503/超时 | `DEPENDENCY_SUSPECT` | 指标记录依赖名 | 无 |
-| 连续3次（约45秒） | `DEPENDENCY_DEGRADED` | `OMCWatchdogDependencyDegraded` warning | 直接探测失败依赖，不立即重启业务容器 |
-| 持续2分钟 | `DEPENDENCY_FAILED` | 对 app/acs 影响发 critical，对 worker影响发 warning或critical | 进入共享依赖或客户端依赖路径分析 |
+| 1轮503/超时 | `DEPENDENCY_SUSPECT` | 指标记录依赖名 | 无 |
+| 连续3轮（约15分钟观察窗口） | `DEPENDENCY_DEGRADED` | `OMCWatchdogDependencyDegraded` warning | 直接探测失败依赖，不立即重启业务容器 |
+| 6轮仍失败（约30分钟观察窗口） | `DEPENDENCY_FAILED` | 对 app/acs 影响发 critical，对 worker影响发 warning或critical | 进入共享依赖或客户端依赖路径分析 |
 | 多个业务进程同时指向同一依赖 | `SHARED_INCIDENT` | 聚合为一条依赖事件 | 只考虑恢复根因服务，不逐个重启业务容器 |
 
-基础服务确认异常并被恢复后，业务进程先获得60～180秒自动重连窗口。若基础服务本体健康但业务 `/readyz` 仍失败，按下一节客户端依赖路径异常处理。
+基础服务确认异常并被恢复后，业务进程先获得5～10分钟自动重连窗口。若基础服务本体健康但业务 `/readyz` 仍失败，按下一节客户端依赖路径异常处理。
 
 #### 5.2.6 基础服务正常但业务进程仍报依赖异常
 
@@ -401,17 +401,17 @@ connection_refused | timeout | dns_error | http_5xx | invalid_body | network_unr
 此时不能重启基础服务，应进入 `CLIENT_DEPENDENCY_PATH_FAILED` 判断流程：
 
 ```text
-1. 业务 /readyz 连续3次失败，提取失败依赖名
+1. 业务 /readyz 连续3轮失败，提取失败依赖名
 2. Watchdog直接探测该基础服务
 3. 执行合成读写探针
-4. 若基础服务连续2次直接探测成功，判定基础服务本体健康
-5. 给业务进程一个自动重连窗口，默认120秒
+4. 若基础服务连续2轮直接探测成功，判定基础服务本体健康
+5. 给业务进程一个自动重连窗口，默认5分钟
 6. 自动重连窗口内 /readyz 恢复：只记录resolved，不重启
 7. 自动重连窗口结束后 /readyz 仍失败：恢复受影响业务进程
 8. 重启后进入对应启动宽限、验证窗口、冷却和预算流程
 ```
 
-如果只有一个业务进程受影响，可以恢复该进程；如果多个业务进程都报同一依赖异常，但基础服务本体健康，应先检查Docker网络、DNS和共享配置，不得同时重启多个业务进程。确认不是Docker网络或宿主资源问题后，再按 `acs → worker → app` 的顺序逐个恢复，每次恢复后等待60～180秒观察其他进程是否自行恢复。
+如果只有一个业务进程受影响，可以恢复该进程；如果多个业务进程都报同一依赖异常，但基础服务本体健康，应先检查Docker网络、DNS和共享配置，不得同时重启多个业务进程。确认不是Docker网络或宿主资源问题后，再按 `acs → worker → app` 的顺序逐个恢复，每次恢复后等待5～10分钟观察其他进程是否自行恢复。
 
 这个场景下的恢复目标是“刷新业务进程内的依赖客户端状态”，不是修复基础服务。因此恢复成功条件以该业务进程 `/readyz` 恢复为主，同时要求 `/healthz`、主入口以及已启用的 `/watchdogz` 正常。
 
@@ -479,14 +479,14 @@ type RuntimeComponent interface {
 
 | 组件 | 默认级别 | 心跳/状态来源 | 默认失效门限 | 故障判断依据 | 故障后处理 |
 |---|---|---|---:|---|---|
-| `app-main-http-listener` | 必选 | 主HTTP server启动成功、未收到非预期退出错误；外部TCP探针复核 `127.0.0.1:18081` 或容器 `:8081` | 30s或立即failed | listener goroutine退出、端口连续失败、启动后未进入serving | `/watchdogz` 连续失败且TCP复核失败时恢复 `app` |
-| `device-status-reconciler` | 必选 | 设备在线/离线状态后台扫描循环每轮心跳 | 120s | goroutine退出、panic、连续超过2个扫描周期未心跳 | 依赖健康时恢复 `app`；依赖失败时归入依赖事件 |
-| `alarm-reconciler` | 必选 | 告警状态reconcile循环心跳 | 120s | reconcile循环停止、panic或长期不调度 | 依赖健康时恢复 `app` |
-| `alarm-sync-processor` | 必选 | 告警同步事件处理器启动成功，处理循环或空闲tick心跳 | 90s | 订阅处理器退出、panic、长期无空闲心跳 | 优先确认NATS/Redis；依赖健康时恢复 `app` |
-| `topology-device-sync` | 条件必选 | 拓扑设备同步服务循环心跳；仅 `topology.device_sync.enabled=true` 时启用 | `max(2×周期, 5m)` | 同步循环退出或超过门限未调度 | 若配置为必选则恢复 `app`，否则只degraded |
-| `mml-scheduler` | 条件必选 | MML定时任务scheduler tick心跳 | 90s | scheduler退出、panic、tick停滞 | 依赖健康时恢复 `app` |
-| `online-index-pruner` | 可选 | 在线索引裁剪循环心跳 | 120s | pruner退出或长期未执行 | 只上报degraded，默认不重启 |
-| `log-rotation-watcher` | 可选 | 日志轮转配置watcher心跳 | 120s | watcher退出或配置刷新循环停滞 | 只上报degraded |
+| `app-main-http-listener` | 必选 | 主HTTP server启动成功、未收到非预期退出错误；外部TCP探针复核 `127.0.0.1:18081` 或容器 `:8081` | 5m或立即failed | listener goroutine退出、端口连续失败、启动后未进入serving | `/watchdogz` 连续失败且TCP复核失败时恢复 `app` |
+| `device-status-reconciler` | 必选 | 设备在线/离线状态后台扫描循环每轮心跳 | 10m或2个扫描周期 | goroutine退出、panic、连续超过2个扫描周期未心跳 | 依赖健康时恢复 `app`；依赖失败时归入依赖事件 |
+| `alarm-reconciler` | 必选 | 告警状态reconcile循环心跳 | 10m或2个扫描周期 | reconcile循环停止、panic或长期不调度 | 依赖健康时恢复 `app` |
+| `alarm-sync-processor` | 必选 | 告警同步事件处理器启动成功，处理循环或空闲tick心跳 | 5m | 订阅处理器退出、panic、长期无空闲心跳 | 优先确认NATS/Redis；依赖健康时恢复 `app` |
+| `topology-device-sync` | 条件必选 | 拓扑设备同步服务循环心跳；仅 `topology.device_sync.enabled=true` 时启用 | `max(2×周期, 10m)` | 同步循环退出或超过门限未调度 | 若配置为必选则恢复 `app`，否则只degraded |
+| `mml-scheduler` | 条件必选 | MML定时任务scheduler tick心跳 | 5m | scheduler退出、panic、tick停滞 | 依赖健康时恢复 `app` |
+| `online-index-pruner` | 可选 | 在线索引裁剪循环心跳 | 10m | pruner退出或长期未执行 | 只上报degraded，默认不重启 |
+| `log-rotation-watcher` | 可选 | 日志轮转配置watcher心跳 | 10m | watcher退出或配置刷新循环停滞 | 只上报degraded |
 
 判断依据：
 
@@ -500,14 +500,14 @@ type RuntimeComponent interface {
 
 | 组件 | 默认级别 | 心跳/状态来源 | 默认失效门限 | 故障判断依据 | 故障后处理 |
 |---|---|---|---:|---|---|
-| `acs-http-listener` | 必选 | ACS CWMP HTTP server启动成功、未非预期退出；TCP复核 `:7557` | 30s或立即failed | listener退出、端口连续不可连、启动后未进入serving | 触发对应ACS实例恢复；primary/candidate互斥 |
-| `session-reaper` | 必选 | 会话清理/超时管理循环心跳 | 90s | session清理循环退出、panic、心跳过期 | 依赖健康时恢复该ACS实例 |
-| `stun-udp-server` | 条件必选 | STUN UDP server serve循环心跳；仅 `stun.enabled=true` 时启用 | 60s或立即failed | UDP server启动失败、serve循环退出 | 若启用STUN则恢复ACS；未启用则skipped |
-| `upload-handler` | 条件必选 | 上传handler装配成功，内部panic计数和请求处理保护状态 | 60s | handler未装配、内部保护器进入failed、panic不可恢复 | 依赖健康时恢复ACS |
-| `backpressure-watchdog` | 条件必选 | PM上传背压watchdog采样循环心跳 | 90s | 采样循环退出或长期不刷新阈值 | 恢复ACS；若只是MinIO/TSDB不可用则归入依赖事件 |
-| `pm-queue-health-sampler` | 可选 | PM队列健康采样循环心跳 | 90s | 采样循环退出或心跳过期 | 只上报degraded；不单独重启 |
-| `trace-capture-hook` | 条件可选 | TR069 trace service和白名单缓存循环心跳；仅trace启用时检查 | 120s | trace服务退出、白名单缓存停止且无poll fallback | 默认degraded；按配置可设为必选 |
-| `log-rotation-watcher` | 可选 | ACS日志轮转配置watcher心跳 | 120s | watcher退出或配置刷新循环停滞 | 只上报degraded |
+| `acs-http-listener` | 必选 | ACS CWMP HTTP server启动成功、未非预期退出；TCP复核 `:7557` | 5m或立即failed | listener退出、端口连续不可连、启动后未进入serving | 触发对应ACS实例恢复；primary/candidate互斥 |
+| `session-reaper` | 必选 | 会话清理/超时管理循环心跳 | 5m | session清理循环退出、panic、心跳过期 | 依赖健康时恢复该ACS实例 |
+| `stun-udp-server` | 条件必选 | STUN UDP server serve循环心跳；仅 `stun.enabled=true` 时启用 | 5m或立即failed | UDP server启动失败、serve循环退出 | 若启用STUN则恢复ACS；未启用则skipped |
+| `upload-handler` | 条件必选 | 上传handler装配成功，内部panic计数和请求处理保护状态 | 5m | handler未装配、内部保护器进入failed、panic不可恢复 | 依赖健康时恢复ACS |
+| `backpressure-watchdog` | 条件必选 | PM上传背压watchdog采样循环心跳 | 5m | 采样循环退出或长期不刷新阈值 | 恢复ACS；若只是MinIO/TSDB不可用则归入依赖事件 |
+| `pm-queue-health-sampler` | 可选 | PM队列健康采样循环心跳 | 10m | 采样循环退出或心跳过期 | 只上报degraded；不单独重启 |
+| `trace-capture-hook` | 条件可选 | TR069 trace service和白名单缓存循环心跳；仅trace启用时检查 | 10m | trace服务退出、白名单缓存停止且无poll fallback | 默认degraded；按配置可设为必选 |
+| `log-rotation-watcher` | 可选 | ACS日志轮转配置watcher心跳 | 10m | watcher退出或配置刷新循环停滞 | 只上报degraded |
 
 判断依据：
 
@@ -522,15 +522,15 @@ type RuntimeComponent interface {
 
 | 组件 | 默认级别 | 心跳/状态来源 | 默认失效门限 | 故障判断依据 | 故障后处理 |
 |---|---|---|---:|---|---|
-| `pm-collector` | 必选 | PM文件NATS订阅成功；处理回调或空闲监控tick心跳 | 90s | 订阅未建立、consumer退出、panic、心跳过期 | 依赖健康且连续失败达到门限后恢复 `worker` |
-| `mr-collector` | 必选 | MR文件NATS订阅成功；处理回调或空闲监控tick心跳 | 90s | 订阅未建立、consumer退出、panic、心跳过期 | 依赖健康时恢复 `worker` |
-| `event-outbox-relay` | 必选 | 通用事件outbox relay循环心跳 | 60s | relay goroutine退出、panic或长期未轮询 | 依赖健康时恢复 `worker` |
-| `device-access-workers` | 条件必选 | reevaluation、policy、GPS probe、outbox dispatcher循环心跳 | 90s | 任一必选consumer退出，或dispatch/recovery/deadline tick长期不执行 | 依赖健康时恢复 `worker` |
-| `pm-aggregation-pipeline` | 条件必选 | PM聚合runner、hourly触发器、stream consumer控制循环心跳；仅聚合启用时检查 | 120s | runner退出、cron调度器停止、stream consumer停滞 | 依赖健康时恢复；长窗口任务不能按任务完成时间判死 |
-| `backup-scheduler-reaper` | 条件必选 | 周期备份scheduler和task reaper循环心跳 | 120s | scheduler/reaper退出或长期未tick | 按配置决定恢复或degraded |
-| `trace-capture-consumer` | 条件可选 | trace capture订阅、sweeper、exporter心跳；仅trace启用时检查 | 120s | capture consumer退出、sweeper长期不运行 | 默认degraded；按配置可设为必选 |
+| `pm-collector` | 必选 | PM文件NATS订阅成功；处理回调或空闲监控tick心跳 | 5m | 订阅未建立、consumer退出、panic、心跳过期 | 依赖健康且连续失败达到门限后恢复 `worker` |
+| `mr-collector` | 必选 | MR文件NATS订阅成功；处理回调或空闲监控tick心跳 | 5m | 订阅未建立、consumer退出、panic、心跳过期 | 依赖健康时恢复 `worker` |
+| `event-outbox-relay` | 必选 | 通用事件outbox relay循环心跳 | 5m | relay goroutine退出、panic或长期未轮询 | 依赖健康时恢复 `worker` |
+| `device-access-workers` | 条件必选 | reevaluation、policy、GPS probe、outbox dispatcher循环心跳 | 5m | 任一必选consumer退出，或dispatch/recovery/deadline tick长期不执行 | 依赖健康时恢复 `worker` |
+| `pm-aggregation-pipeline` | 条件必选 | PM聚合runner、hourly触发器、stream consumer控制循环心跳；仅聚合启用时检查 | 10m | runner退出、cron调度器停止、stream consumer停滞 | 依赖健康时恢复；长窗口任务不能按任务完成时间判死 |
+| `backup-scheduler-reaper` | 条件必选 | 周期备份scheduler和task reaper循环心跳 | 10m | scheduler/reaper退出或长期未tick | 按配置决定恢复或degraded |
+| `trace-capture-consumer` | 条件可选 | trace capture订阅、sweeper、exporter心跳；仅trace启用时检查 | 10m | capture consumer退出、sweeper长期不运行 | 默认degraded；按配置可设为必选 |
 | `retention-cleanup-crons` | 可选 | PM retention、日志清理、字典同步、回收站等cron注册和最近tick | `max(2×周期, 24h)` | cron未注册或超过周期未触发 | 只上报degraded，默认不重启 |
-| `tsdb-shadow-dim-sync` | 条件可选 | 主库维度同步到TSDB的周期循环心跳 | 180s | sync runner退出或长期未tick | 默认degraded；若配置为必选则恢复 |
+| `tsdb-shadow-dim-sync` | 条件可选 | 主库维度同步到TSDB的周期循环心跳 | 10m | sync runner退出或长期未tick | 默认degraded；若配置为必选则恢复 |
 | `pending-queue-restore` | 启动期组件 | 启动期pending任务队列恢复完成/失败状态 | 启动宽限内 | 启动恢复失败只记录错误，不代表主循环失活 | 只告警，不触发重启 |
 
 判断依据：
@@ -566,8 +566,8 @@ type RuntimeComponent interface {
       "required": true,
       "status": "stale",
       "last_heartbeat": "2026-08-25T10:10:00+08:00",
-      "stale_for": "95s",
-      "stale_after": "90s",
+      "stale_for": "6m",
+      "stale_after": "5m",
       "last_error_class": "control_loop_stale",
       "restart_hint": "restart_process"
     }
@@ -585,11 +585,11 @@ type RuntimeComponent interface {
 | `unhealthy` | 必选组件退出、panic或心跳过期 | 503 |
 | `stopping` | 正在优雅停止 | 503，但Watchdog不得重启 |
 
-默认内部心跳每10秒更新，连续6个周期未更新（60秒）才判定 stale。不同组件可配置覆盖值，长周期任务必须以控制循环心跳而非任务完成时间判定。
+默认内部组件每1分钟上报一次控制循环心跳，连续5分钟没有心跳才判定 stale。不同组件可配置覆盖值，长周期任务必须以控制循环心跳而非任务完成时间判定，不能因为任务本身周期长就误判。
 
 #### 5.3.7 自动恢复条件
 
-`/watchdogz=503` 连续3次、进程不处于启动/停止/维护状态、宿主资源不过载、共享依赖没有同时故障时，可以恢复该业务容器。若配置中 `watchdog_enabled=false`，该探针不参与异常计数和恢复判定。
+`/watchdogz=503` 连续3轮、进程不处于启动/停止/维护状态、宿主资源不过载、共享依赖没有同时故障时，可以恢复该业务容器。默认外部Watchdog每5分钟探测一次 `/watchdogz`，因此自动恢复前会覆盖约15分钟观察窗口。若配置中 `watchdog_enabled=false`，该探针不参与异常计数和恢复判定。
 
 ### 5.4 主业务入口和TCP探针
 
@@ -614,7 +614,7 @@ TCP成功只证明端口在监听，不能证明协议处理正确；TCP失败�
 
 如果 `web` 返回 502/504，但 `app` 或 `acs` 自身探针也失败，根因优先归类到后端业务进程，不应先重启 `web`。只有 `web` 容器非running、Nginx入口自身不可达、stub_status失败或配置加载异常时，才恢复 `web` 容器。
 
-不建议 Watchdog周期性制造真实设备任务、写业务表或上传文件。带副作用的端到端检查由独立E2E/巡检执行，不能作为高频自动重启触发器。基础服务合成读写探针只允许使用专用key或专用表，见下一节。
+不建议 Watchdog周期性制造真实设备任务、写业务表或上传文件。带副作用的端到端检查由独立E2E/巡检执行，不能作为自动重启触发器。基础服务合成读写探针只允许使用专用key或专用表，见下一节。
 
 ### 5.5 业务进度和容量指标
 
@@ -638,10 +638,10 @@ TCP成功只证明端口在监听，不能证明协议处理正确；TCP失败�
 
 ### 5.6 基础服务合成读写探针
 
-可以参照已有系统“创建一条测试数据、查询、删除”的方式，但它不能替代轻量探针，也不能高频执行。建议分为两层：
+可以参照已有系统“创建一条测试数据、查询、删除”的方式，但它不能替代轻量探针，也不能频繁执行。建议分为两层：
 
-1. 高频轻量探针：Redis `PING`、PostgreSQL `SELECT 1`、MinIO live/ready、NATS `/healthz`，用于快速发现不可达；
-2. 低频或按需合成读写探针：写入专用测试数据、读回校验、删除或TTL清理，用于证明依赖具备最小读写能力。
+1. 分钟级轻量探针：Redis `PING`、PostgreSQL `SELECT 1`、MinIO live/ready、NATS `/healthz`，默认5分钟执行一次，用于周期性发现不可达；
+2. 分钟级或按需合成读写探针：写入专用测试数据、读回校验、删除或TTL清理，默认Redis/PG 5分钟一次、TSDB 10分钟一次，用于证明依赖具备最小读写能力。
 
 合成读写探针能证明：
 
@@ -675,7 +675,7 @@ DEL key
 - `SET`失败：写路径不可用；
 - `GET`失败或值不一致：读写一致性异常；
 - `DEL`失败：清理失败，记录warning；因key带TTL，单次删除失败不直接触发重启；
-- 连续3次合成探针失败，且 `PING` 或容器health也失败，才进入Redis恢复候选。
+- 连续3轮合成探针失败，且 `PING` 或容器health也失败，才进入Redis恢复候选。
 
 禁止使用 `KEYS`、全库扫描、业务key前缀或无TTL写入。
 
@@ -708,7 +708,7 @@ DELETE FROM omc_watchdog.probe WHERE id = $1;
 COMMIT;
 ```
 
-如果担心频繁 `DELETE` 造成额外WAL和表膨胀，可以改为固定一行 `UPSERT + SELECT`，再由低频清理任务删除超过1天的探针行。默认建议每60秒执行一次；当多个业务 `/readyz` 同时指向PG失败时，可以立即按需执行一次，不必等周期到期。
+如果担心频繁 `DELETE` 造成额外WAL和表膨胀，可以改为固定一行 `UPSERT + SELECT`，再由低频清理任务删除超过1天的探针行。默认建议PG每5分钟执行一次、TSDB每10分钟执行一次；当多个业务 `/readyz` 连续失败并指向PG时，可以按需提前执行一次，但同一依赖按需触发最小间隔不低于2分钟。
 
 判定规则：
 
@@ -716,12 +716,12 @@ COMMIT;
 - `INSERT/UPDATE`失败：写路径不可用，常见于只读、磁盘满、权限或锁问题；
 - `SELECT`失败或token不一致：读路径或事务异常；
 - `DELETE`失败：清理异常，记录warning并依赖定期清理兜底；
-- 连续3次合成探针失败只产生critical和根因确认；PostgreSQL/TimescaleDB第一阶段仍默认不自动重启，除非显式开启有状态服务自动恢复。
+- 连续3轮合成探针失败只产生critical和根因确认；PostgreSQL/TimescaleDB第一阶段仍默认不自动重启，除非显式开启有状态服务自动恢复。
 
 #### 执行约束
 
-1. 合成探针默认60秒一次，不能与10秒主循环同频；
-2. `/readyz` 指向同一依赖失败时可以按需立即触发一次；
+1. 合成探针默认分钟级执行，Redis/PG默认5分钟一次，TSDB默认10分钟一次；
+2. `/readyz` 指向同一依赖连续失败时可以按需提前触发一次，但同一依赖按需触发最小间隔不低于2分钟；
 3. 宿主磁盘、inode、I/O PSI、只读挂载达到critical时跳过合成写入，避免放大故障；
 4. 维护、迁移、备份、恢复窗口内跳过或降级为只读探针；
 5. 合成探针失败不能单独触发业务容器重启；
@@ -785,15 +785,15 @@ Docker events用于加快发现，周期性全量扫描用于防止事件丢失�
 
 ### 6.4 Docker daemon故障处理
 
-Docker探测默认每10秒执行，Unix socket连接和响应总超时2秒：
+Docker控制面探测随主循环执行，默认每5分钟一次，Unix socket连接和响应总超时2秒：
 
 | 连续失败 | 状态 | 动作 |
 |---|---|---|
-| 1次 | `DOCKER_SUSPECT` | 记录指标，不操作容器 |
-| 3次（约30秒） | `DOCKER_UNAVAILABLE` | 发critical事件，冻结全部容器恢复动作，查询systemd状态 |
+| 1轮 | `DOCKER_SUSPECT` | 记录指标，本轮不操作容器 |
+| 3轮（约15分钟观察窗口） | `DOCKER_UNAVAILABLE` | 发critical事件，冻结全部容器恢复动作，查询systemd状态 |
 | docker.service为failed/inactive | `DOCKER_EXITED` | 主要依赖systemd `Restart=always`，Watchdog等待恢复 |
-| docker.service为active但API持续60秒不响应 | `DOCKER_HUNG_CANDIDATE` | 可配置执行一次 `systemctl restart docker` |
-| 重启后120秒仍不可用 | `DOCKER_QUARANTINED` | 停止自动动作，发critical事件并等待人工接管 |
+| docker.service为active但API连续3轮不响应 | `DOCKER_HUNG_CANDIDATE` | 可配置执行一次 `systemctl restart docker` |
+| 重启后10分钟仍不可用 | `DOCKER_QUARANTINED` | 停止自动动作，发critical事件并等待人工接管 |
 
 重启 Docker daemon会影响整机所有容器，因此默认策略建议：
 
@@ -815,7 +815,7 @@ Watchdog仍然向Prometheus暴露指标，Prometheus继续负责看板、趋势�
 | 原因 | 说明 |
 |---|---|
 | 同故障域 | Prometheus与业务服务同机、同Docker、同Compose网络，Docker或容器网络故障时可能无法发出恢复指令 |
-| 发现链路较慢 | 15秒抓取、规则评估、`for`窗口、Alertmanager分组和重试适合告警降噪，不适合30～60秒内的进程级恢复 |
+| 不是恢复控制面 | Prometheus的抓取、规则评估、`for`窗口、Alertmanager分组和重试适合告警降噪，但缺少本机恢复动作所需的事务上下文 |
 | 缺少执行上下文 | Prometheus通常不知道维护状态、容器ID变化、Docker是否正在自动拉起、ACS互斥恢复和重启预算 |
 | 告警非事务 | Alertmanager会去重、分组、重试，不能保证恢复动作只执行一次 |
 | `up` 语义有限 | `up=1`只表示metrics可抓，不证明主入口和关键消费者健康；`up=0`也可能是Prometheus路径故障 |
@@ -824,7 +824,7 @@ Watchdog仍然向Prometheus暴露指标，Prometheus继续负责看板、趋势�
 
 | 组件 | 职责 |
 |---|---|
-| Watchdog | 直接、短周期、具备执行上下文的本机恢复控制面 |
+| Watchdog | 直接、分钟级、具备执行上下文的本机恢复控制面 |
 | Docker | 容器主进程退出后的基础拉起 |
 | systemd | Docker和Watchdog进程监管 |
 | Prometheus | 指标、趋势、规则评估和Watchdog结果可观测性 |
@@ -881,13 +881,13 @@ HEALTHY ──单次失败──> SUSPECT
 
 ### 9.1 主循环周期与调度原则
 
-Watchdog只有一个全局调度循环，默认每10秒启动一轮扫描。每轮扫描有20秒deadline，并加入0～2秒随机抖动，避免多台机器或多个实例同一时刻集中访问基础服务。
+Watchdog只有一个全局调度循环，默认每5分钟启动一轮扫描。每轮扫描有60秒deadline，并加入0～1分钟随机抖动，避免多台机器或多个实例同一时刻集中访问基础服务。
 
 | 参数 | 默认值 | 说明 |
 |---|---:|---|
-| 全局扫描周期 | 10s | 调度器每10秒计算一次哪些探针到期 |
-| 扫描抖动 | 0～2s | 启动下一轮前随机延迟，降低同步抖动 |
-| 单轮deadline | 20s | 到期后取消未完成探针，本轮不执行恢复动作 |
+| 全局扫描周期 | 5m | 调度器每5分钟计算一次哪些探针到期 |
+| 扫描抖动 | 0～1m | 启动下一轮前随机延迟，降低同步抖动 |
+| 单轮deadline | 60s | 到期后取消未完成探针，本轮不执行恢复动作 |
 | 是否允许扫描重叠 | 否 | 上一轮未结束时不启动新一轮，只记录 `scan_overrun` |
 | 普通探针最大并发 | 16 | HTTP、TCP、Docker network轻量探针共享该上限 |
 | 依赖探针最大并发 | 4 | Redis、PG、NATS、MinIO轻量探针共享该上限 |
@@ -900,7 +900,7 @@ Watchdog只有一个全局调度循环，默认每10秒启动一轮扫描。每�
 
 ```mermaid
 flowchart TD
-    A[10s ticker + 0-2s jitter] --> B[读取配置/状态/维护窗口]
+    A[5m ticker + 0-1m jitter] --> B[读取配置/状态/维护窗口]
     B --> C[Docker _ping + list + inspect]
     C -->|Docker不可用| D[标记DOCKER_UNAVAILABLE<br/>冻结容器动作]
     C -->|Docker可用| E[宿主资源动作抑制检查]
@@ -924,7 +924,7 @@ flowchart TD
 
 | 节点 | 说明 |
 |---|---|
-| `10s ticker + 0-2s jitter` | 到扫描周期后启动一轮检测；抖动用于避免多实例同时打依赖服务 |
+| `5m ticker + 0-1m jitter` | 到扫描周期后启动一轮检测；抖动用于避免多实例同时打依赖服务 |
 | `读取配置/状态/维护窗口` | 加载热生效后的配置、连续失败计数、冷却/退避/隔离状态和维护模式 |
 | `Docker _ping + list + inspect` | 先确认Docker控制面是否可信，并读取容器running、health、RestartCount、OOMKilled等事实 |
 | `DOCKER_UNAVAILABLE` | Docker控制面不可用时，Watchdog无法可靠恢复容器，因此冻结容器动作，只上报 |
@@ -952,7 +952,7 @@ flowchart TD
 | HTTP/TCP/`/healthz`/`/readyz`/`/watchdogz` | 异步，有并发上限 | 都是只读探测，串行会拉长扫描周期 |
 | 基础服务轻量探测 | 异步，有独立并发上限 | 与业务探针隔离，避免业务探针过多影响根因确认 |
 | 合成读写探针 | 异步，但低频且单并发 | 有轻微写入副作用，必须限流 |
-| Docker event stream | 异步旁路 | 只用于加速发现退出/OOM，不替代10秒周期扫描 |
+| Docker event stream | 异步旁路 | 只用于加速发现退出/OOM，不替代5分钟周期扫描和连续失败门限 |
 | 根因聚合、状态机计算 | 同步 | 必须基于同一轮快照收敛出一个动作计划 |
 | 恢复动作 | 同步串行 | 避免重启风暴、端口互斥和ACS双实例同时动作 |
 | 状态持久化、事件记录、喂systemd | 同步收尾 | 只有完整扫描结束才证明Watchdog自身健康 |
@@ -965,32 +965,32 @@ flowchart TD
 
 | 对象/探针 | 默认周期 | 单次超时 | 执行模型 | 连续异常门限 | 达到门限后的处理 |
 |---|---:|---:|---|---:|---|
-| Docker daemon `_ping` | 10s | 2s | 同步前置 | 3轮 | 进入 `DOCKER_UNAVAILABLE`，冻结全部容器动作 |
-| Docker list/inspect | 10s | 2s/目标 | 同步前置 | 3轮 | 同上；保留宿主入口探测原始结果但不重启 |
-| 容器运行状态 | 10s | Inspect结果 | 同步前置 | 2轮 | 容器非running超过30秒且Docker策略未恢复时，可 `docker start/restart` |
-| Docker health | 10s | Inspect结果 | 同步前置 | 3轮 | 结合进程探针复核；单独unhealthy先告警不立即重启 |
-| `web` 管理入口 `127.0.0.1:8081/` | 10s | 3s | 异步 | 3次 | 若app自身健康，恢复 `web` |
-| `web` ACS入口 `127.0.0.1:8080` TCP | 10s | 2s | 异步 | 3次 | 若acs自身健康，恢复 `web` |
-| `web` 容器内 `:8090/stub_status` | 10s | 2s | 异步 | 3次 | 判定Nginx自身异常，恢复 `web` |
-| `app` `/healthz`；`/watchdogz` 在Phase 2启用后参与 | 10s | 2s | 异步 | 3次 | 判定进程或内部关键循环异常，恢复 `app` 候选 |
-| `app` 主入口TCP `127.0.0.1:18081` 或容器 `:8081` | 10s | 2s | 异步 | 3次 | 与 `/healthz` 不一致时，判定主listener异常 |
-| `app` `/readyz` | 15s | 6s | 异步 | 3次 | 只进入依赖分析；基础服务健康且重连窗口结束后才恢复 `app` |
-| `acs` `/healthz`；`/watchdogz` 在Phase 2启用后参与 | 10s | 2s | 异步 | 3次 | 判定ACS进程或内部关键循环异常 |
-| `acs` 主入口TCP `127.0.0.1:7557` 或容器 `:7557` | 10s | 2s | 异步 | 3次 | 只验证accept能力，不发真实Inform |
-| `acs` `/readyz` | 15s | 6s | 异步 | 3次 | 只进入依赖分析；注意ACS实例恢复互斥 |
-| `acs-candidate` 容器网络探针 | 10s | 2s | 异步 | 3次 | 通过容器网络IP探测，不依赖宿主端口映射 |
-| `worker` `/healthz`；`/watchdogz` 在Phase 2启用后参与 | 15s | 3s | 异步 | 4次 | 判定worker进程或内部消费者循环异常 |
-| `worker` `/readyz` | 15s | 6s | 异步 | 4次 | 只进入依赖分析，默认不直接触发worker重启 |
-| Redis轻量探测 `PING` | 10s | 1s | 异步依赖池 | 5次 | 与合成探针共同确认后，redis可进入恢复候选 |
-| PostgreSQL/TSDB轻量探测 | 10s | 2s | 异步依赖池 | 5次 | 默认只告警；自动重启需显式开启 |
-| NATS/MinIO轻量探测 | 10s | 2s | 异步依赖池 | 5次 | 通过安全门禁后才恢复根因服务 |
-| Redis合成 `SET/GET/DEL` | 60s或按需 | 1s | 异步单并发 | 3次 | 用于确认读写路径；key带TTL并清理 |
-| PG合成SQL事务 | 60s或按需 | 2s | 异步单并发 | 3次 | 使用专用schema/table、短事务和低权限账号 |
-| TSDB合成SQL事务 | 120s或按需 | 2s | 异步单并发 | 3次 | 周期更低，避免影响时序写入 |
-| 宿主资源抑制检查 | 10s | 2s | 同步前置 | 1轮critical | 冻结主动恢复，只上报，不治理宿主机 |
-| Watchdog自身systemd心跳 | 每轮结束 | 20s deadline | 同步收尾 | 1轮未完成 | 不发送 `WATCHDOG=1`，由systemd重启Watchdog |
+| Docker daemon `_ping` | 5m | 2s | 同步前置 | 3轮 | 进入 `DOCKER_UNAVAILABLE`，冻结全部容器动作 |
+| Docker list/inspect | 5m | 2s/目标 | 同步前置 | 3轮 | 同上；保留宿主入口探测原始结果但不重启 |
+| 容器运行状态 | 5m | Inspect结果 | 同步前置 | 3轮 | 容器连续3轮非running且Docker策略未恢复时，可 `docker start/restart` |
+| Docker health | 5m | Inspect结果 | 同步前置 | 3轮 | 结合进程探针复核；单独unhealthy先告警不立即重启 |
+| `web` 管理入口 `127.0.0.1:8081/` | 5m | 3s | 异步 | 3轮 | 若app自身健康，恢复 `web` |
+| `web` ACS入口 `127.0.0.1:8080` TCP | 5m | 2s | 异步 | 3轮 | 若acs自身健康，恢复 `web` |
+| `web` 容器内 `:8090/stub_status` | 5m | 2s | 异步 | 3轮 | 判定Nginx自身异常，恢复 `web` |
+| `app` `/healthz`；`/watchdogz` 在Phase 2启用后参与 | 5m | 2s | 异步 | 3轮 | 判定进程或内部关键循环异常，恢复 `app` 候选 |
+| `app` 主入口TCP `127.0.0.1:18081` 或容器 `:8081` | 5m | 2s | 异步 | 3轮 | 与 `/healthz` 不一致时，判定主listener异常 |
+| `app` `/readyz` | 5m | 6s | 异步 | 3轮 | 只进入依赖分析；基础服务健康且重连窗口结束后才恢复 `app` |
+| `acs` `/healthz`；`/watchdogz` 在Phase 2启用后参与 | 5m | 2s | 异步 | 3轮 | 判定ACS进程或内部关键循环异常 |
+| `acs` 主入口TCP `127.0.0.1:7557` 或容器 `:7557` | 5m | 2s | 异步 | 3轮 | 只验证accept能力，不发真实Inform |
+| `acs` `/readyz` | 5m | 6s | 异步 | 3轮 | 只进入依赖分析；注意ACS实例恢复互斥 |
+| `acs-candidate` 容器网络探针 | 5m | 2s | 异步 | 3轮 | 通过容器网络IP探测，不依赖宿主端口映射 |
+| `worker` `/healthz`；`/watchdogz` 在Phase 2启用后参与 | 5m | 3s | 异步 | 3轮 | 判定worker进程或内部消费者循环异常 |
+| `worker` `/readyz` | 5m | 6s | 异步 | 3轮 | 只进入依赖分析，默认不直接触发worker重启 |
+| Redis轻量探测 `PING` | 5m | 1s | 异步依赖池 | 3轮 | 与合成探针共同确认后，redis可进入恢复候选 |
+| PostgreSQL/TSDB轻量探测 | 5m | 2s | 异步依赖池 | 3轮 | 默认只告警；自动重启需显式开启 |
+| NATS/MinIO轻量探测 | 5m | 2s | 异步依赖池 | 3轮 | 通过安全门禁后才恢复根因服务 |
+| Redis合成 `SET/GET/DEL` | 5m或按需 | 1s | 异步单并发 | 3轮 | 用于确认读写路径；key带TTL并清理 |
+| PG合成SQL事务 | 5m或按需 | 2s | 异步单并发 | 3轮 | 使用专用schema/table、短事务和低权限账号 |
+| TSDB合成SQL事务 | 10m或按需 | 2s | 异步单并发 | 3轮 | 周期更低，避免影响时序写入 |
+| 宿主资源抑制检查 | 5m | 2s | 同步前置 | 1轮critical | 冻结主动恢复，只上报，不治理宿主机 |
+| Watchdog自身systemd心跳 | 每轮结束 | 60s deadline | 同步收尾 | 1轮未完成 | 不发送 `WATCHDOG=1`，由systemd重启Watchdog |
 
-“按需”指业务 `/readyz` 明确报告某个依赖失败时，Watchdog可以提前触发对应依赖的轻量探测和合成读写探针，但同一依赖的按需触发最少间隔建议30秒，防止异常时反复写探测数据。
+“按需”指业务 `/readyz` 连续失败并明确报告某个依赖失败时，Watchdog可以提前触发对应依赖的轻量探测和合成读写探针，但同一依赖的按需触发最少间隔建议2分钟，防止异常时反复写探测数据。
 
 ### 9.4 每轮扫描步骤
 
@@ -1028,7 +1028,7 @@ flowchart TD
 1. `/healthz` 连续失败达到门限；
 2. 已启用的 `/watchdogz` 连续失败达到门限；
 3. 主TCP/HTTP入口连续失败达到门限，且不是Docker网络、宿主资源或发布维护导致；
-4. 容器非running超过30秒，Docker restart policy没有自行恢复；
+4. 容器连续3轮非running，Docker restart policy没有自行恢复；
 5. Docker health连续unhealthy，并且 Watchdog自己的 `/healthz` 或主入口复核也失败；
 6. `/readyz` 持续失败，但对应基础服务直接探测和合成读写均健康，且业务自动重连窗口结束后仍未恢复。
 
@@ -1045,16 +1045,17 @@ flowchart TD
 以 `app` 为例，`web`、`acs` 和 `worker` 使用各自的启动宽限和冷却时间：
 
 ```text
-00s  /healthz第1次失败：记录SUSPECT，不动作
-10s  /healthz第2次失败：补充Docker、TCP、宿主资源门禁检查
-20s  /healthz第3次失败：进入UNHEALTHY，生成恢复候选
-21s  安全门禁通过，获取生命周期锁，重新Inspect容器ID
-22s  调用Docker Restart，停止超时默认15s
-22s  目标进入RECOVERING，记录recovery_attempt=1
-22s-112s  app启动宽限90s；此期间healthz/readyz失败记为expected_failure
-健康探针连续2次成功  进入VERIFYING
-VERIFYING持续30s无关键失败  恢复成功，进入COOLDOWN
-COOLDOWN 120s  继续探测和上报，但不再次自动重启
+00m  上一轮探针成功，目标处于HEALTHY
+05m  /healthz第1轮失败：记录SUSPECT，不动作
+10m  /healthz第2轮失败：补充Docker、TCP、宿主资源门禁检查
+15m  /healthz第3轮失败：进入UNHEALTHY，生成恢复候选
+15m+ 安全门禁通过，获取生命周期锁，重新Inspect容器ID
+15m+ 调用Docker Restart，停止超时默认15s
+15m+ 目标进入RECOVERING，记录recovery_attempt=1
+15m～20m  app启动宽限5m；此期间healthz/readyz失败记为expected_failure
+健康探针连续2轮成功  进入VERIFYING
+VERIFYING窗口内无关键失败  恢复成功，进入COOLDOWN
+COOLDOWN 15m  继续探测和上报，但不再次自动重启
 冷却结束  回到HEALTHY
 ```
 
@@ -1062,10 +1063,10 @@ COOLDOWN 120s  继续探测和上报，但不再次自动重启
 
 | 服务 | Docker停止超时 | 启动宽限 | 验证成功条件 | 冷却时间 | 失败后退避 |
 |---|---:|---:|---|---:|---|
-| web | 30s | 60s | `8081`入口和 `stub_status` 连续2次成功 | 2m | 2m、10m |
-| app | 15s | 90s | `/healthz`、主入口、已启用的 `/watchdogz` 连续2次成功 | 2m | 2m、10m |
-| acs | 20s | 120s | `/healthz`、ACS TCP、已启用的 `/watchdogz` 连续2次成功 | 3m | 2m、10m |
-| worker | 30s | 180s | `/healthz`、已启用的 `/watchdogz` 连续2次成功 | 5m | 5m、15m |
+| web | 30s | 5m | `8081`入口和 `stub_status` 连续2轮成功 | 15m | 10m、30m |
+| app | 15s | 5m | `/healthz`、主入口、已启用的 `/watchdogz` 连续2轮成功 | 15m | 10m、30m |
+| acs | 20s | 5m | `/healthz`、ACS TCP、已启用的 `/watchdogz` 连续2轮成功 | 15m | 10m、30m |
+| worker | 30s | 10m | `/healthz`、已启用的 `/watchdogz` 连续2轮成功 | 20m | 10m、30m |
 
 除 `CLIENT_DEPENDENCY_PATH_FAILED` 场景外，`/readyz` 不作为业务容器恢复成功的必要条件。若进程级探针已经恢复但 `/readyz` 仍失败，应转为依赖事件；如果本次恢复原因就是客户端依赖路径异常，则必须要求该业务进程 `/readyz` 恢复。
 
@@ -1077,8 +1078,8 @@ COOLDOWN 120s  继续探测和上报，但不再次自动重启
 |---|---|---|---:|
 | `STOPPING` | Docker restart开始到旧容器停止，最多15～30s | 记录为 `expected_failure: stopping` | 否 |
 | `STARTING` | 新容器running后到启动宽限结束 | 记录为 `expected_failure: startup_grace` | 否 |
-| `VERIFYING` | 探针开始恢复后的30s | 若偶发失败，回到 `STARTING` 剩余窗口；若窗口耗尽则失败 | 否 |
-| `COOLDOWN` | 恢复成功后的2～5分钟 | 失败仍记录为异常，但只标记 `relapse_in_cooldown` | 否 |
+| `VERIFYING` | 探针开始恢复后的10m内 | 若偶发失败，回到 `STARTING` 剩余窗口；若窗口耗尽则失败 | 否 |
+| `COOLDOWN` | 恢复成功后的15～20分钟 | 失败仍记录为异常，但只标记 `relapse_in_cooldown` | 否 |
 | `BACKOFF` | 恢复失败后的退避等待 | 继续探测；若自行恢复则结束退避 | 否 |
 | `QUARANTINED` | 超出预算后 | 只探测和告警，不动作 | 否 |
 
@@ -1096,33 +1097,34 @@ COOLDOWN 120s  继续探测和上报，但不再次自动重启
 
 1. Docker API返回恢复动作失败；
 2. 启动宽限结束后容器仍非running；
-3. 启动宽限结束后必选探针未达到连续2次成功；
+3. 启动宽限结束后必选探针未达到连续2轮成功；
 4. 启动宽限内发生明确OOMKilled或快速崩溃循环；
 5. 恢复过程中发现宿主资源critical、Docker daemon失联或生命周期锁被抢占。
 
 失败后的动作：
 
 ```text
-第1次恢复失败：进入BACKOFF 2m
-第2次恢复失败：进入BACKOFF 10m
+第1次恢复失败：进入BACKOFF 10m
+第2次恢复失败：进入BACKOFF 30m
 达到服务重启预算：进入QUARANTINED
 人工执行 omc-watchdog recover <service>：可绕过连续失败门限，但不能绕过锁、安全门禁和预算审计
 ```
 
-重启预算采用滑动窗口。例如 `app=3次/15m` 表示15分钟内最多自动发起3次恢复动作。成功恢复不会立即清空窗口内次数，只会进入冷却；窗口自然滑出后才恢复预算。
+重启预算采用滑动窗口。例如 `app=2次/1h` 表示1小时内最多自动发起2次恢复动作。成功恢复不会立即清空窗口内次数，只会进入冷却；窗口自然滑出后才恢复预算。
 
 ### 9.9 共享依赖恢复时序
 
 当多个业务服务 `/readyz` 同时失败并指向同一依赖时，Watchdog不进入“逐个重启业务”的循环，而是进入依赖恢复流程：
 
 ```text
-00s  app/acs/worker readyz开始报告postgres失败
-45s  三个服务均达到DEPENDENCY_DEGRADED，创建共享事件
-45s  冻结受影响业务服务的自动重启
-45s-60s  直接探测postgres：Docker状态、pg_isready、SELECT 1、recovery状态
-60s  若直接探测也失败且安全门禁通过，才考虑恢复postgres
-60s-360s  postgres启动/恢复宽限，业务readyz失败记为expected_failure: dependency_recovering
-依赖直接探测恢复后  给业务服务60～180秒自动重连窗口
+00m  上一轮readyz和依赖探针成功
+05m  app/acs/worker readyz第1轮报告postgres失败
+10m  第2轮仍失败，记录DEPENDENCY_SUSPECT并补充依赖直接探测
+15m  第3轮仍失败，创建共享事件并冻结受影响业务服务自动重启
+15m+  直接探测postgres：Docker状态、pg_isready、SELECT 1、recovery状态、合成SQL
+若postgres直接探测也连续3轮失败且安全门禁通过，才考虑恢复postgres
+postgres启动/恢复宽限内，业务readyz失败记为expected_failure: dependency_recovering
+依赖直接探测恢复后  给业务服务5～10分钟自动重连窗口
 业务readyz恢复  结束共享事件
 个别业务仍未恢复  才按app/acs/worker顺序逐个评估业务容器恢复
 ```
@@ -1134,7 +1136,7 @@ COOLDOWN 120s  继续探测和上报，但不再次自动重启
 ```text
 基础服务健康
   ├─ 只有一个业务进程readyz失败
-  │    └─ 等待120秒自动重连，仍失败则恢复该业务进程
+  │    └─ 等待5分钟自动重连，仍失败则恢复该业务进程
   └─ 多个业务进程readyz失败
        ├─ 先查Docker网络、DNS、宿主资源和共享配置
        ├─ 若存在网络/宿主异常：冻结业务重启，只告警
@@ -1145,9 +1147,9 @@ COOLDOWN 120s  继续探测和上报，但不再次自动重启
 
 | 场景 | 等待窗口 | 窗口内失败计数 | 窗口结束动作 |
 |---|---:|---|---|
-| 单业务进程依赖路径异常 | 120s | `/readyz` 失败记为 `client_reconnect_grace` | 仍失败则重启该业务进程 |
-| 多业务进程依赖路径异常 | 180s | 冻结批量业务重启 | 排除网络/宿主问题后逐个恢复 |
-| 业务进程重启后依赖仍失败 | 服务启动宽限 + 60s | 不计新异常 | 进入backoff或quarantine |
+| 单业务进程依赖路径异常 | 5m | `/readyz` 失败记为 `client_reconnect_grace` | 仍失败则重启该业务进程 |
+| 多业务进程依赖路径异常 | 10m | 冻结批量业务重启 | 排除网络/宿主问题后逐个恢复 |
+| 业务进程重启后依赖仍失败 | 服务启动宽限 + 5m | 不计新异常 | 进入backoff或quarantine |
 
 ### 9.10 Docker控制面异常时序
 
@@ -1155,10 +1157,10 @@ Docker daemon异常时，Watchdog不能可靠执行容器恢复，因此优先�
 
 ```text
 第1轮Docker API失败：记录DOCKER_SUSPECT，继续尝试宿主端口HTTP探测
-连续3轮约30s失败：进入DOCKER_UNAVAILABLE，冻结全部容器恢复
+连续3轮约15分钟观察窗口失败：进入DOCKER_UNAVAILABLE，冻结全部容器恢复
 若docker.service failed/inactive：等待systemd Restart=always恢复
-若docker.service active但API持续超时60s：可选执行一次systemctl restart docker
-重启后120s仍不可用：进入DOCKER_QUARANTINED，停止本机自动动作，发critical事件并等待人工接管
+若docker.service active但API连续3轮超时：可选执行一次systemctl restart docker
+重启后10分钟仍不可用：进入DOCKER_QUARANTINED，停止本机自动动作，发critical事件并等待人工接管
 ```
 
 Docker控制面不可用期间，业务 `/healthz` 失败不能直接累计为进程异常，因为Watchdog无法判断容器网络、端口映射和Docker状态是否可信。此时只保留探测原始结果和 `control_plane_unknown` 事件。
@@ -1213,14 +1215,14 @@ for ticker.C {
 
 | 参数 | web | app | acs单实例 | worker |
 |---|---:|---:|---:|---:|
-| 主探测周期 | 10s | 10s | 10s | 15s |
+| 主探测周期 | 5m | 5m | 5m | 5m |
 | 单次HTTP超时 | 3s | 2s | 2s | 3s |
-| 连续失败门限 | 3 | 3 | 3 | 4 |
-| `/watchdogz` stale | 不适用 | 60s | 60s | 90s |
-| 启动宽限 | 60s | 90s | 120s | 180s |
-| 验证窗口 | 30s | 30s | 30s | 30s |
-| 冷却时间 | 2m | 2m | 3m | 5m |
-| 自动恢复预算 | 3次/15m | 3次/15m | 2次/15m | 2次/30m |
+| 连续失败门限 | 3轮 | 3轮 | 3轮 | 3轮 |
+| `/watchdogz` stale | 不适用 | 5m | 5m | 5m |
+| 启动宽限 | 5m | 5m | 5m | 10m |
+| 验证窗口 | 10m | 10m | 10m | 10m |
+| 冷却时间 | 15m | 15m | 15m | 20m |
+| 自动恢复预算 | 2次/1h | 2次/1h | 2次/2h | 2次/2h |
 
 `/watchdogz` stale是Phase 2新增内部有效性探针后的默认值。当前代码未实现 `/watchdogz` 时，应在配置中保持 `watchdog_enabled=false`，不参与第一阶段恢复判定。
 
@@ -1230,11 +1232,11 @@ ACS primary与candidate共用一个全局恢复互斥锁，任何时候最多恢
 
 | 服务 | 直接探测 | 连续失败 | 启动宽限 | 最大自动恢复预算 |
 |---|---|---:|---:|---:|
-| redis-core / redis-pm | `PING` + `SET/GET/DEL`专用key | 轻量探测10s周期连续5次，或合成探针60s周期连续3次 | 60s | 2次/30m |
-| nats | `/healthz` + JetStream状态 | 10s周期连续5次 | 5m | 2次/1h |
-| minio | live + ready | 10s周期连续5次 | 2m | 2次/1h |
-| postgres | `pg_isready` + `SELECT 1` + 合成SQL事务 | 轻量探测10s周期连续5次，或合成探针60s周期连续3次 | 5m | 1次/1h |
-| postgres-tsdb | `pg_isready` + `SELECT 1` + 合成SQL事务 | 轻量探测10s周期连续5次，或合成探针120s周期连续3次 | 10m | 1次/1h |
+| redis-core / redis-pm | `PING` + `SET/GET/DEL`专用key | 轻量探测5m周期连续3轮，或合成探针5m周期连续3轮 | 5m | 2次/1h |
+| nats | `/healthz` + JetStream状态 | 5m周期连续3轮 | 10m | 2次/2h |
+| minio | live + ready | 5m周期连续3轮 | 5m | 2次/2h |
+| postgres | `pg_isready` + `SELECT 1` + 合成SQL事务 | 轻量探测5m周期连续3轮，或合成探针5m周期连续3轮 | 10m | 1次/2h |
+| postgres-tsdb | `pg_isready` + `SELECT 1` + 合成SQL事务 | 轻量探测5m周期连续3轮，或合成探针10m周期连续3轮 | 15m | 1次/2h |
 
 有状态服务的自动恢复开关按服务独立配置，第一阶段建议默认关闭 PostgreSQL、TimescaleDB自动重启，只告警并保留人工确认入口。
 
@@ -1293,13 +1295,13 @@ Watchdog输出两类信息：
 | 告警 | 严重度 | 条件 |
 |---|---|---|
 | `OMCWatchdogProcessUnhealthy` | warning | 进程探针达到连续失败门限 |
-| `OMCWatchdogProcessFailed` | critical | 进程不可用持续2分钟 |
-| `OMCWatchdogDependencyDegraded` | warning | 依赖探针连续失败45秒 |
-| `OMCWatchdogSharedDependencyFailed` | critical | 多个主链路进程共同依赖失败2分钟 |
+| `OMCWatchdogProcessFailed` | critical | 进程不可用持续30分钟或恢复失败 |
+| `OMCWatchdogDependencyDegraded` | warning | 依赖探针连续失败3轮 |
+| `OMCWatchdogSharedDependencyFailed` | critical | 多个主链路进程共同依赖持续失败30分钟或根因恢复失败 |
 | `OMCWatchdogClientDependencyPathFailed` | warning/critical | 基础服务健康，但业务进程到依赖路径持续失败 |
 | `OMCWatchdogRecoveryFailed` | critical | 恢复动作执行失败或观察期未恢复 |
 | `OMCWatchdogTargetQuarantined` | critical | 超出恢复预算 |
-| `OMCWatchdogDockerUnavailable` | critical | Docker API连续30秒不可用 |
+| `OMCWatchdogDockerUnavailable` | critical | Docker API连续3轮不可用 |
 | `OMCWatchdogHostResourceCritical` | critical | 宿主资源越过动作抑制门限 |
 
 恢复成功产生事件和计数，不建议每次都发邮件；可在服务恢复时发送resolved通知。
@@ -1372,7 +1374,7 @@ root_candidate: postgres
 4. 获取全局生命周期锁
 5. 只恢复一个根因服务
 6. 等待该服务度过启动宽限并通过直接探测
-7. 给业务进程60～180秒自动重连时间
+7. 给业务进程5～10分钟自动重连时间
 8. 业务 /readyz 自行恢复：结束事件
 9. 个别业务仍未恢复：逐个恢复，禁止并发
 10. 超出预算：隔离并通知人工
@@ -1383,7 +1385,7 @@ root_candidate: postgres
 ```text
 1. 记录基础服务本体健康
 2. 标记受影响业务进程为CLIENT_DEPENDENCY_PATH_FAILED
-3. 等待120秒自动重连窗口
+3. 等待5分钟自动重连窗口
 4. 窗口内业务 /readyz 恢复：结束事件
 5. 窗口结束仍失败：只恢复受影响业务进程
 6. 重启后按业务服务启动宽限和验证窗口确认
@@ -1417,7 +1419,7 @@ acs-candidate → acs-primary → worker → app
 - 真正的磁盘满、OOM、只读文件系统被掩盖；
 - 业务短暂恢复后再次失败，形成永久抖动。
 
-允许的是“故障确认后的有限周期重试”，默认退避：立即、2分钟、10分钟；达到服务预算后隔离，不再永久重启。
+允许的是“故障确认后的有限周期重试”，默认退避：立即、10分钟、30分钟；达到服务预算后隔离，不再永久重启。
 
 ---
 
@@ -1471,14 +1473,14 @@ worker没有主业务HTTP端口，必须组合：
 
 恢复规则：
 
-1. `web` 容器非running超过30秒，Docker未自行恢复时，可以恢复 `web`；
-2. `127.0.0.1:8081/` 连续3次失败，且 app自身健康时，可以恢复 `web`；
-3. `127.0.0.1:8080` TCP连续3次失败，且 acs自身健康时，可以恢复 `web`；
-4. `stub_status` 连续3次失败，且容器running时，可以恢复 `web`；
+1. `web` 容器连续3轮非running，Docker未自行恢复时，可以恢复 `web`；
+2. `127.0.0.1:8081/` 连续3轮失败，且 app自身健康时，可以恢复 `web`；
+3. `127.0.0.1:8080` TCP连续3轮失败，且 acs自身健康时，可以恢复 `web`；
+4. `stub_status` 连续3轮失败，且容器running时，可以恢复 `web`；
 5. 如果 `web` 返回502/504，同时 app或acs自身探针失败，优先恢复后端业务进程，不先重启 `web`；
 6. Nginx配置文件挂载错误、证书缺失或配置测试失败时，重启通常不能解决，应告警并进入隔离。
 
-`web` 恢复使用Compose配置的30秒优雅停止窗口。恢复后要求 `8081` 入口和 `stub_status` 连续2次成功，再进入冷却期。
+`web` 恢复使用Compose配置的30秒优雅停止窗口。恢复后要求 `8081` 入口和 `stub_status` 连续2轮成功，再进入冷却期。
 
 ### 12.5 有状态基础服务
 
@@ -1490,7 +1492,7 @@ worker没有主业务HTTP端口，必须组合：
 - 合成事务连续失败可确认根因，但第一阶段仍只告警、不自动重启；
 - 磁盘、inode、只读挂载异常只作为自动恢复抑制条件，不由Watchdog清理或修复；
 - 第一阶段默认不自动重启；
-- 开启后最多1次/小时；
+- 开启后最多1次/2小时；
 - 任何自动动作都要记录数据库是否处于recovery和探测错误；
 - 重启后必须等待 `SELECT 1`，不能只看容器running。
 
@@ -1504,16 +1506,16 @@ worker没有主业务HTTP端口，必须组合：
 #### NATS
 
 - JetStream大量backlog恢复可能接近数分钟；
-- 在5分钟启动宽限内不判定恢复失败；
+- 在10分钟启动宽限内不判定恢复失败；
 - 重启前确认不是正常JetStream恢复；
-- 自动恢复最多2次/小时。
+- 自动恢复最多2次/2小时。
 
 #### MinIO
 
 - `live`失败表示进程级故障候选；
 - `live=200`、`ready!=200`表示暂不能接流量，不立即重启；
 - 磁盘满、只读或权限错误时禁止重启，只上报，不自动清理或修复数据目录；
-- 自动恢复最多2次/小时。
+- 自动恢复最多2次/2小时。
 
 ### 12.6 非核心组件
 
@@ -1552,7 +1554,7 @@ Prometheus、Alertmanager、Grafana、Loki、Tempo、OpenTelemetry Collector 和
 ### 13.3 并发限制
 
 - 同一时刻最多一个恢复动作；
-- 5分钟内全局最多两个恢复动作；
+- 30分钟内全局最多两个恢复动作；
 - 同一服务启动观察期内不能再次重启；
 - ACS两个实例禁止并发恢复；
 - 基础服务恢复期间暂停受影响业务服务恢复；
@@ -1577,8 +1579,8 @@ Type=notify
 NotifyAccess=main
 ExecStart=/opt/omc/current/bin/omc-watchdog --config /etc/omc/watchdog.yaml
 Restart=always
-RestartSec=5s
-WatchdogSec=30s
+RestartSec=10s
+WatchdogSec=15m
 TimeoutStopSec=10s
 NoNewPrivileges=true
 ProtectHome=true
@@ -1607,7 +1609,7 @@ Watchdog主循环必须按以下方式工作：
 
 不能单独启动一个无条件ticker goroutine持续发送 `WATCHDOG=1`。否则主扫描循环已经死锁，喂狗goroutine仍可能存活，systemd无法发现Watchdog失效。
 
-每轮扫描deadline建议20秒，`WatchdogSec=30s`。连续无法完成完整扫描时，Watchdog故意不喂狗，由systemd杀死并重新拉起。
+每轮扫描deadline建议60秒，`WatchdogSec=15m`。`WatchdogSec` 建议大于“2 × 扫描周期 + 单轮deadline + 最大抖动”，默认配置下约为 `2 × 5m + 60s + 1m`，因此取15分钟。这样可以容忍偶发一轮扫描超时，但连续无法完成完整扫描时，Watchdog会故意不喂狗，由systemd杀死并重新拉起。
 
 ---
 
@@ -1631,7 +1633,7 @@ Watchdog配置采用“内置默认profile + 配置文件覆盖”的方式：
 
 | 类别 | 可配置内容 | 默认策略 |
 |---|---|---|
-| 全局扫描 | 扫描周期、deadline、抖动、并发上限、全局恢复预算 | 默认10秒扫描，20秒deadline |
+| 全局扫描 | 扫描周期、deadline、抖动、并发上限、全局恢复预算 | 默认5分钟扫描，60秒deadline |
 | 主要业务服务 | 是否检测、是否自动恢复、HTTP/TCP/内部探针周期、超时、连续失败门限、启动宽限、冷却、退避、预算 | 默认全部检测并允许有限自动恢复 |
 | 基础依赖服务 | 是否检测、轻量探针周期、合成读写周期、连续失败门限、启动宽限、恢复预算 | 默认全部检测；PostgreSQL/TSDB自动恢复默认关闭 |
 | 单个探针 | `/healthz`、`/readyz`、`/watchdogz`、TCP、Docker health、合成读写是否启用及门限 | 默认启用适用于该服务且已经实现的探针 |
@@ -1655,15 +1657,15 @@ config:
     reject_invalid_config: true
 
 scan:
-  interval: 10s
-  deadline: 20s
-  jitter: 2s
+  interval: 5m
+  deadline: 60s
+  jitter: 1m
   allow_overlapping_scans: false
   max_probe_concurrency: 16
   max_dependency_probe_concurrency: 4
   max_synthetic_probe_concurrency: 1
   global_max_actions: 2
-  global_action_window: 5m
+  global_action_window: 30m
 
 docker:
   socket: /var/run/docker.sock
@@ -1679,12 +1681,12 @@ maintenance:
 
 recovery_defaults:
   verify_successes: 2
-  verify_window: 30s
+  verify_window: 10m
   suppress_failures_during_startup: true
   relapse_during_cooldown: record_and_suppress_action
-  dependency_reconnect_grace: 120s
-  client_dependency_reconnect_grace: 120s
-  multi_service_client_path_grace: 180s
+  dependency_reconnect_grace: 5m
+  client_dependency_reconnect_grace: 5m
+  multi_service_client_path_grace: 10m
 
 targets:
   web:
@@ -1701,20 +1703,20 @@ targets:
     docker_network_probe:
       port: 8090
       path: /stub_status
-    http_interval: 10s
-    tcp_interval: 10s
-    stub_status_interval: 10s
+    http_interval: 5m
+    tcp_interval: 5m
+    stub_status_interval: 5m
     timeout: 3s
     tcp_timeout: 2s
     stub_status_timeout: 2s
     failure_threshold: 3
     stop_timeout: 30s
-    startup_grace: 60s
+    startup_grace: 5m
     verify_successes: 2
-    verify_window: 30s
-    cooldown: 2m
-    backoff: [2m, 10m]
-    restart_budget: {count: 3, window: 15m}
+    verify_window: 10m
+    cooldown: 15m
+    backoff: [10m, 30m]
+    restart_budget: {count: 2, window: 1h}
 
   app:
     enabled: true
@@ -1730,20 +1732,20 @@ targets:
     watchdog_url: http://127.0.0.1:9091/watchdogz
     tcp_enabled: true
     main_tcp_probe: 127.0.0.1:18081
-    health_interval: 10s
-    watchdog_interval: 10s
-    ready_interval: 15s
-    tcp_interval: 10s
+    health_interval: 5m
+    watchdog_interval: 5m
+    ready_interval: 5m
+    tcp_interval: 5m
     timeout: 2s
     ready_timeout: 6s
     failure_threshold: 3
     stop_timeout: 15s
-    startup_grace: 90s
+    startup_grace: 5m
     verify_successes: 2
-    verify_window: 30s
-    cooldown: 2m
-    backoff: [2m, 10m]
-    restart_budget: {count: 3, window: 15m}
+    verify_window: 10m
+    cooldown: 15m
+    backoff: [10m, 30m]
+    restart_budget: {count: 2, window: 1h}
     recovery_hook: app
 
   acs:
@@ -1760,20 +1762,20 @@ targets:
     watchdog_url: http://127.0.0.1:9095/watchdogz
     tcp_enabled: true
     main_tcp_probe: 127.0.0.1:7557
-    health_interval: 10s
-    watchdog_interval: 10s
-    ready_interval: 15s
-    tcp_interval: 10s
+    health_interval: 5m
+    watchdog_interval: 5m
+    ready_interval: 5m
+    tcp_interval: 5m
     timeout: 2s
     ready_timeout: 6s
     failure_threshold: 3
     stop_timeout: 20s
-    startup_grace: 120s
+    startup_grace: 5m
     verify_successes: 2
-    verify_window: 30s
-    cooldown: 3m
-    backoff: [2m, 10m]
-    restart_budget: {count: 2, window: 15m}
+    verify_window: 10m
+    cooldown: 15m
+    backoff: [10m, 30m]
+    restart_budget: {count: 2, window: 2h}
     mutex_group: acs
 
   acs-candidate:
@@ -1791,19 +1793,19 @@ targets:
     ready_enabled: true
     # 当前代码尚未实现 /watchdogz；Phase 2 增加内部组件心跳后改为 true。
     watchdog_enabled: false
-    health_interval: 10s
-    watchdog_interval: 10s
-    ready_interval: 15s
+    health_interval: 5m
+    watchdog_interval: 5m
+    ready_interval: 5m
     timeout: 2s
     ready_timeout: 6s
     failure_threshold: 3
     stop_timeout: 20s
-    startup_grace: 120s
+    startup_grace: 5m
     verify_successes: 2
-    verify_window: 30s
-    cooldown: 3m
-    backoff: [2m, 10m]
-    restart_budget: {count: 2, window: 15m}
+    verify_window: 10m
+    cooldown: 15m
+    backoff: [10m, 30m]
+    restart_budget: {count: 2, window: 2h}
     mutex_group: acs
 
   worker:
@@ -1818,62 +1820,62 @@ targets:
     # 当前代码尚未实现 /watchdogz；Phase 2 增加内部组件心跳后改为 true。
     watchdog_enabled: false
     watchdog_url: http://127.0.0.1:9092/watchdogz
-    health_interval: 15s
-    watchdog_interval: 15s
-    ready_interval: 15s
+    health_interval: 5m
+    watchdog_interval: 5m
+    ready_interval: 5m
     timeout: 3s
     ready_timeout: 6s
-    failure_threshold: 4
+    failure_threshold: 3
     stop_timeout: 30s
-    startup_grace: 180s
+    startup_grace: 10m
     verify_successes: 2
-    verify_window: 30s
-    cooldown: 5m
-    backoff: [5m, 15m]
-    restart_budget: {count: 2, window: 30m}
+    verify_window: 10m
+    cooldown: 20m
+    backoff: [10m, 30m]
+    restart_budget: {count: 2, window: 2h}
 
 dependency_probes:
-  redis-core: {enabled: true, kind: redis, interval: 10s, timeout: 1s, failure_threshold: 5}
-  redis-pm: {enabled: true, kind: redis, interval: 10s, timeout: 1s, failure_threshold: 5}
-  postgres: {enabled: true, kind: postgres, interval: 10s, timeout: 2s, failure_threshold: 5}
-  postgres-tsdb: {enabled: true, kind: postgres, interval: 10s, timeout: 2s, failure_threshold: 5}
-  nats: {enabled: true, kind: nats, interval: 10s, timeout: 2s, failure_threshold: 5}
-  minio: {enabled: true, kind: minio, interval: 10s, timeout: 2s, failure_threshold: 5}
+  redis-core: {enabled: true, kind: redis, interval: 5m, timeout: 1s, failure_threshold: 3}
+  redis-pm: {enabled: true, kind: redis, interval: 5m, timeout: 1s, failure_threshold: 3}
+  postgres: {enabled: true, kind: postgres, interval: 5m, timeout: 2s, failure_threshold: 3}
+  postgres-tsdb: {enabled: true, kind: postgres, interval: 5m, timeout: 2s, failure_threshold: 3}
+  nats: {enabled: true, kind: nats, interval: 5m, timeout: 2s, failure_threshold: 3}
+  minio: {enabled: true, kind: minio, interval: 5m, timeout: 2s, failure_threshold: 3}
 
 stateful_recovery:
-  postgres: {enabled: false, max_restarts: 1, window: 1h}
-  postgres-tsdb: {enabled: false, max_restarts: 1, window: 1h}
-  redis-core: {enabled: true, max_restarts: 2, window: 30m}
-  redis-pm: {enabled: true, max_restarts: 2, window: 30m}
-  nats: {enabled: true, startup_grace: 5m, max_restarts: 2, window: 1h}
-  minio: {enabled: true, startup_grace: 2m, max_restarts: 2, window: 1h}
+  postgres: {enabled: false, max_restarts: 1, window: 2h}
+  postgres-tsdb: {enabled: false, max_restarts: 1, window: 2h}
+  redis-core: {enabled: true, max_restarts: 2, window: 1h}
+  redis-pm: {enabled: true, max_restarts: 2, window: 1h}
+  nats: {enabled: true, startup_grace: 10m, max_restarts: 2, window: 2h}
+  minio: {enabled: true, startup_grace: 5m, max_restarts: 2, window: 2h}
 
 synthetic_probes:
   redis-core:
     enabled: true
     kind: redis
-    interval: 60s
-    on_demand_min_interval: 30s
+    interval: 5m
+    on_demand_min_interval: 2m
     timeout: 1s
     failure_threshold: 3
     key_prefix: omc:watchdog
-    ttl: 60s
+    ttl: 10m
 
   redis-pm:
     enabled: true
     kind: redis
-    interval: 60s
-    on_demand_min_interval: 30s
+    interval: 5m
+    on_demand_min_interval: 2m
     timeout: 1s
     failure_threshold: 3
     key_prefix: omc:watchdog
-    ttl: 60s
+    ttl: 10m
 
   postgres:
     enabled: true
     kind: postgres
-    interval: 60s
-    on_demand_min_interval: 30s
+    interval: 5m
+    on_demand_min_interval: 2m
     timeout: 2s
     failure_threshold: 3
     schema: omc_watchdog
@@ -1884,8 +1886,8 @@ synthetic_probes:
   postgres-tsdb:
     enabled: true
     kind: postgres
-    interval: 120s
-    on_demand_min_interval: 30s
+    interval: 10m
+    on_demand_min_interval: 2m
     timeout: 2s
     failure_threshold: 3
     schema: omc_watchdog
@@ -1934,7 +1936,7 @@ synthetic_probes:
 启用或禁用目标时，需要保护已有状态：
 
 - 禁用目标：停止探测和恢复，保留该目标历史状态和重启预算，不删除事件；
-- 重新启用目标：进入一个短暂 `CONFIG_RELOAD_GRACE` 窗口，默认30秒，避免用禁用期间的旧失败计数立刻触发重启；
+- 重新启用目标：进入一个短暂 `CONFIG_RELOAD_GRACE` 窗口，默认1分钟，避免用禁用期间的旧失败计数立刻触发重启；
 - 调小失败门限：只影响后续判断，不应在reload当刻立刻执行恢复，必须至少再完成一轮新配置下的探测；
 - 调大失败门限：立即按新门限抑制后续恢复；
 - 关闭 `recovery_enabled`：立即禁止新恢复动作，但不打断已经执行中的Docker restart。
@@ -1947,12 +1949,12 @@ synthetic_probes:
 
 | 配置项 | 校验规则 |
 |---|---|
-| `scan.interval` | 5s～60s，默认10s |
-| `scan.deadline` | 必须小于systemd `WatchdogSec`，默认20s |
-| HTTP/TCP探针周期 | 不小于5s，且超时必须小于周期 |
-| `/readyz`周期 | 不小于10s，默认15s |
-| 合成读写周期 | Redis/PG不小于30s，TSDB不小于60s |
-| 连续失败门限 | 1～10；若低于3，建议要求 `recovery_enabled=false` 或人工确认 |
+| `scan.interval` | 1m～15m，默认5m |
+| `scan.deadline` | 必须小于systemd `WatchdogSec`，默认60s；`WatchdogSec` 建议大于2个扫描周期、deadline和抖动之和 |
+| HTTP/TCP探针周期 | 不小于1m，默认5m，且超时必须小于周期 |
+| `/readyz`周期 | 不小于1m，默认5m |
+| 合成读写周期 | Redis/PG不小于5m，TSDB不小于10m |
+| 连续失败门限 | 1～10，默认3；若低于3，建议要求 `recovery_enabled=false` 或人工确认 |
 | 并发上限 | 必须大于0，合成读写默认保持1 |
 | 目标名 | 必须是内置目标或显式扩展目标，不能拼写错误后静默忽略 |
 | URL/端口 | 必须解析成功，禁止包含明文凭据 |
@@ -2045,7 +2047,7 @@ omcgo/cmd/watchdog/
 omcgo/internal/watchdog/
 ├── config.go              # 配置加载和严格校验
 ├── config_reload.go       # SIGHUP/fsnotify/watchdogctl reload两阶段热加载
-├── scheduler.go           # 10秒扫描、next_due和不重叠控制
+├── scheduler.go           # 5分钟扫描、next_due和不重叠控制
 ├── probe_runner.go        # 有界异步探针执行、deadline取消和结果归一化
 ├── discovery.go           # Compose label服务发现
 ├── docker_client.go       # Docker API适配
@@ -2126,9 +2128,9 @@ Docker API建议使用官方或主流稳定Go客户端，并固定与当前Docke
 | PG本体和合成事务正常，但worker `/readyz` 持续失败 | 等待客户端重连窗口后只重启worker，不重启PG |
 | 同时让app/acs/worker依赖PG失败 | 聚合为单个PG事件，不重启三个业务容器 |
 | app/acs/worker均报PG失败但PG直接探测正常 | 进入网络/客户端路径排查，不批量重启业务 |
-| NATS启动恢复4分钟 | 在5分钟宽限内不重启NATS |
+| NATS启动恢复4分钟 | 在10分钟宽限内不重启NATS |
 | 数据盘达到95% | 发critical，抑制有状态服务重启，不清理磁盘 |
-| Watchdog主循环阻塞 | 30秒内systemd停止等待并重新拉起Watchdog |
+| Watchdog主循环阻塞 | 超过systemd WatchdogSec后停止等待并重新拉起Watchdog |
 | docker.sock不可用 | 冻结容器动作并上报DockerUnavailable |
 | 发布流程持有生命周期锁 | Watchdog继续探测但不执行恢复 |
 | primary和candidate同时异常 | 不并发重启，先查共同依赖 |
@@ -2137,12 +2139,12 @@ Docker API建议使用官方或主流稳定Go客户端，并固定与当前Docke
 
 ### 19.3 生产验收指标
 
-1. 单业务进程彻底卡死后60秒内开始恢复；
+1. 单业务进程彻底卡死后，默认连续3轮失败确认，最长约15分钟内开始恢复；
 2. 容器主进程退出时不与Docker发生重复恢复；
 3. 单依赖故障不会造成业务容器重启风暴；
 4. 所有自动动作具备完整事件记录；
 5. 超出预算后能稳定进入隔离，而不是永久循环；
-6. Watchdog主循环故障30～60秒内被systemd重新拉起；
+6. Watchdog主循环故障超过 `WatchdogSec` 后被systemd重新拉起，默认约15分钟内完成自愈；
 7. 发布、迁移和人工维护期间无误重启。
 
 ---
