@@ -408,7 +408,7 @@ connection_refused | timeout | dns_error | http_5xx | invalid_body | network_unr
 
 `/watchdogz` 仍放在 metrics端口，并且不得依赖外部基础设施。第一阶段如果暂不实现该接口，Watchdog配置必须将对应 `watchdog_enabled=false`，探测结果记为 `skipped(not_implemented)`，不能因为接口不存在触发重启。Phase 2 增加内部组件心跳后，再启用该探针。
 
-#### 5.3.1 检查内容
+#### 5.3.1 注册模型和通用判定口径
 
 每个进程向内部 `RuntimeHealthRegistry` 注册关键组件：
 
@@ -422,17 +422,119 @@ type RuntimeComponent interface {
 }
 ```
 
-建议注册项：
+`/watchdogz` 不主动访问 PostgreSQL、Redis、NATS、MinIO，不制造业务请求，也不以“最近有没有业务消息”作为健康标准。它只读取进程内组件自己上报的状态和心跳。
 
-| 进程 | 必选内部组件 |
+每个组件至少暴露以下字段：
+
+| 字段 | 含义 |
 |---|---|
-| app | 主HTTP listener、gRPC listener、关键订阅者、后台调度器 |
-| acs | ACS listener、session reaper、关键事件订阅者、上传服务内部循环 |
-| worker | PM消费者、MR消费者、聚合消费者、任务消费者、关键scheduler |
+| `name` | 组件稳定名称，例如 `pm-collector`、`acs-http-listener` |
+| `enabled` | 当前配置下该组件是否启用；未启用组件不参与判定 |
+| `required` | 是否主链路必选；必选组件异常会使 `/watchdogz` 返回503 |
+| `status` | `starting`、`healthy`、`degraded`、`waiting_dependency`、`stale`、`failed`、`exited`、`stopping` |
+| `last_heartbeat` | 最近一次控制循环心跳时间 |
+| `stale_after` | 多久没有心跳判定为stale |
+| `last_error_class` | 错误分类，只记录类型，不记录敏感内容 |
+| `restart_hint` | `none`、`wait_dependency`、`restart_process`、`manual_check` |
+
+状态判定：
+
+| 状态 | HTTP影响 | 判断依据 |
+|---|---:|---|
+| `starting` | 200 | 组件处于允许启动窗口，不计异常 |
+| `healthy` | 200 | 组件控制循环正常上报心跳 |
+| `degraded` | 200 | 可选组件异常或能力降级，但主链路仍可运行 |
+| `waiting_dependency` | 200 | 组件循环还活着，正在等待外部依赖恢复；根因交给 `/readyz` 和基础服务探针判断 |
+| `stale` | 必选组件503，可选组件200 | 超过 `stale_after` 未上报心跳 |
+| `failed` | 必选组件503，可选组件200 | 组件捕获到不可自恢复错误或panic |
+| `exited` | 必选组件503，可选组件200 | 组件goroutine/runner非预期退出 |
+| `stopping` | 503，但Watchdog按 `expected_failure` 处理 | 进程正在优雅退出，不触发新重启 |
 
 组件心跳代表“控制循环仍完成一次周期”，不能简单使用“最后一条业务消息时间”。无业务流量时也必须能健康。
 
-#### 5.3.2 响应语义
+下列表格给出默认profile建议。实际 `enabled`、`required`、`stale_after` 和是否触发自动恢复仍应支持配置覆盖，并随Watchdog配置热加载生效。
+
+#### 5.3.2 `app` 的 `/watchdogz` 检查项
+
+`app` 是管理面REST API和主要控制面入口。它的 `/watchdogz` 重点证明“主HTTP入口和关键后台控制循环还在运行”，外部依赖仍由 `/readyz` 判断。
+
+| 组件 | 默认级别 | 心跳/状态来源 | 默认失效门限 | 故障判断依据 | 故障后处理 |
+|---|---|---|---:|---|---|
+| `app-main-http-listener` | 必选 | 主HTTP server启动成功、未收到非预期退出错误；外部TCP探针复核 `127.0.0.1:18081` 或容器 `:8081` | 30s或立即failed | listener goroutine退出、端口连续失败、启动后未进入serving | `/watchdogz` 连续失败且TCP复核失败时恢复 `app` |
+| `device-status-reconciler` | 必选 | 设备在线/离线状态后台扫描循环每轮心跳 | 120s | goroutine退出、panic、连续超过2个扫描周期未心跳 | 依赖健康时恢复 `app`；依赖失败时归入依赖事件 |
+| `alarm-reconciler` | 必选 | 告警状态reconcile循环心跳 | 120s | reconcile循环停止、panic或长期不调度 | 依赖健康时恢复 `app` |
+| `alarm-sync-processor` | 必选 | 告警同步事件处理器启动成功，处理循环或空闲tick心跳 | 90s | 订阅处理器退出、panic、长期无空闲心跳 | 优先确认NATS/Redis；依赖健康时恢复 `app` |
+| `topology-device-sync` | 条件必选 | 拓扑设备同步服务循环心跳；仅 `topology.device_sync.enabled=true` 时启用 | `max(2×周期, 5m)` | 同步循环退出或超过门限未调度 | 若配置为必选则恢复 `app`，否则只degraded |
+| `mml-scheduler` | 条件必选 | MML定时任务scheduler tick心跳 | 90s | scheduler退出、panic、tick停滞 | 依赖健康时恢复 `app` |
+| `online-index-pruner` | 可选 | 在线索引裁剪循环心跳 | 120s | pruner退出或长期未执行 | 只上报degraded，默认不重启 |
+| `log-rotation-watcher` | 可选 | 日志轮转配置watcher心跳 | 120s | watcher退出或配置刷新循环停滞 | 只上报degraded |
+
+判断依据：
+
+- 如果 `app-main-http-listener` 失败，同时 `/healthz=200`，说明metrics server活着但主入口失活，可以恢复 `app`；
+- 如果后台组件显示 `waiting_dependency`，且 `/readyz` 或基础服务探针也失败，不按 `/watchdogz` 重启 `app`；
+- 可选组件异常只让 `/watchdogz.status=degraded`，不触发自动恢复。
+
+#### 5.3.3 `acs` / `acs-candidate` 的 `/watchdogz` 检查项
+
+`acs` 和 `acs-candidate` 使用同一套组件定义。区别是正式 `acs` 有宿主端口 `7557`，`acs-candidate` 主要通过容器网络IP探测。
+
+| 组件 | 默认级别 | 心跳/状态来源 | 默认失效门限 | 故障判断依据 | 故障后处理 |
+|---|---|---|---:|---|---|
+| `acs-http-listener` | 必选 | ACS CWMP HTTP server启动成功、未非预期退出；TCP复核 `:7557` | 30s或立即failed | listener退出、端口连续不可连、启动后未进入serving | 触发对应ACS实例恢复；primary/candidate互斥 |
+| `session-reaper` | 必选 | 会话清理/超时管理循环心跳 | 90s | session清理循环退出、panic、心跳过期 | 依赖健康时恢复该ACS实例 |
+| `stun-udp-server` | 条件必选 | STUN UDP server serve循环心跳；仅 `stun.enabled=true` 时启用 | 60s或立即failed | UDP server启动失败、serve循环退出 | 若启用STUN则恢复ACS；未启用则skipped |
+| `upload-handler` | 条件必选 | 上传handler装配成功，内部panic计数和请求处理保护状态 | 60s | handler未装配、内部保护器进入failed、panic不可恢复 | 依赖健康时恢复ACS |
+| `backpressure-watchdog` | 条件必选 | PM上传背压watchdog采样循环心跳 | 90s | 采样循环退出或长期不刷新阈值 | 恢复ACS；若只是MinIO/TSDB不可用则归入依赖事件 |
+| `pm-queue-health-sampler` | 可选 | PM队列健康采样循环心跳 | 90s | 采样循环退出或心跳过期 | 只上报degraded；不单独重启 |
+| `trace-capture-hook` | 条件可选 | TR069 trace service和白名单缓存循环心跳；仅trace启用时检查 | 120s | trace服务退出、白名单缓存停止且无poll fallback | 默认degraded；按配置可设为必选 |
+| `log-rotation-watcher` | 可选 | ACS日志轮转配置watcher心跳 | 120s | watcher退出或配置刷新循环停滞 | 只上报degraded |
+
+判断依据：
+
+- `acs-http-listener` 失败是主链路失效，连续达到门限后可恢复对应ACS容器；
+- `stun-udp-server` 只有在STUN配置启用时才参与判定；
+- 上传、背压、trace组件遇到 MinIO/TSDB/NATS 不可用时，应上报 `waiting_dependency`，由 `/readyz` 和依赖探针决定根因，不直接重启ACS；
+- primary和candidate同时 `/watchdogz` 异常时，先查共享依赖和宿主/Docker状态，不并发恢复两个实例。
+
+#### 5.3.4 `worker` 的 `/watchdogz` 检查项
+
+`worker` 没有主业务HTTP入口，主要价值来自内部消费者和调度器。因此 `worker /watchdogz` 是最重要的内部有效性探针。
+
+| 组件 | 默认级别 | 心跳/状态来源 | 默认失效门限 | 故障判断依据 | 故障后处理 |
+|---|---|---|---:|---|---|
+| `pm-collector` | 必选 | PM文件NATS订阅成功；处理回调或空闲监控tick心跳 | 90s | 订阅未建立、consumer退出、panic、心跳过期 | 依赖健康且连续失败达到门限后恢复 `worker` |
+| `mr-collector` | 必选 | MR文件NATS订阅成功；处理回调或空闲监控tick心跳 | 90s | 订阅未建立、consumer退出、panic、心跳过期 | 依赖健康时恢复 `worker` |
+| `event-outbox-relay` | 必选 | 通用事件outbox relay循环心跳 | 60s | relay goroutine退出、panic或长期未轮询 | 依赖健康时恢复 `worker` |
+| `device-access-workers` | 条件必选 | reevaluation、policy、GPS probe、outbox dispatcher循环心跳 | 90s | 任一必选consumer退出，或dispatch/recovery/deadline tick长期不执行 | 依赖健康时恢复 `worker` |
+| `pm-aggregation-pipeline` | 条件必选 | PM聚合runner、hourly触发器、stream consumer控制循环心跳；仅聚合启用时检查 | 120s | runner退出、cron调度器停止、stream consumer停滞 | 依赖健康时恢复；长窗口任务不能按任务完成时间判死 |
+| `backup-scheduler-reaper` | 条件必选 | 周期备份scheduler和task reaper循环心跳 | 120s | scheduler/reaper退出或长期未tick | 按配置决定恢复或degraded |
+| `trace-capture-consumer` | 条件可选 | trace capture订阅、sweeper、exporter心跳；仅trace启用时检查 | 120s | capture consumer退出、sweeper长期不运行 | 默认degraded；按配置可设为必选 |
+| `retention-cleanup-crons` | 可选 | PM retention、日志清理、字典同步、回收站等cron注册和最近tick | `max(2×周期, 24h)` | cron未注册或超过周期未触发 | 只上报degraded，默认不重启 |
+| `tsdb-shadow-dim-sync` | 条件可选 | 主库维度同步到TSDB的周期循环心跳 | 180s | sync runner退出或长期未tick | 默认degraded；若配置为必选则恢复 |
+| `pending-queue-restore` | 启动期组件 | 启动期pending任务队列恢复完成/失败状态 | 启动宽限内 | 启动恢复失败只记录错误，不代表主循环失活 | 只告警，不触发重启 |
+
+判断依据：
+
+- PM/MR collector没有业务消息时也必须通过空闲tick更新心跳，不能因为“没文件上传”误判stale；
+- NATS断开但consumer retry循环仍在运行时，状态应为 `waiting_dependency`，由 `/readyz` 和NATS直接探针判断根因；
+- PM聚合、retention、backup这类长周期任务必须以调度循环心跳判定，不能以“某个小时桶是否完成”作为 `/watchdogz` 失败依据；
+- 多个worker内部组件同时 `waiting_dependency`，且 `/readyz` 指向同一依赖时，不重启worker，先处理共享依赖。
+
+#### 5.3.5 故障后的判断矩阵
+
+| `/watchdogz` 结果 | `/readyz` / 依赖探针 | 判断 | Watchdog动作 |
+|---|---|---|---|
+| 必选组件 `stale/failed/exited` | 依赖健康 | 进程内部关键循环失活 | 连续达到门限后恢复该业务容器 |
+| 必选组件 `waiting_dependency` | 对应依赖失败 | 外部依赖故障，不是内部循环死亡 | 进入共享依赖/基础服务分析，不重启业务 |
+| 可选组件 `degraded/stale` | 依赖健康 | 非主链路降级 | 上报warning，不自动重启 |
+| `/watchdogz` 404 | 配置 `watchdog_enabled=false` | 探针未实现或未启用 | 记为 `skipped(not_implemented)` |
+| `/watchdogz` 404 | 配置 `watchdog_enabled=true` | 配置与版本不匹配 | 记为配置/版本错误，默认不立即重启，要求人工修正配置 |
+| `/watchdogz` 超时 | `/healthz` 也失败 | metrics端口或进程整体异常 | 按 `/healthz` 进程故障路径处理 |
+| `/watchdogz` 503 | 宿主资源critical | 宿主状态不适合恢复 | 冻结恢复，只上报 |
+| `/watchdogz` 503 | 正在STARTING/STOPPING/RECOVERING | 预期窗口内失败 | 记为 `expected_failure`，不累加异常 |
+
+#### 5.3.6 响应语义
 
 ```json
 {
@@ -441,10 +543,14 @@ type RuntimeComponent interface {
   "components": [
     {
       "name": "pm-consumer",
+      "enabled": true,
       "required": true,
       "status": "stale",
       "last_heartbeat": "2026-08-25T10:10:00+08:00",
-      "stale_for": "95s"
+      "stale_for": "95s",
+      "stale_after": "90s",
+      "last_error_class": "control_loop_stale",
+      "restart_hint": "restart_process"
     }
   ]
 }
@@ -462,7 +568,7 @@ type RuntimeComponent interface {
 
 默认内部心跳每10秒更新，连续6个周期未更新（60秒）才判定 stale。不同组件可配置覆盖值，长周期任务必须以控制循环心跳而非任务完成时间判定。
 
-#### 5.3.3 自动恢复条件
+#### 5.3.7 自动恢复条件
 
 `/watchdogz=503` 连续3次、进程不处于启动/停止/维护状态、宿主资源不过载、共享依赖没有同时故障时，可以恢复该业务容器。若配置中 `watchdog_enabled=false`，该探针不参与异常计数和恢复判定。
 
@@ -1938,6 +2044,11 @@ omcgo/internal/watchdog/
 ├── metrics.go             # Prometheus指标
 ├── eventlog.go            # 结构化审计事件
 └── server.go              # Watchdog自身health/metrics/CLI socket
+
+omcgo/internal/core/runtimehealth/
+├── registry.go            # 业务进程内 RuntimeHealthRegistry
+├── component.go           # 组件状态、心跳、stale判定和错误分类
+└── handler.go             # /watchdogz HTTP handler
 ```
 
 Docker API建议使用官方或主流稳定Go客户端，并固定与当前Docker Engine兼容的API版本。恢复执行器不得使用 `sh -c` 拼接服务名。
@@ -1968,6 +2079,10 @@ Docker API建议使用官方或主流稳定Go客户端，并固定与当前Docke
 - `/readyz` 失败不立即重启业务服务，基础服务健康且重连窗口耗尽后才允许恢复对应业务进程；
 - Redis合成 `SET/GET/DEL` 成功、失败和删除失败分类；
 - PostgreSQL合成事务成功、写失败、读不一致和锁超时分类；
+- `/watchdogz` 必选组件 stale/failed/exited 时返回503；
+- `/watchdogz` 可选组件 degraded 时返回200并标记degraded；
+- `/watchdogz` 组件 `waiting_dependency` 时不触发内部故障恢复；
+- 当前版本未实现 `/watchdogz` 且 `watchdog_enabled=false` 时，Watchdog不探测、不计数；
 - 宿主critical抑制恢复；
 - 生命周期锁和维护模式；
 - ACS互斥恢复；
@@ -2029,6 +2144,7 @@ Docker API建议使用官方或主流稳定Go客户端，并固定与当前Docke
 ### Phase 2：内部有效性与共享依赖
 
 - 增加 `/watchdogz` 和关键组件心跳，并把对应 `watchdog_enabled` 切为true；
+- 为 `app`、`acs/acs-candidate`、`worker` 接入 RuntimeHealthRegistry，并按本设计注册必选/可选组件；
 - 增加PG、Redis、NATS、MinIO直接探测；
 - 实现共享依赖故障聚合；
 - 实现基础服务健康但业务依赖路径异常时的业务进程恢复；
