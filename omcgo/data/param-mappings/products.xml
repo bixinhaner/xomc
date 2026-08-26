@@ -245,7 +245,8 @@
     <indicator deviceType="" platform="" />
     <alarm neType="IMSCORE" />
     <patterns>
-      <pattern globalOrder="61">^ImsCore$</pattern>
+      <!-- 核心网设备 ProductClass 前后可能带其他字符串（如 CoreNetwork/ImsCore），放宽为包含匹配 -->
+      <pattern globalOrder="61">(?i)ImsCore</pattern>
     </patterns>
   </product>
   <!-- ============ 18. UPS 产品（电源设备，ProductClass 以 UPS 开头） ============ -->

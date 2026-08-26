@@ -14,7 +14,10 @@ const (
 )
 
 const upsProductClassPredicate = `COALESCE(d.product_class, '') LIKE 'UPS%'`
-const coreNetworkProductClassPredicate = `UPPER(COALESCE(d.product_class, '')) = 'IMSCORE'`
+// coreNetworkProductClassPredicate 与 IsCoreNetworkProductClass 保持同一语义：
+// ProductClass 包含 ImsCore（大小写不敏感）即核心网设备。核心网上报的 ProductClass
+// 前后可能带其他字符串（如 CoreNetwork/ImsCore），不能做全等匹配。
+const coreNetworkProductClassPredicate = `UPPER(COALESCE(d.product_class, '')) LIKE '%IMSCORE%'`
 
 func normalizeDeviceListDeviceType(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
@@ -52,7 +55,7 @@ func applyDeviceListDeviceTypeFilter(b sq.SelectBuilder, value string) sq.Select
 }
 
 func deviceListDeviceTypeFromProductClass(productClass string) string {
-	if strings.EqualFold(strings.TrimSpace(productClass), "ImsCore") {
+	if IsCoreNetworkProductClass(productClass) {
 		return DeviceListDeviceTypeCoreNetwork
 	}
 	if isUPSProductClass(productClass) {
@@ -61,9 +64,11 @@ func deviceListDeviceTypeFromProductClass(productClass string) string {
 	return DeviceListDeviceTypeBaseStation
 }
 
-// IsCoreNetworkProductClass is the shared ImsCore discriminator.
+// IsCoreNetworkProductClass is the shared ImsCore discriminator:
+// case-insensitive containment, so prefixed/suffixed classes such as
+// "CoreNetwork/ImsCore" still classify as core-network devices.
 func IsCoreNetworkProductClass(productClass string) bool {
-	return strings.EqualFold(strings.TrimSpace(productClass), "ImsCore")
+	return strings.Contains(strings.ToUpper(strings.TrimSpace(productClass)), "IMSCORE")
 }
 
 // IsUPSProductClass is the shared UPS discriminator. UPS is intentionally
