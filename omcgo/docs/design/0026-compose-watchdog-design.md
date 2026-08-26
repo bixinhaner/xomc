@@ -371,6 +371,12 @@ global:
   max_parallel_recoveries: 1
   hot_reload: true
 
+logging:
+  level: info
+  format: json
+  per_probe_result: true
+  redact_sensitive: true
+
 dependency_verify:
   enabled: true
   triggers: [readyz_failure]
@@ -554,6 +560,15 @@ targets:
 | `watchdog_self.systemd_notify` | 是否向 systemd 发送 `READY=1` 和 `WATCHDOG=1` |
 | `watchdog_self.health_addr` | Watchdog 自身本地健康接口监听地址 |
 
+日志配置：
+
+| 配置项 | 含义 |
+|---|---|
+| `logging.level` | 日志级别，第一阶段默认 `info`；失败、重启和配置错误需要打印 `warn` 或 `error` |
+| `logging.format` | 日志格式，建议固定为 `json`，方便后期按字段检索 |
+| `logging.per_probe_result` | 是否打印每个探针的检测结果；默认 `true`，因为检测周期是5分钟，日志量可控且便于定位 |
+| `logging.redact_sensitive` | 是否脱敏敏感信息；默认 `true`，日志中不能打印密码、token、完整DSN、Redis值、探测token等 |
+
 基础服务真实验证配置：
 
 | 配置项 | 含义 |
@@ -641,7 +656,8 @@ Watchdog 支持以下热加载方式：
 - 修改检测周期、失败次数、服务开关、恢复开关可热生效；
 - 修改 systemd unit、监听地址、Docker socket 路径等基础运行参数，需要重启 Watchdog；
 - 关闭某个服务检测后，该服务不再计数、不再恢复；
-- 关闭 `recovery_enabled` 后，该服务继续检测和上报，但不自动重启。
+- 关闭 `recovery_enabled` 后，该服务继续检测和上报，但不自动重启；
+- 修改日志级别、是否打印单探针结果等日志配置可热生效。
 
 ---
 
@@ -690,7 +706,129 @@ GET http://127.0.0.1:19100/healthz
 
 ## 9. 日志、状态和告警
 
-第一阶段只需要保留必要信息，方便排查和审计：
+第一阶段日志要打印得足够详细，方便后期定位问题。建议统一写入 journald，并使用结构化 JSON 格式。
+
+### 9.1 日志原则
+
+1. 每一轮检测生成一个 `round_id`，本轮所有检测、判断和恢复动作都带上这个 `round_id`；
+2. 每个服务、每个已启用探针都要记录一次结果，包括成功、失败、超时和跳过原因；
+3. 失败日志必须带上连续失败次数、门限值、当前状态和下一步动作；
+4. 自动重启前必须记录为什么重启，自动重启后必须记录执行结果；
+5. 启动等待期、冷却期、超预算、配置关闭等“不重启”的情况也要记录原因；
+6. 真实读写验证必须记录验证对象、验证方式和成功/失败结果；
+7. 日志不能打印敏感信息，包括密码、完整连接串、HTTP鉴权头、Redis值、SQL参数值、探测token。
+
+### 9.2 关键日志事件
+
+| 事件 | 何时打印 | 关键字段 |
+|---|---|---|
+| `watchdog_start` | Watchdog 启动完成 | `config_path`、`targets_count`、`scan_interval` |
+| `config_reload` | 配置热加载成功或失败 | `result`、`reason`、`changed_fields` |
+| `scan_round_start` | 每轮检测开始 | `round_id`、`scan_interval`、`targets_count` |
+| `probe_result` | 每个探针执行完成 | `target`、`check`、`result`、`duration_ms`、`failure_count`、`threshold` |
+| `dependency_verify_result` | 业务服务报依赖异常后，真实读写验证完成 | `business_target`、`dependency`、`mode`、`result`、`duration_ms` |
+| `state_transition` | 服务状态变化 | `target`、`from`、`to`、`reason` |
+| `recovery_decision` | 判断是否自动恢复 | `target`、`decision`、`reason`、`failure_count`、`threshold` |
+| `restart_start` | 开始重启容器 | `target`、`container`、`reason` |
+| `restart_result` | 重启执行完成 | `target`、`result`、`duration_ms`、`startup_grace_until` |
+| `scan_round_finish` | 每轮检测结束 | `round_id`、`duration_ms`、`healthy_count`、`unhealthy_count`、`restarted_count` |
+| `watchdog_self_notify` | 向 systemd 发送心跳 | `result` |
+
+### 9.3 单条日志建议字段
+
+| 字段 | 说明 |
+|---|---|
+| `ts` | 日志时间 |
+| `level` | `info`、`warn`、`error` |
+| `event` | 日志事件名 |
+| `round_id` | 检测轮次ID |
+| `target` | 服务名，例如 `app`、`postgres` |
+| `kind` | `business` 或 `dependency` |
+| `check` | 探针类型，例如 `docker`、`healthz`、`watchdogz`、`tcp`、`postgres`、`redis` |
+| `result` | `success`、`fail`、`timeout`、`skipped` |
+| `duration_ms` | 本次检测耗时 |
+| `failure_count` | 当前连续失败次数 |
+| `threshold` | 当前服务失败门限 |
+| `state` | 服务当前状态 |
+| `reason` | 失败原因或跳过原因 |
+| `next_action` | 下一步动作，例如 `observe`、`restart_candidate`、`restart`、`skip` |
+
+示例：单个探针失败但未达到门限。
+
+```json
+{
+  "ts": "2026-08-26T10:00:03+08:00",
+  "level": "warn",
+  "event": "probe_result",
+  "round_id": "20260826-100000",
+  "target": "app",
+  "kind": "business",
+  "check": "healthz",
+  "result": "fail",
+  "http_status": 503,
+  "duration_ms": 238,
+  "failure_count": 2,
+  "threshold": 3,
+  "state": "SUSPECT",
+  "next_action": "observe"
+}
+```
+
+示例：业务服务报告 PostgreSQL 异常后，真实读写验证成功。
+
+```json
+{
+  "ts": "2026-08-26T10:00:06+08:00",
+  "level": "info",
+  "event": "dependency_verify_result",
+  "round_id": "20260826-100000",
+  "business_target": "app",
+  "dependency": "postgres",
+  "mode": "sql_insert_select_delete",
+  "result": "success",
+  "duration_ms": 81,
+  "next_action": "do_not_restart_dependency"
+}
+```
+
+示例：达到门限并开始重启。
+
+```json
+{
+  "ts": "2026-08-26T10:15:02+08:00",
+  "level": "warn",
+  "event": "recovery_decision",
+  "round_id": "20260826-101500",
+  "target": "acs",
+  "decision": "restart",
+  "reason": "watchdogz_failed_threshold_reached",
+  "failure_count": 3,
+  "threshold": 3,
+  "cooldown": false,
+  "restart_budget_remaining": 1
+}
+```
+
+示例：处于启动等待期，因此本轮失败不计数。
+
+```json
+{
+  "ts": "2026-08-26T10:20:02+08:00",
+  "level": "info",
+  "event": "probe_result",
+  "round_id": "20260826-102000",
+  "target": "worker",
+  "check": "healthz",
+  "result": "skipped",
+  "reason": "startup_grace",
+  "startup_grace_until": "2026-08-26T10:25:00+08:00",
+  "next_action": "wait"
+}
+```
+
+### 9.4 状态文件和指标
+
+状态文件只保存恢复判断需要的状态，日志保存详细过程：
 
 | 信息 | 说明 |
 |---|---|
@@ -707,7 +845,7 @@ GET http://127.0.0.1:19100/healthz
 /opt/omc/run/watchdog/events.jsonl
 ```
 
-日志写入 journald，同时可以暴露少量 Prometheus 指标：
+同时可以暴露少量 Prometheus 指标：
 
 - `omc_watchdog_target_status`；
 - `omc_watchdog_probe_failures_total`；
@@ -730,9 +868,10 @@ Prometheus 只负责展示和告警，不负责直接执行重启。
 8. `app`、`acs`、`acs-candidate`、`worker` 支持 `/watchdogz`，只检查必要业务组件；
 9. 业务服务报告基础依赖异常时，Watchdog 会对对应基础服务执行真实新增、查询、删除或等价闭环验证；
 10. 基础服务真实验证成功时，不重启基础服务；真实验证连续失败达到门限后，才允许进入基础服务重启候选；
-11. 配置热加载成功后下一轮检测生效；
-12. 配置热加载失败时旧配置继续生效；
-13. Watchdog 进程退出或主循环卡死后，systemd 能自动重启 Watchdog；
-14. Watchdog 重启后不丢失冷却期、失败次数和重启预算。
+11. 每轮检测、每个探针、状态变化、重启判断和重启结果都有结构化日志，并可通过 `round_id` 串联；
+12. 配置热加载成功后下一轮检测生效；
+13. 配置热加载失败时旧配置继续生效；
+14. Watchdog 进程退出或主循环卡死后，systemd 能自动重启 Watchdog；
+15. Watchdog 重启后不丢失冷却期、失败次数和重启预算。
 
 ---
