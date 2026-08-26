@@ -12,7 +12,7 @@
 
 本期 Watchdog 只做第一阶段最核心的事情：定期检查 OMC 的主要业务进程和基础依赖服务是否还活着；如果连续多轮检查都失败，就尝试重启对应服务；重启后给服务一段恢复等待时间，在这段时间内检测失败不再重复计数，避免刚重启就被再次重启。
 
-它不是监控平台，也不是容量治理工具。Prometheus 继续负责指标、趋势和告警；Watchdog 只负责本机 Docker Compose 服务的简单自愈。
+它不是监控平台，也不是容量治理工具。Prometheus 继续负责指标、趋势和告警；Watchdog 只负责本机 Docker Compose 服务的自愈。
 
 第一阶段只满足四个目标：
 
@@ -422,7 +422,78 @@ targets:
     enabled: false
 ```
 
-### 7.1 热加载规则
+### 7.1 配置项说明
+
+以下说明对应上面的 YAML 样例。
+
+全局配置：
+
+| 配置项 | 含义 |
+|---|---|
+| `version` | 配置文件版本，便于后续兼容升级 |
+| `global.scan_interval` | 全局默认检测周期，例如 `5m` 表示每5分钟检测一轮 |
+| `global.default_failure_threshold` | 默认连续失败门限，例如 `3` 表示连续3轮失败后才进入重启候选 |
+| `global.default_startup_grace` | 默认启动等待时间，服务重启后这段时间内检测失败不计入新异常 |
+| `global.default_cooldown` | 默认冷却时间，服务刚恢复后这段时间内不重复自动重启 |
+| `global.max_parallel_recoveries` | 同一时刻最多允许几个自动恢复动作，第一阶段固定建议为 `1` |
+| `global.hot_reload` | 是否启用配置热加载 |
+| `watchdog_self.systemd_notify` | 是否向 systemd 发送 `READY=1` 和 `WATCHDOG=1` |
+| `watchdog_self.health_addr` | Watchdog 自身本地健康接口监听地址 |
+
+服务级配置：
+
+| 配置项 | 含义 |
+|---|---|
+| `targets.<service>` | 被检测服务名，例如 `app`、`acs`、`redis-core` |
+| `enabled` | 是否检测该服务；为 `false` 时不检测、不计数、不恢复 |
+| `recovery_enabled` | 是否允许自动重启；为 `false` 时仍可检测和告警，但不自动恢复 |
+| `kind` | 服务类型，`business` 表示主要业务服务，`dependency` 表示基础依赖服务 |
+| `interval` | 当前服务自己的检测周期；不配置时使用 `global.scan_interval` |
+| `failure_threshold` | 当前服务连续失败几轮后进入重启候选；不配置时使用全局默认值 |
+| `startup_grace` | 当前服务重启后的启动等待时间；等待期内失败不累计 |
+| `cooldown` | 当前服务恢复后的冷却时间；冷却期内继续检测，但不重复自动重启 |
+| `restart_budget.count` | 一个预算窗口内最多允许自动重启几次 |
+| `restart_budget.window` | 重启预算窗口，例如 `2h` 表示2小时内最多重启指定次数 |
+
+检查项配置：
+
+| 配置项 | 含义 |
+|---|---|
+| `checks.docker` | 是否检查 Docker 容器状态，包括容器是否存在、是否 running |
+| `checks.http.enabled` | 是否启用 HTTP 检查 |
+| `checks.http.url` | HTTP 检查地址，例如 `web` 的管理入口 |
+| `checks.healthz.enabled` | 是否启用 `/healthz` 检查 |
+| `checks.healthz.url` | `/healthz` 地址，用于判断进程基本存活 |
+| `checks.tcp.enabled` | 是否启用 TCP 端口检查 |
+| `checks.tcp.address` | TCP 检查地址，例如 `127.0.0.1:7557` |
+| `checks.watchdogz.enabled` | 是否启用 `/watchdogz` 检查 |
+| `checks.watchdogz.url` | `/watchdogz` 地址，用于检查必要业务组件是否仍在运行 |
+| `checks.watchdogz.required_components` | `/watchdogz` 必须返回正常的组件列表，只检查这里列出的必要组件 |
+| `checks.readyz.enabled` | 是否启用 `/readyz` 检查 |
+| `checks.readyz.url` | `/readyz` 地址，用于辅助判断依赖是否异常 |
+| `checks.readyz.recovery_trigger` | 是否允许 `/readyz` 直接触发重启；第一阶段默认 `false` |
+| `checks.postgres.enabled` | 是否启用 PostgreSQL 轻量检查 |
+| `checks.redis.enabled` | 是否启用 Redis 轻量检查 |
+| `timeout` | 单次检查超时时间；超时只影响本轮结果，不代表立即重启 |
+
+配置关闭示例：
+
+```yaml
+targets:
+  worker:
+    enabled: true
+    recovery_enabled: false
+
+  acs-candidate:
+    enabled: false
+```
+
+含义：
+
+- `worker` 仍然检测和告警，但不会自动重启；
+- `acs-candidate` 完全不检测，也不会自动重启。
+
+### 7.2 热加载规则
 
 Watchdog 支持以下热加载方式：
 
