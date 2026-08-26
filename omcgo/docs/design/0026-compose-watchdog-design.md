@@ -50,7 +50,7 @@ Prometheus、Alertmanager、Grafana、Loki、Tempo、OpenTelemetry Collector、e
 ### 2.1 设计目标
 
 1. 发现业务进程退出、OOM、崩溃循环、HTTP失活和内部关键循环失活；
-2. 区分进程故障、外部依赖故障、宿主资源故障和 Docker daemon 故障；
+2. 区分进程故障、外部依赖故障、宿主资源风险和 Docker daemon 故障，其中宿主资源只用于恢复动作门禁；
 3. 对明确、可恢复的故障执行有限、错峰、可审计的自动恢复；
 4. 多个业务进程同时异常时聚合共同依赖，优先恢复根因服务；
 5. 有状态基础服务采用比无状态服务更保守的恢复策略；
@@ -67,7 +67,8 @@ Prometheus、Alertmanager、Grafana、Loki、Tempo、OpenTelemetry Collector、e
 5. 不实现“每隔固定时间重启全栈”的计划任务；
 6. 不把 `acs-candidate` 视为已经自动接管正式 ACS 流量的 HA 实例；
 7. 不处理宿主机断电、内核不可用、systemd整体不可用等超出本机用户态Watchdog能力范围的故障；
-8. 不对 Prometheus、Alertmanager、Grafana、Loki、Tempo、OpenTelemetry Collector、exporters 等非核心组件做自动恢复。
+8. 不治理宿主 CPU、内存、磁盘、inode、I/O PSI 等服务器资源问题；这些信号只作为自动恢复前的安全门禁和告警输入；
+9. 不对 Prometheus、Alertmanager、Grafana、Loki、Tempo、OpenTelemetry Collector、exporters 等非核心组件做自动恢复。
 
 ---
 
@@ -129,7 +130,7 @@ Prometheus当前每15秒抓取一次 `app`、`acs`、`acs-candidate`、`worker` 
                       ├── Docker Engine API（Unix socket）
                       ├── /healthz、/readyz、/watchdogz
                       ├── TCP/HTTP 业务入口探测
-                      ├── 宿主 CPU/内存/磁盘/inode/I/O PSI
+                      ├── 宿主资源安全门禁（CPU/内存/磁盘/inode/I/O PSI）
                       ├── 基础服务直接探测
                       ├── 生命周期锁与维护状态
                       └── 恢复执行器
@@ -161,7 +162,7 @@ Prometheus当前每15秒抓取一次 `app`、`acs`、`acs-candidate`、`worker` 
 主要考虑点：
 
 1. Docker daemon 或容器网络故障时，容器内 Watchdog无法可靠工作；
-2. 宿主进程可以访问 Docker Unix socket、systemd和宿主资源；
+2. 宿主进程可以访问 Docker Unix socket、systemd，并读取必要宿主资源信号作为恢复动作门禁；
 3. systemd能够监管 Watchdog自身。
 
 更具体地说，容器化主 Watchdog存在以下问题：
@@ -172,7 +173,7 @@ Prometheus当前每15秒抓取一次 `app`、`acs`、`acs-candidate`、`worker` 
 | Compose生命周期耦合 | 发布、升级或 `docker compose down/up` 可能把Watchdog一起停掉，正好失去监管 |
 | 无法可靠恢复Docker自身 | 容器依赖Docker daemon存活，不能在Docker不可用时检查 `docker.service` 或执行受控恢复 |
 | systemd喂狗不完整 | 容器内进程难以作为宿主 systemd `Type=notify` 服务被可靠监管 |
-| 宿主资源视角不完整 | 磁盘、inode、I/O PSI、只读挂载、systemd状态和宿主journal需要宿主视角 |
+| 宿主资源门禁不完整 | 磁盘、inode、I/O PSI、只读挂载、systemd状态和宿主journal需要宿主视角；这些信号只用于抑制误重启，不用于自动治理宿主机 |
 | 权限并未更安全 | 挂载 `/var/run/docker.sock` 后，容器基本具备宿主root级Docker控制能力，隔离收益有限 |
 | 状态持久化易丢 | 如果随Compose重建，冷却期、重启预算、隔离状态容易被误清空 |
 
@@ -180,7 +181,7 @@ Prometheus当前每15秒抓取一次 `app`、`acs`、`acs-candidate`、`worker` 
 
 | 层级 | 运行位置 | 职责 |
 |---|---|---|
-| `omc-watchdog` 主进程 | 宿主机 systemd | Docker控制面、宿主资源、恢复动作、预算和隔离 |
+| `omc-watchdog` 主进程 | 宿主机 systemd | Docker控制面、宿主资源安全门禁、恢复动作、预算和隔离 |
 | Prometheus/Alertmanager | Docker Compose | 指标采集、趋势、告警通知 |
 | 应用内部 `/healthz`、`/readyz`、`/watchdogz` | 业务容器内 | 暴露进程和内部组件状态 |
 | `web` Nginx入口 | 业务容器内 | 暴露前端静态资源、管理面入口和ACS入口代理 |
@@ -291,7 +292,7 @@ healthcheck:
 | 连续结果 | 状态 | 上报 | 自动动作 |
 |---|---|---|---|
 | 1次失败 | `SUSPECT` | 指标累加，不发告警 | 无 |
-| 2次失败 | `SUSPECT` | journald `warning` | 立即补充Docker状态、TCP和宿主资源探测 |
+| 2次失败 | `SUSPECT` | journald `warning` | 立即补充Docker状态、TCP和宿主资源门禁检查 |
 | 3次失败（约30秒） | `PROCESS_UNHEALTHY` | `OMCWatchdogProcessUnhealthy` warning事件 | 满足安全条件时恢复该单个容器 |
 | 持续2分钟 | `PROCESS_FAILED` | Prometheus critical告警 | 若仍在预算内继续有界恢复，否则隔离 |
 | 超出重启预算 | `QUARANTINED` | `OMCWatchdogTargetQuarantined` critical | 停止自动重启，等待人工处理 |
@@ -734,7 +735,7 @@ HEALTHY ──单次失败──> SUSPECT
 
 - `MAINTENANCE`：人工或发布流程暂停自动动作；
 - `SHARED_INCIDENT`：多个业务服务指向同一根因；
-- `HOST_DEGRADED`：宿主资源故障，抑制无意义重启；
+- `HOST_DEGRADED`：宿主资源达到动作抑制门限，只冻结容器恢复和上报，不治理宿主机；
 - `DOCKER_UNAVAILABLE`：Docker控制面不可用，冻结容器动作。
 
 状态持久化到 `/opt/omc/run/watchdog/state.json`，使用临时文件 + `fsync` + atomic rename更新。Watchdog重启不能清空重启预算和隔离状态。
@@ -794,7 +795,7 @@ flowchart TD
 |---|---|---|
 | 读取配置、持久状态、维护窗口 | 同步，每轮一次 | 是后续判断输入，必须先完成 |
 | Docker `_ping`、容器list、目标Inspect | 同步前置，每轮一次 | Docker状态不可信时，不能贸然执行容器恢复 |
-| 宿主资源动作抑制检查 | 同步前置，每轮一次 | 磁盘、OOM、只读文件系统等会改变恢复策略 |
+| 宿主资源动作抑制检查 | 同步前置，每轮一次 | 只判断“此刻能不能安全重启容器”；不清理磁盘、不杀进程、不调整服务器资源 |
 | HTTP/TCP/`/healthz`/`/readyz`/`/watchdogz` | 异步，有并发上限 | 都是只读探测，串行会拉长扫描周期 |
 | 基础服务轻量探测 | 异步，有独立并发上限 | 与业务探针隔离，避免业务探针过多影响根因确认 |
 | 合成读写探针 | 异步，但低频且单并发 | 有轻微写入副作用，必须限流 |
@@ -833,7 +834,7 @@ flowchart TD
 | Redis合成 `SET/GET/DEL` | 60s或按需 | 1s | 异步单并发 | 3次 | 用于确认读写路径；key带TTL并清理 |
 | PG合成SQL事务 | 60s或按需 | 2s | 异步单并发 | 3次 | 使用专用schema/table、短事务和低权限账号 |
 | TSDB合成SQL事务 | 120s或按需 | 2s | 异步单并发 | 3次 | 周期更低，避免影响时序写入 |
-| 宿主资源抑制检查 | 10s | 2s | 同步前置 | 1轮critical | 冻结主动恢复，只上报 |
+| 宿主资源抑制检查 | 10s | 2s | 同步前置 | 1轮critical | 冻结主动恢复，只上报，不治理宿主机 |
 | Watchdog自身systemd心跳 | 每轮结束 | 20s deadline | 同步收尾 | 1轮未完成 | 不发送 `WATCHDOG=1`，由systemd重启Watchdog |
 
 “按需”指业务 `/readyz` 明确报告某个依赖失败时，Watchdog可以提前触发对应依赖的轻量探测和合成读写探针，但同一依赖的按需触发最少间隔建议30秒，防止异常时反复写探测数据。
@@ -846,7 +847,7 @@ flowchart TD
 2. 读取持久状态：包括连续失败次数、最近成功时间、最近恢复时间、重启预算、冷却期、隔离状态和上次容器ID。
 3. 读取维护状态：如果维护文件未过期或生命周期锁被发布/迁移流程持有，本轮继续探测，但禁止自动恢复。
 4. 同步探测Docker控制面：执行 `_ping`、按Compose label列出容器、Inspect目标容器。
-5. 同步探测宿主资源：检查磁盘、inode、内存、I/O PSI、Docker root是否只读。达到critical时冻结主动恢复。
+5. 同步执行宿主资源安全门禁：检查磁盘、inode、内存、I/O PSI、Docker root是否只读。达到critical时冻结主动恢复，只上报，不执行宿主机治理动作。
 6. 计算到期探针：按每个探针自己的周期和 `next_due` 判断是否执行；恢复窗口内仍可探测，但按窗口规则解释结果。
 7. 有界异步执行只读探针：HTTP、TCP、`/healthz`、`/readyz`、`/watchdogz`、基础服务轻量探测和到期的合成探针。
 8. 归一化结果：每个探针只产生 `success`、`failure`、`expected_failure`、`skipped`、`suppressed` 五类结果。
@@ -892,7 +893,7 @@ flowchart TD
 
 ```text
 00s  /healthz第1次失败：记录SUSPECT，不动作
-10s  /healthz第2次失败：补充Docker、TCP、宿主资源探测
+10s  /healthz第2次失败：补充Docker、TCP、宿主资源门禁检查
 20s  /healthz第3次失败：进入UNHEALTHY，生成恢复候选
 21s  安全门禁通过，获取生命周期锁，重新Inspect容器ID
 22s  调用Docker Restart，停止超时默认15s
@@ -1084,7 +1085,35 @@ ACS primary与candidate共用一个全局恢复互斥锁，任何时候最多恢
 
 ### 10.3 宿主资源门限
 
-宿主资源异常时，重启通常不能解决根因，因此主要用于抑制动作：
+宿主资源门限不是“服务器治理策略”，而是Watchdog执行容器恢复前的安全门禁。它回答的问题只有一个：当前宿主机状态是否允许Watchdog继续重启业务或基础服务容器。
+
+如果宿主资源已经critical，重启容器通常不能解决根因，还可能放大事故。例如磁盘满时重启PostgreSQL或MinIO可能继续失败，I/O严重阻塞时重启业务进程会制造新的启动风暴。因此Watchdog只做以下动作：
+
+1. 冻结主动容器恢复；
+2. 记录事件和指标；
+3. 上报告警，等待人工或外部运维系统处理；
+4. 宿主资源恢复后，再继续按业务/依赖探针重新判断是否需要恢复容器。
+
+Watchdog不执行以下动作：
+
+- 清理磁盘、删除日志或删除业务文件；
+- 扩容磁盘、调整分区或修复文件系统；
+- 杀其他宿主进程释放内存；
+- 修改内核参数、I/O调度或cgroup资源；
+- 重启宿主机。
+
+各信号含义如下：
+
+| 信号 | 含义 | 对Watchdog的作用 |
+|---|---|---|
+| CPU/load | 宿主机整体CPU是否长期过载 | 判断业务探针超时是否可能由整机过载导致 |
+| 内存/OOM | 宿主机可用内存和OOM风险 | 防止容器刚重启又被OOM杀死 |
+| 磁盘空间 | 数据盘、Docker root、日志目录剩余空间 | 磁盘满时冻结恢复，避免数据库/对象存储反复失败 |
+| inode | 文件系统还能创建多少文件/目录项 | inode耗尽时，即使磁盘空间未满也会导致写文件失败 |
+| I/O PSI | Linux Pressure Stall Information，表示进程等待磁盘I/O的压力 | 判断服务超时是否由宿主I/O卡顿导致 |
+| Docker root只读 | Docker数据目录是否变成只读或不可写 | 只读时容器恢复高风险，必须停止自动动作 |
+
+默认门限：
 
 | 信号 | warning | critical / 动作抑制 |
 |---|---:|---:|
@@ -1095,7 +1124,7 @@ ACS primary与candidate共用一个全局恢复互斥锁，任何时候最多恢
 | 每核load1 | >= 1.5 持续10m | >= 3持续5m |
 | Docker root目录只读 | 立即critical | 冻结全部恢复动作 |
 
-门限必须结合实际压测基线调整。资源critical时允许Docker处理已经退出的容器，但Watchdog不主动制造额外重启风暴。
+门限必须结合实际压测基线调整。资源critical时允许Docker自身restart policy处理已经退出的容器，但Watchdog不主动制造额外重启风暴，也不把宿主资源告警当成“需要治理服务器”的执行指令。
 
 ### 10.4 告警和事件
 
@@ -1304,6 +1333,7 @@ worker没有主业务HTTP端口，必须组合：
 - health失败先检查磁盘、inode、只读挂载、recovery和SQL；
 - 合成读写探针使用专用 `omc_watchdog.probe` 表和低权限账号；
 - 合成事务连续失败可确认根因，但第一阶段仍只告警、不自动重启；
+- 磁盘、inode、只读挂载异常只作为自动恢复抑制条件，不由Watchdog清理或修复；
 - 第一阶段默认不自动重启；
 - 开启后最多1次/小时；
 - 任何自动动作都要记录数据库是否处于recovery和探测错误；
@@ -1313,7 +1343,7 @@ worker没有主业务HTTP端口，必须组合：
 
 - `PING`失败且容器health失败后可有限重启；
 - 合成 `SET/GET/DEL` 连续失败可作为恢复前的根因确认；
-- 若内存耗尽、AOF/RDB错误或数据目录只读，重启被抑制；
+- 若内存耗尽、AOF/RDB错误或数据目录只读，重启被抑制并上报人工处理；
 - core和PM实例分别处理，不能同时重启。
 
 #### NATS
@@ -1327,7 +1357,7 @@ worker没有主业务HTTP端口，必须组合：
 
 - `live`失败表示进程级故障候选；
 - `live=200`、`ready!=200`表示暂不能接流量，不立即重启；
-- 磁盘满、只读或权限错误时禁止重启；
+- 磁盘满、只读或权限错误时禁止重启，只上报，不自动清理或修复数据目录；
 - 自动恢复最多2次/小时。
 
 ### 12.6 非核心组件
@@ -1863,7 +1893,7 @@ omcgo/internal/watchdog/
 ├── docker_events.go       # 事件流和断线重连
 ├── http_probe.go          # health/ready/watchdog探针
 ├── dependency_probe.go    # PG/Redis/NATS/MinIO直接探测
-├── host_probe_linux.go    # 磁盘、inode、内存、PSI、只读检测
+├── host_probe_linux.go    # 宿主资源安全门禁：磁盘、inode、内存、PSI、只读检测
 ├── state_machine.go       # 单目标状态机
 ├── correlator.go          # 多进程共享根因聚合
 ├── policy.go              # 门限、预算和动作抑制
@@ -1929,7 +1959,7 @@ Docker API建议使用官方或主流稳定Go客户端，并固定与当前Docke
 | 同时让app/acs/worker依赖PG失败 | 聚合为单个PG事件，不重启三个业务容器 |
 | app/acs/worker均报PG失败但PG直接探测正常 | 进入网络/客户端路径排查，不批量重启业务 |
 | NATS启动恢复4分钟 | 在5分钟宽限内不重启NATS |
-| 数据盘达到95% | 发critical，抑制有状态服务重启 |
+| 数据盘达到95% | 发critical，抑制有状态服务重启，不清理磁盘 |
 | Watchdog主循环阻塞 | 30秒内systemd停止等待并重新拉起Watchdog |
 | docker.sock不可用 | 冻结容器动作并上报DockerUnavailable |
 | 发布流程持有生命周期锁 | Watchdog继续探测但不执行恢复 |
@@ -1970,9 +2000,9 @@ Docker API建议使用官方或主流稳定Go客户端，并固定与当前Docke
 - 对Redis、NATS、MinIO开放有限自动恢复；
 - PostgreSQL和TimescaleDB仍默认人工确认。
 
-### Phase 3：宿主资源与策略调优
+### Phase 3：宿主资源门禁与策略调优
 
-- 接入宿主资源门限和Docker daemon可选恢复；
+- 接入宿主资源安全门禁和Docker daemon可选恢复；
 - 根据生产数据调整门限和恢复预算。
 
 ---
