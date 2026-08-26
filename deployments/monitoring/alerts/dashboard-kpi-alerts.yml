@@ -16,7 +16,7 @@ groups:
         labels: {severity: critical, domain: omc, subsystem: dashboard}
         annotations:
           summary: "Dashboard KPI 查询持续超时"
-          description: "查询已被 3 秒应用超时或 2.5 秒 statement timeout 截断，请联查 TSDB 资源和执行计划。"
+          description: "查询已被 60 秒应用超时或 55 秒 statement timeout 截断，请联查 TSDB 资源和执行计划。"
 
       - alert: DashboardKPIQueryRejected
         expr: increase(dashboard_kpi_query_rejected_total[5m]) > 0

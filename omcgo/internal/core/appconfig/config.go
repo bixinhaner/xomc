@@ -353,10 +353,10 @@ type DashboardConfig struct {
 
 func (c DashboardConfig) Defaults() DashboardConfig {
 	if c.QueryTimeout <= 0 {
-		c.QueryTimeout = 3 * time.Second
+		c.QueryTimeout = 60 * time.Second
 	}
 	if c.StatementTimeout <= 0 {
-		c.StatementTimeout = 2500 * time.Millisecond
+		c.StatementTimeout = 55 * time.Second
 	}
 	if c.MaxConcurrent <= 0 {
 		c.MaxConcurrent = 4

@@ -44,8 +44,8 @@ tsdb:
   log_sql_slow_threshold: 1000
 
 dashboard:
-  query_timeout: 3s
-  statement_timeout: 2500ms
+  query_timeout: 60s
+  statement_timeout: 55s
   max_concurrent: 4
   queue_timeout: 100ms
   fresh_cache_ttl: 4m30s

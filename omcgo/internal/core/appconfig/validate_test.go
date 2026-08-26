@@ -247,8 +247,8 @@ func TestACSDeploymentBackpressureFallbacksMatchDefaults(t *testing.T) {
 
 func TestDashboardConfigDefaults(t *testing.T) {
 	cfg := (DashboardConfig{}).Defaults()
-	assert.Equal(t, 3*time.Second, cfg.QueryTimeout)
-	assert.Equal(t, 2500*time.Millisecond, cfg.StatementTimeout)
+	assert.Equal(t, 60*time.Second, cfg.QueryTimeout)
+	assert.Equal(t, 55*time.Second, cfg.StatementTimeout)
 	assert.Equal(t, 4, cfg.MaxConcurrent)
 	assert.Equal(t, 100*time.Millisecond, cfg.QueueTimeout)
 	assert.Equal(t, 4*time.Minute+30*time.Second, cfg.FreshCacheTTL)
