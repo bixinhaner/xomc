@@ -14,6 +14,8 @@
 
 它不是监控平台，也不是容量治理工具。Prometheus 继续负责指标、趋势和告警；Watchdog 只负责本机 Docker Compose 服务的自愈。
 
+如果业务服务报告基础依赖异常，Watchdog 不直接重启基础服务，而是先对对应基础服务做一次真实最小读写验证：新增一条专用探测数据、查询确认、再删除清理。只有这个验证也连续失败，才认为基础服务本体异常；如果验证成功，则优先认为是业务进程自己的连接池、连接状态或客户端链路异常。
+
 第一阶段只满足四个目标：
 
 1. 主要业务进程或基础依赖服务挂了，连续多轮检查仍失败后，尝试重启；
@@ -96,7 +98,92 @@
 | `nats` | Docker状态、健康接口或TCP端口 |
 | `minio` | Docker状态、live/ready健康接口 |
 
-基础依赖服务第一阶段先做轻量检测。之前提到的“创建测试数据、查询、删除”本阶段不做，避免 Watchdog 自己给数据库或Redis制造额外写入压力。
+基础依赖服务平时先做轻量检测。当主要业务服务通过 `/readyz` 或依赖检查报告基础服务异常时，Watchdog 需要对对应基础服务执行一次真实读写验证，用专用测试数据完成“新增、查询、删除”，确认基础服务到底是否真实可用。
+
+真实读写验证只在业务服务报告依赖异常时触发，不作为每轮固定写入动作，避免 Watchdog 自己给数据库或 Redis 制造额外压力。
+
+### 2.4 基础服务真实读写验证
+
+真实读写验证使用 Watchdog 专用数据，不使用业务数据。
+
+对应基础服务的确定规则：
+
+1. 优先使用 `/readyz` 返回的失败依赖名，例如 `postgres`、`redis-core`、`nats`；
+2. 如果 `/readyz` 只返回整体失败、没有细分依赖名，则按业务服务配置里的 `dependencies` 列表逐个验证；
+3. 如果既没有失败依赖名，也没有 `dependencies` 配置，Watchdog 不猜测依赖关系，只记录告警。
+
+连接路径原则：真实读写验证要尽量复用业务进程实际使用的连接地址、端口和认证信息。如果某个依赖只在 Docker 网络内可访问，Watchdog 可以通过配置选择容器网络地址，或通过受控方式在同一 Compose 网络内执行验证，避免只验证宿主机端口而漏掉容器网络问题。
+
+| 基础服务 | 验证方式 | 成功标准 |
+|---|---|---|
+| `postgres` / `postgres-tsdb` | 向专用表 `INSERT` 一条探测记录，`SELECT` 校验 token，再 `DELETE` 删除 | 三步都成功，且查询到的 token 与写入一致 |
+| `redis-core` / `redis-pm` | `SET` 一个带TTL的专用key，`GET` 校验值，再 `DEL` 删除 | 三步都成功，且查询到的值与写入一致 |
+| `minio` | 上传一个专用小对象，`GET` 或 `HEAD` 校验，再删除对象 | 对象可写、可读、可删除 |
+| `nats` | 使用临时 subject 发布一条探测消息并消费到，再取消订阅 | 能完成发布和消费闭环 |
+
+PostgreSQL / TimescaleDB 建议在安装初始化阶段准备专用表。Watchdog 运行期不每轮建表，只执行新增、查询和删除：
+
+```sql
+CREATE SCHEMA IF NOT EXISTS omc_watchdog;
+
+CREATE TABLE IF NOT EXISTS omc_watchdog.probe (
+    id text PRIMARY KEY,
+    token text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+```
+
+运行期验证语句：
+
+```sql
+BEGIN;
+SET LOCAL statement_timeout = '2s';
+SET LOCAL lock_timeout = '500ms';
+
+INSERT INTO omc_watchdog.probe (id, token, updated_at)
+VALUES ($1, $2, now());
+
+SELECT token
+FROM omc_watchdog.probe
+WHERE id = $1;
+
+DELETE FROM omc_watchdog.probe
+WHERE id = $1;
+
+COMMIT;
+```
+
+Redis 验证命令：
+
+```text
+SET omc:watchdog:<service>:<probe-id> <token> EX 600 NX
+GET omc:watchdog:<service>:<probe-id>
+DEL omc:watchdog:<service>:<probe-id>
+```
+
+MinIO 验证动作：
+
+```text
+PUT    omc-watchdog/<host-id>/<probe-id>
+GET    omc-watchdog/<host-id>/<probe-id>
+DELETE omc-watchdog/<host-id>/<probe-id>
+```
+
+NATS 验证动作：
+
+```text
+SUB omc.watchdog.probe.<probe-id>
+PUB omc.watchdog.probe.<probe-id> <token>
+等待收到 <token>
+UNSUB omc.watchdog.probe.<probe-id>
+```
+
+验证结果使用规则：
+
+1. 真实读写验证失败，说明基础服务本体或最小读写链路确实异常；
+2. 真实读写验证成功，但业务服务仍持续报告依赖异常，说明更可能是业务进程自己的连接池、连接状态或客户端链路异常；
+3. 真实读写验证也要遵守连续失败门限，默认连续3轮失败后才进入基础服务重启候选；
+4. 真实读写验证成功时，不重启基础服务。
 
 ---
 
@@ -131,15 +218,16 @@ Watchdog 主循环每5分钟执行一次，流程如下：
 2. 读取上次状态，包括失败次数、重启等待窗口、冷却窗口和重启预算
 3. 通过 Docker API 获取目标容器状态
 4. 对已启用服务执行健康检测
-5. 更新每个服务的连续失败次数
-6. 如果服务处于启动等待期，检测失败记为预期失败，不增加失败次数
-7. 如果服务检测成功，清空该服务连续失败次数
-8. 如果连续失败达到门限，生成一个重启候选
-9. 检查是否允许重启：是否启用恢复、是否在冷却期、是否超预算、是否已有其他服务正在恢复
-10. 只选择一个服务执行重启
-11. 记录重启事件，并进入启动等待期
-12. 保存状态，输出日志和指标
-13. 本轮完整结束后通知 systemd：Watchdog 自己仍然健康
+5. 如果主要业务服务报告基础依赖异常，根据失败依赖名或 `dependencies` 配置，对对应基础服务执行真实读写验证
+6. 更新每个服务的连续失败次数
+7. 如果服务处于启动等待期，检测失败记为预期失败，不增加失败次数
+8. 如果服务检测成功，清空该服务连续失败次数
+9. 如果连续失败达到门限，生成一个重启候选
+10. 检查是否允许重启：是否启用恢复、是否在冷却期、是否超预算、是否已有其他服务正在恢复
+11. 只选择一个服务执行重启
+12. 记录重启事件，并进入启动等待期
+13. 保存状态，输出日志和指标
+14. 本轮完整结束后通知 systemd：Watchdog 自己仍然健康
 ```
 
 流程图：
@@ -149,7 +237,10 @@ flowchart TD
     A[每5分钟开始一轮检测] --> B[读取配置和历史状态]
     B --> C[读取Docker容器状态]
     C --> D[执行已启用的服务检测]
-    D --> E[更新连续失败次数]
+    D --> X{业务服务是否报告依赖异常?}
+    X -->|是| Y[根据依赖名或配置映射执行真实读写验证]
+    X -->|否| E[更新连续失败次数]
+    Y --> E
     E --> F{是否处于启动等待期?}
     F -->|是| G[失败不计数]
     F -->|否| H{是否连续失败达到门限?}
@@ -194,13 +285,14 @@ flowchart TD
 
 ### 5.3 业务服务报依赖异常时怎么处理
 
-如果业务服务的 `/readyz` 或日志显示依赖异常，第一阶段按简单规则处理：
+如果业务服务的 `/readyz` 或明确依赖检查结果显示依赖异常，第一阶段按简单规则处理：
 
-1. 先检测对应基础依赖服务；
-2. 如果基础依赖服务也连续失败，优先重启基础依赖服务；
-3. 如果基础依赖服务正常，但业务服务持续报依赖异常，说明可能是业务进程自己的连接池、连接状态或客户端链路异常；
-4. 此时只重启受影响的业务服务，不重启基础依赖服务；
-5. 多个业务服务同时异常时，不批量重启，仍然一次只恢复一个服务。
+1. 先根据失败依赖名或业务服务配置的 `dependencies` 找到对应基础依赖服务；
+2. 对该基础服务执行真实读写验证；
+3. 如果真实读写验证也连续失败，说明基础服务本体或最小读写链路异常，优先重启基础依赖服务；
+4. 如果真实读写验证成功，但业务服务持续报依赖异常，说明可能是业务进程自己的连接池、连接状态或客户端链路异常；
+5. 此时只重启受影响的业务服务，不重启基础依赖服务；
+6. 多个业务服务同时异常时，不批量重启，仍然一次只恢复一个服务。
 
 `/readyz` 不作为“直接重启业务服务”的唯一依据，它只作为判断依赖问题的辅助信号。
 
@@ -264,6 +356,7 @@ flowchart TD
 4. 检测周期、失败门限、启动等待时间、冷却时间和重启预算都可以配置；
 5. 配置支持热加载，修改后不需要重启 Watchdog。
 6. `/watchdogz` 的开关和必要组件列表也可以配置，只检查配置中列出的必要组件。
+7. 基础服务真实读写验证可以配置开关、触发条件、验证方式和最小触发间隔。
 
 配置样例：
 
@@ -277,6 +370,12 @@ global:
   default_cooldown: 15m
   max_parallel_recoveries: 1
   hot_reload: true
+
+dependency_verify:
+  enabled: true
+  triggers: [readyz_failure]
+  min_interval: 2m
+  failure_threshold: 3
 
 watchdog_self:
   systemd_notify: true
@@ -309,6 +408,7 @@ targets:
     enabled: true
     recovery_enabled: true
     kind: business
+    dependencies: [postgres, redis-core, nats, minio]
     interval: 5m
     checks:
       docker: true
@@ -341,6 +441,7 @@ targets:
     enabled: true
     recovery_enabled: true
     kind: business
+    dependencies: [postgres, redis-core]
     interval: 5m
     checks:
       docker: true
@@ -368,6 +469,7 @@ targets:
     enabled: true
     recovery_enabled: true
     kind: business
+    dependencies: [postgres, postgres-tsdb, redis-pm, nats, minio]
     interval: 5m
     checks:
       docker: true
@@ -397,6 +499,12 @@ targets:
       postgres:
         enabled: true
         timeout: 2s
+        verify:
+          enabled: true
+          mode: sql_insert_select_delete
+          schema: omc_watchdog
+          table: probe
+          timeout: 3s
     failure_threshold: 3
     startup_grace: 10m
 
@@ -410,6 +518,12 @@ targets:
       redis:
         enabled: true
         timeout: 1s
+        verify:
+          enabled: true
+          mode: redis_set_get_del
+          key_prefix: omc:watchdog
+          ttl: 10m
+          timeout: 2s
     failure_threshold: 3
     startup_grace: 5m
 ```
@@ -440,6 +554,15 @@ targets:
 | `watchdog_self.systemd_notify` | 是否向 systemd 发送 `READY=1` 和 `WATCHDOG=1` |
 | `watchdog_self.health_addr` | Watchdog 自身本地健康接口监听地址 |
 
+基础服务真实验证配置：
+
+| 配置项 | 含义 |
+|---|---|
+| `dependency_verify.enabled` | 是否开启基础服务真实读写验证；关闭后只做轻量检测 |
+| `dependency_verify.triggers` | 触发真实验证的来源；第一阶段默认 `readyz_failure`，表示业务服务 `/readyz` 报依赖异常时触发 |
+| `dependency_verify.min_interval` | 同一个基础服务两次真实验证之间的最小间隔，避免短时间内反复写入探测数据 |
+| `dependency_verify.failure_threshold` | 真实读写验证连续失败几轮后，才认为基础服务可进入重启候选；默认与服务失败门限一致，为 `3` |
+
 服务级配置：
 
 | 配置项 | 含义 |
@@ -448,6 +571,7 @@ targets:
 | `enabled` | 是否检测该服务；为 `false` 时不检测、不计数、不恢复 |
 | `recovery_enabled` | 是否允许自动重启；为 `false` 时仍可检测和告警，但不自动恢复 |
 | `kind` | 服务类型，`business` 表示主要业务服务，`dependency` 表示基础依赖服务 |
+| `dependencies` | 业务服务依赖的基础服务列表；当 `/readyz` 没有返回具体失败依赖名时，Watchdog 按这个列表逐个做真实验证 |
 | `interval` | 当前服务自己的检测周期；不配置时使用 `global.scan_interval` |
 | `failure_threshold` | 当前服务连续失败几轮后进入重启候选；不配置时使用全局默认值 |
 | `startup_grace` | 当前服务重启后的启动等待时间；等待期内失败不累计 |
@@ -474,6 +598,15 @@ targets:
 | `checks.readyz.recovery_trigger` | 是否允许 `/readyz` 直接触发重启；第一阶段默认 `false` |
 | `checks.postgres.enabled` | 是否启用 PostgreSQL 轻量检查 |
 | `checks.redis.enabled` | 是否启用 Redis 轻量检查 |
+| `checks.<dependency>.verify.enabled` | 是否允许该基础服务执行真实读写验证 |
+| `checks.postgres.verify.mode` | PostgreSQL 真实验证方式，第一阶段使用 `sql_insert_select_delete` |
+| `checks.postgres.verify.schema` | PostgreSQL 专用探测 schema，默认 `omc_watchdog` |
+| `checks.postgres.verify.table` | PostgreSQL 专用探测表，默认 `probe` |
+| `checks.redis.verify.mode` | Redis 真实验证方式，第一阶段使用 `redis_set_get_del` |
+| `checks.redis.verify.key_prefix` | Redis 探测 key 前缀，例如 `omc:watchdog` |
+| `checks.redis.verify.ttl` | Redis 探测 key 的过期时间，即使删除失败也会自动过期 |
+| `checks.minio.verify.mode` | MinIO 真实验证方式，第一阶段使用小对象 PUT、GET/HEAD、DELETE |
+| `checks.nats.verify.mode` | NATS 真实验证方式，第一阶段使用临时 subject 发布并消费一条探测消息 |
 | `timeout` | 单次检查超时时间；超时只影响本轮结果，不代表立即重启 |
 
 配置关闭示例：
@@ -595,9 +728,11 @@ Prometheus 只负责展示和告警，不负责直接执行重启。
 6. 同一时刻最多自动重启一个服务；
 7. 每个服务都可以配置是否检测、是否自动恢复、检测周期、失败次数和启动等待时间；
 8. `app`、`acs`、`acs-candidate`、`worker` 支持 `/watchdogz`，只检查必要业务组件；
-9. 配置热加载成功后下一轮检测生效；
-10. 配置热加载失败时旧配置继续生效；
-11. Watchdog 进程退出或主循环卡死后，systemd 能自动重启 Watchdog；
-12. Watchdog 重启后不丢失冷却期、失败次数和重启预算。
+9. 业务服务报告基础依赖异常时，Watchdog 会对对应基础服务执行真实新增、查询、删除或等价闭环验证；
+10. 基础服务真实验证成功时，不重启基础服务；真实验证连续失败达到门限后，才允许进入基础服务重启候选；
+11. 配置热加载成功后下一轮检测生效；
+12. 配置热加载失败时旧配置继续生效；
+13. Watchdog 进程退出或主循环卡死后，systemd 能自动重启 Watchdog；
+14. Watchdog 重启后不丢失冷却期、失败次数和重启预算。
 
 ---
