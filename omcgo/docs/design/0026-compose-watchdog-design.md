@@ -14,6 +14,8 @@
 
 它不是监控平台，也不是容量治理工具。Prometheus 继续负责指标、趋势和告警；Watchdog 只负责本机 Docker Compose 服务的自愈。
 
+部署形态上，Watchdog 是宿主机上的独立可执行进程，由 systemd 托管，不作为 Docker Compose 里的一个业务容器启动。它通过 Docker Engine API 读取 Compose 容器状态，并对已有容器执行启动或重启。第一阶段默认不自动重建容器、不构建镜像、不拉取镜像。
+
 如果业务服务报告基础依赖异常，Watchdog 不直接重启基础服务，而是先对对应基础服务做一次真实最小读写验证：新增一条专用探测数据、查询确认、再删除清理。只有这个验证也连续失败，才认为基础服务本体异常；如果验证成功，则优先认为是业务进程自己的连接池、连接状态或客户端链路异常。
 
 第一阶段只满足四个目标：
@@ -224,7 +226,7 @@ Watchdog 主循环每5分钟执行一次，流程如下：
 8. 如果服务检测成功，清空该服务连续失败次数
 9. 如果连续失败达到门限，生成一个重启候选
 10. 检查是否允许重启：是否启用恢复、是否在冷却期、是否超预算、是否已有其他服务正在恢复
-11. 只选择一个服务执行重启
+11. 只选择一个服务，通过 Docker API 执行启动或重启
 12. 记录重启事件，并进入启动等待期
 13. 保存状态，输出日志和指标
 14. 本轮完整结束后通知 systemd：Watchdog 自己仍然健康
@@ -247,7 +249,7 @@ flowchart TD
     H -->|否| I[保存状态并等待下一轮]
     H -->|是| J{是否允许自动重启?}
     J -->|否| I
-    J -->|是| K[串行重启一个服务]
+    J -->|是| K[通过Docker API串行启动或重启一个服务]
     K --> L[进入启动等待期]
     L --> I
     I --> M[本轮完成后通知systemd]
@@ -296,6 +298,46 @@ flowchart TD
 
 `/readyz` 不作为“直接重启业务服务”的唯一依据，它只作为判断依赖问题的辅助信号。
 
+### 5.4 Docker API 的检测和自愈边界
+
+Watchdog 通过 Docker Engine API 管理 Compose 创建出来的容器。第一阶段以“恢复已有容器”为主，不把 Watchdog 做成发布系统。
+
+Docker API 默认用于读取这些信息：
+
+| 信息 | 用途 |
+|---|---|
+| 容器是否存在 | 判断服务是否已经被 Compose 创建 |
+| 容器状态 | 识别 `running`、`exited`、`restarting`、`paused`、`dead` 等状态 |
+| Docker health 状态 | 如果容器配置了 healthcheck，可作为 Docker 状态的补充信号 |
+| 退出码和退出时间 | 辅助判断容器是否异常退出 |
+| `OOMKilled` | 记录容器是否因为内存不足被系统杀掉，仅作为失败原因写日志 |
+| 重启次数和启动时间 | 辅助判断服务是否频繁异常 |
+| Compose labels | 通过 `com.docker.compose.project`、`com.docker.compose.service` 等标签匹配目标服务 |
+
+Docker API 默认允许执行这些恢复动作：
+
+| 场景 | 第一阶段动作 |
+|---|---|
+| Docker API 不可访问 | 本轮无法确认容器状态，不执行容器恢复，记录错误和告警，等待下一轮或人工处理 |
+| 容器存在且仍在运行，但探针连续失败达到门限 | 执行 `ContainerRestart`，等价于重启该容器 |
+| 容器存在但处于 `exited` 或 `created` | 如果配置允许，执行 `ContainerStart`；否则只记录告警 |
+| 容器处于 `restarting` | 记录当前状态，等待下一轮；连续异常达到门限后再按规则处理 |
+| 容器处于 `paused` 或 `dead` | 连续失败达到门限后进入重启候选 |
+| 容器不存在 | 默认不自动创建，只记录告警；如果后续显式开启 `recreate_missing`，才允许走 Compose 重建 |
+
+需要明确区分几类动作：
+
+| 动作 | 是否第一阶段默认执行 | 说明 |
+|---|---|---|
+| 重启已有容器 | 是 | 通过 Docker API 执行，是主要自愈手段 |
+| 启动已存在但停止的容器 | 可配置 | 默认可以开启，但仍要遵守失败门限、等待期和预算 |
+| 重建缺失容器 | 否 | 默认关闭；如确需支持，应通过 `docker compose up -d --no-build <service>` 执行，不直接用原始 Docker API 拼容器 |
+| 构建或拉取镜像 | 否 | 属于发布部署流程，不属于 Watchdog 第一阶段自愈范围 |
+
+如果 Docker Engine API 自身不可用，Watchdog 不能可靠判断和操作容器。第一阶段不主动重启 `docker.service`，只记录错误和告警，等待 Docker API 恢复后再继续检测。
+
+如果未来确实需要“容器缺失后自动拉起”，建议只做受控的 Compose 级补救：使用固定的 compose 文件、固定 project 名称和固定 service 名称执行 `docker compose up -d --no-build <service>`。这样可以保持网络、卷、环境变量和 labels 与 Compose 定义一致。
+
 ---
 
 ## 6. 重启后的等待和计数规则
@@ -318,7 +360,7 @@ flowchart TD
 05m  第1次失败，状态 SUSPECT，不重启
 10m  第2次失败，继续观察，不重启
 15m  第3次失败，达到门限，准备重启
-15m+ 执行 docker restart app
+15m+ 通过 Docker API 重启 app 容器
 15m~20m app 处于启动等待期，期间检测失败不计数
 20m  app 检测成功，进入冷却期
 20m~35m 冷却期内继续检测，但不重复自动重启
@@ -370,6 +412,15 @@ global:
   default_cooldown: 15m
   max_parallel_recoveries: 1
   hot_reload: true
+
+docker:
+  socket: unix:///var/run/docker.sock
+  compose_project: omc
+  compose_files:
+    - /opt/omc/current/docker-compose.yml
+  restart_timeout: 30s
+  start_stopped: true
+  recreate_missing: false
 
 logging:
   level: info
@@ -560,6 +611,17 @@ targets:
 | `watchdog_self.systemd_notify` | 是否向 systemd 发送 `READY=1` 和 `WATCHDOG=1` |
 | `watchdog_self.health_addr` | Watchdog 自身本地健康接口监听地址 |
 
+Docker 控制配置：
+
+| 配置项 | 含义 |
+|---|---|
+| `docker.socket` | Docker Engine API 地址，第一阶段默认使用宿主机 Unix socket：`unix:///var/run/docker.sock` |
+| `docker.compose_project` | Compose project 名称，用于通过 Compose labels 过滤本系统容器，避免误操作其他容器 |
+| `docker.compose_files` | Compose 文件路径；第一阶段主要用于记录和后续可选的受控重建，不用于每轮检测 |
+| `docker.restart_timeout` | 单次容器启动或重启动作的超时时间 |
+| `docker.start_stopped` | 容器已存在但停止时，是否允许 Watchdog 自动启动 |
+| `docker.recreate_missing` | 容器不存在时是否允许 Watchdog 通过 Compose 重建；第一阶段默认 `false` |
+
 日志配置：
 
 | 配置项 | 含义 |
@@ -661,9 +723,32 @@ Watchdog 支持以下热加载方式：
 
 ---
 
-## 8. Watchdog 自身自检
+## 8. Watchdog 运行形态和自身自检
 
-Watchdog 本身不建议放在同一个 Docker Compose 里启动，第一阶段建议作为宿主机 systemd 服务运行。原因很简单：如果 Docker 或 Compose 流程本身异常，放在容器里的 Watchdog 也可能一起失效。
+### 8.1 运行形态
+
+第一阶段建议把 Watchdog 做成一个单独的可执行程序，例如 `omc-watchdog`，部署在宿主机上，由 systemd 启动和保活。
+
+不建议把 Watchdog 放进 OMC 自己的 Docker Compose 里，主要考虑：
+
+1. Watchdog 要监管 Docker 容器，如果它自己也是同一组 Compose 容器，Docker 或 Compose 异常时它可能一起失效；
+2. Watchdog 需要访问 Docker Engine API，放在宿主机 systemd 里更直接，权限边界也更清晰；
+3. systemd 可以监管 Watchdog 本身，Watchdog 退出或主循环卡死后能被自动拉起；
+4. Watchdog 的生命周期应该独立于业务容器升级，避免业务 Compose 重启时把监管者也一起停掉。
+
+部署时建议包含：
+
+| 文件 | 说明 |
+|---|---|
+| `/opt/omc/current/bin/omc-watchdog` | Watchdog 可执行文件 |
+| `/etc/omc/watchdog.yaml` | Watchdog 配置文件 |
+| `/etc/systemd/system/omc-watchdog.service` | systemd unit |
+| `/opt/omc/run/watchdog/state.json` | Watchdog 本地状态文件 |
+| `/opt/omc/run/watchdog/events.jsonl` | Watchdog 事件日志文件 |
+
+Watchdog 默认通过 `/var/run/docker.sock` 访问 Docker Engine API。这个权限等价于管理本机 Docker，部署时要限制给 Watchdog 专用运行用户或受控用户组，不要把 Docker socket 暴露到网络。
+
+### 8.2 Watchdog 自身自检
 
 建议 systemd unit：
 
@@ -868,10 +953,13 @@ Prometheus 只负责展示和告警，不负责直接执行重启。
 8. `app`、`acs`、`acs-candidate`、`worker` 支持 `/watchdogz`，只检查必要业务组件；
 9. 业务服务报告基础依赖异常时，Watchdog 会对对应基础服务执行真实新增、查询、删除或等价闭环验证；
 10. 基础服务真实验证成功时，不重启基础服务；真实验证连续失败达到门限后，才允许进入基础服务重启候选；
-11. 每轮检测、每个探针、状态变化、重启判断和重启结果都有结构化日志，并可通过 `round_id` 串联；
-12. 配置热加载成功后下一轮检测生效；
-13. 配置热加载失败时旧配置继续生效；
-14. Watchdog 进程退出或主循环卡死后，systemd 能自动重启 Watchdog；
-15. Watchdog 重启后不丢失冷却期、失败次数和重启预算。
+11. Watchdog 作为宿主机 systemd 独立进程运行，不放进 OMC 业务 Compose；
+12. Watchdog 通过 Docker API 检测和启动/重启已有容器；
+13. 第一阶段默认不自动重建容器、不构建镜像、不拉取镜像；
+14. 每轮检测、每个探针、状态变化、重启判断和重启结果都有结构化日志，并可通过 `round_id` 串联；
+15. 配置热加载成功后下一轮检测生效；
+16. 配置热加载失败时旧配置继续生效；
+17. Watchdog 进程退出或主循环卡死后，systemd 能自动重启 Watchdog；
+18. Watchdog 重启后不丢失冷却期、失败次数和重启预算。
 
 ---
