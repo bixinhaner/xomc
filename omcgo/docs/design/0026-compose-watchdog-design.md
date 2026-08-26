@@ -21,7 +21,7 @@
 3. 默认检测主要业务进程和基础依赖服务，但检测周期、失败次数、是否检测、是否允许自动重启都可配置，并支持热生效；
 4. Watchdog 自己也要能被监管，避免 Watchdog 挂了无人发现。
 
-第一阶段不做复杂自愈，不做全栈定时重启，不做服务器资源治理，不新增复杂内部探针。
+第一阶段不做复杂自愈，不做全栈定时重启，不做服务器资源治理。可以新增 `/watchdogz`，但只用于主要业务进程里的必要业务探测，不扩展成全量 goroutine 巡检。
 
 ---
 
@@ -32,18 +32,60 @@
 | 服务 | 作用 | 默认检测方式 |
 |---|---|---|
 | `web` | 前端入口、Nginx 反向代理、ACS入口代理 | Docker状态、管理入口HTTP、ACS入口TCP、Nginx状态页 |
-| `app` | 管理面API和控制面服务 | Docker状态、`/healthz`、主业务端口TCP |
-| `acs` | 正式ACS实例，承载TR-069流量 | Docker状态、`/healthz`、ACS端口TCP |
-| `acs-candidate` | 发布接力实例 | Docker状态、容器网络内 `/healthz` |
-| `worker` | PM/MR、告警、异步任务消费者 | Docker状态、`/healthz` |
+| `app` | 管理面API和控制面服务 | Docker状态、`/healthz`、`/watchdogz`、主业务端口TCP |
+| `acs` | 正式ACS实例，承载TR-069流量 | Docker状态、`/healthz`、`/watchdogz`、ACS端口TCP |
+| `acs-candidate` | 发布接力实例 | Docker状态、容器网络内 `/healthz`、`/watchdogz` |
+| `worker` | PM/MR、告警、异步任务消费者 | Docker状态、`/healthz`、`/watchdogz` |
 
 说明：
 
 - `/healthz` 只证明进程和HTTP探针通道还活着，不证明业务完全正常；
 - `web` 不是 Go 进程，没有 `/healthz`，以 Nginx 入口和 Docker 状态为主；
-- 第一阶段不新增 `/watchdogz`，后续如果确实需要再单独设计内部 goroutine/消费者心跳。
+- `/watchdogz` 只给主要业务进程使用，基础依赖服务不需要实现。
 
-### 2.2 默认检测的基础依赖服务
+### 2.2 `/watchdogz` 只检查必要业务项
+
+`/watchdogz` 是主要业务进程自己暴露的轻量内部探针，用来补充 `/healthz` 的不足。它只回答一个问题：这个进程里最必要的主业务组件是否还在运行。
+
+它不做这些事情：
+
+- 不访问 PostgreSQL、Redis、NATS、MinIO；
+- 不创建测试数据；
+- 不检查所有 goroutine；
+- 不根据日志关键字直接判定重启；
+- 不替代 `/readyz` 做依赖判断。
+
+第一阶段建议只检查下面这些必要项：
+
+| 服务 | `/watchdogz` 必要检查项 | 说明 |
+|---|---|---|
+| `app` | `main-api`、`core-control-loop` | 管理面主API和核心控制循环仍在运行 |
+| `acs` | `cwmp-server`、`session-loop` | ACS主服务和会话处理主循环仍在运行 |
+| `acs-candidate` | `cwmp-server`、`session-loop` | 与 `acs` 相同，但通过容器网络访问 |
+| `worker` | `worker-supervisor`、`pm-mr-consumer` | worker主调度器和PM/MR消费主循环仍在运行 |
+
+`/watchdogz` 返回规则：
+
+| 结果 | 含义 | Watchdog处理 |
+|---|---|---|
+| HTTP 200 | 必要项正常 | 该探针成功，清空 `/watchdogz` 连续失败计数 |
+| HTTP 503 | 必要项异常 | 记为失败，连续达到门限后可重启该业务进程 |
+| 超时或连接失败 | 探针不可达 | 记为失败 |
+| 未实现或配置关闭 | 不参与检测 | 不计失败，不触发重启 |
+
+示例响应：
+
+```json
+{
+  "status": "ok",
+  "components": [
+    {"name": "main-api", "status": "ok"},
+    {"name": "core-control-loop", "status": "ok"}
+  ]
+}
+```
+
+### 2.3 默认检测的基础依赖服务
 
 | 服务 | 默认检测方式 |
 |---|---|
@@ -54,7 +96,7 @@
 | `nats` | Docker状态、健康接口或TCP端口 |
 | `minio` | Docker状态、live/ready健康接口 |
 
-基础依赖服务第一阶段先做轻量检测。之前提到的“创建测试数据、查询、删除”可以作为后续增强项，不放进第一阶段默认实现，避免 Watchdog 自己给数据库或Redis制造额外写入压力。
+基础依赖服务第一阶段先做轻量检测。之前提到的“创建测试数据、查询、删除”本阶段不做，避免 Watchdog 自己给数据库或Redis制造额外写入压力。
 
 ---
 
@@ -125,6 +167,8 @@ flowchart TD
 ## 5. 异常判断和恢复规则
 
 ### 5.1 什么情况下重启
+
+一个服务可能有多个检查项。第一阶段按简单规则处理：Docker状态、`/healthz`、`/watchdogz`、HTTP/TCP 入口属于主要检查项；任一已启用的主要检查项连续失败达到门限，就可以进入重启候选。`/readyz` 默认只作为依赖辅助信号，不直接触发业务服务重启。
 
 满足以下条件时，Watchdog 可以尝试重启目标服务：
 
@@ -219,6 +263,7 @@ flowchart TD
 3. 每个服务都可以单独开启或关闭自动恢复；
 4. 检测周期、失败门限、启动等待时间、冷却时间和重启预算都可以配置；
 5. 配置支持热加载，修改后不需要重启 Watchdog。
+6. `/watchdogz` 的开关和必要组件列表也可以配置，只检查配置中列出的必要组件。
 
 配置样例：
 
@@ -275,6 +320,11 @@ targets:
         enabled: true
         address: 127.0.0.1:18081
         timeout: 2s
+      watchdogz:
+        enabled: true
+        url: http://127.0.0.1:9091/watchdogz
+        timeout: 2s
+        required_components: [main-api, core-control-loop]
       readyz:
         enabled: true
         url: http://127.0.0.1:9091/readyz
@@ -302,6 +352,11 @@ targets:
         enabled: true
         address: 127.0.0.1:7557
         timeout: 2s
+      watchdogz:
+        enabled: true
+        url: http://127.0.0.1:9095/watchdogz
+        timeout: 2s
+        required_components: [cwmp-server, session-loop]
     failure_threshold: 3
     startup_grace: 5m
     cooldown: 15m
@@ -320,6 +375,11 @@ targets:
         enabled: true
         url: http://127.0.0.1:9092/healthz
         timeout: 3s
+      watchdogz:
+        enabled: true
+        url: http://127.0.0.1:9092/watchdogz
+        timeout: 3s
+        required_components: [worker-supervisor, pm-mr-consumer]
     failure_threshold: 3
     startup_grace: 10m
     cooldown: 15m
@@ -463,9 +523,10 @@ Prometheus 只负责展示和告警，不负责直接执行重启。
 5. 重启后进入启动等待时间，等待期内失败不累计；
 6. 同一时刻最多自动重启一个服务；
 7. 每个服务都可以配置是否检测、是否自动恢复、检测周期、失败次数和启动等待时间；
-8. 配置热加载成功后下一轮检测生效；
-9. 配置热加载失败时旧配置继续生效；
-10. Watchdog 进程退出或主循环卡死后，systemd 能自动重启 Watchdog；
-11. Watchdog 重启后不丢失冷却期、失败次数和重启预算。
+8. `app`、`acs`、`acs-candidate`、`worker` 支持 `/watchdogz`，只检查必要业务组件；
+9. 配置热加载成功后下一轮检测生效；
+10. 配置热加载失败时旧配置继续生效；
+11. Watchdog 进程退出或主循环卡死后，systemd 能自动重启 Watchdog；
+12. Watchdog 重启后不丢失冷却期、失败次数和重启预算。
 
 ---
