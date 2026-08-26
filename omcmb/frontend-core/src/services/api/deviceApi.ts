@@ -623,7 +623,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
 
   const normalizedProductClass = (bd.product_class ?? '').trim().toUpperCase();
   const deviceType = bd.device_type
-    || (normalizedProductClass === 'IMSCORE'
+    || (normalizedProductClass.includes('IMSCORE')
       ? 'CORE_NETWORK'
       : (normalizedProductClass.startsWith('UPS') ? 'UPS' : 'BASE_STATION'));
   const networkType = deviceType === 'UPS'

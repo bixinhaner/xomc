@@ -114,11 +114,11 @@ func TestApplyDeviceFilters_DeviceTypeTabs(t *testing.T) {
 	).ToSql()
 	require.NoError(t, err)
 	assert.Contains(t, baseStationSQL, "NOT (COALESCE(d.product_class, '') LIKE 'UPS%')")
-	assert.Contains(t, baseStationSQL, "NOT (UPPER(COALESCE(d.product_class, '')) = 'IMSCORE')")
+	assert.Contains(t, baseStationSQL, "NOT (UPPER(COALESCE(d.product_class, '')) LIKE '%IMSCORE%')")
 	assert.Empty(t, baseStationArgs)
 
 	coreSQL, coreArgs, err := applyDeviceFilters(base, DeviceFilter{DeviceType: DeviceListDeviceTypeCoreNetwork}).ToSql()
 	require.NoError(t, err)
-	assert.Contains(t, coreSQL, "UPPER(COALESCE(d.product_class, '')) = 'IMSCORE'")
+	assert.Contains(t, coreSQL, "UPPER(COALESCE(d.product_class, '')) LIKE '%IMSCORE%'")
 	assert.Empty(t, coreArgs)
 }

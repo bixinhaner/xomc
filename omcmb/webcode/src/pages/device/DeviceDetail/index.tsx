@@ -123,7 +123,7 @@ function isCoreNetworkDeviceLike(device?: Pick<Device, 'deviceType' | 'networkTy
   if (!device) return false;
   return device.deviceType === 'CORE_NETWORK'
     || device.networkType === 'CORE_NETWORK'
-    || device.productClass?.trim().toUpperCase() === 'IMSCORE';
+    || device.productClass?.trim().toUpperCase().includes('IMSCORE');
 }
 
 function passwordTaskStatusTagSpec(status: DeviceTaskStatus | undefined): {
