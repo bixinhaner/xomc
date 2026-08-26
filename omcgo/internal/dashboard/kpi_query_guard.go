@@ -58,7 +58,7 @@ func NewKPIQueryGuard(config KPIQueryGuardConfig, metrics KPIQueryMetrics) *KPIQ
 		config.MaxConcurrent = 4
 	}
 	if config.QueryTimeout <= 0 {
-		config.QueryTimeout = 3 * time.Second
+		config.QueryTimeout = 60 * time.Second
 	}
 	if config.QueueTimeout <= 0 {
 		config.QueueTimeout = 100 * time.Millisecond
