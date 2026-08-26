@@ -128,7 +128,7 @@ Prometheus当前每15秒抓取一次 `app`、`acs`、`acs-candidate`、`worker` 
             └── omc-watchdog.service
                       │
                       ├── Docker Engine API（Unix socket）
-                      ├── /healthz、/readyz、/watchdogz
+                      ├── /healthz、/readyz、/watchdogz（Phase 2新增）
                       ├── TCP/HTTP 业务入口探测
                       ├── 宿主资源安全门禁（CPU/内存/磁盘/inode/I/O PSI）
                       ├── 基础服务直接探测
@@ -183,7 +183,7 @@ Prometheus当前每15秒抓取一次 `app`、`acs`、`acs-candidate`、`worker` 
 |---|---|---|
 | `omc-watchdog` 主进程 | 宿主机 systemd | Docker控制面、宿主资源安全门禁、恢复动作、预算和隔离 |
 | Prometheus/Alertmanager | Docker Compose | 指标采集、趋势、告警通知 |
-| 应用内部 `/healthz`、`/readyz`、`/watchdogz` | 业务容器内 | 暴露进程和内部组件状态 |
+| 应用内部 `/healthz`、`/readyz`、`/watchdogz` | 业务容器内 | `/healthz`和`/readyz`当前已有；`/watchdogz`为Phase 2新增内部组件状态 |
 | `web` Nginx入口 | 业务容器内 | 暴露前端静态资源、管理面入口和ACS入口代理 |
 
 如果某些环境没有 systemd，或为了开发测试需要容器化Watchdog，可以做“降级模式”，但不作为生产主方案：
@@ -394,11 +394,19 @@ connection_refused | timeout | dns_error | http_5xx | invalid_body | network_unr
 
 如果只有一个业务进程受影响，可以恢复该进程；如果多个业务进程都报同一依赖异常，但基础服务本体健康，应先检查Docker网络、DNS和共享配置，不得同时重启多个业务进程。确认不是Docker网络或宿主资源问题后，再按 `acs → worker → app` 的顺序逐个恢复，每次恢复后等待60～180秒观察其他进程是否自行恢复。
 
-这个场景下的恢复目标是“刷新业务进程内的依赖客户端状态”，不是修复基础服务。因此恢复成功条件以该业务进程 `/readyz` 恢复为主，同时要求 `/healthz`、`/watchdogz` 和主入口正常。
+这个场景下的恢复目标是“刷新业务进程内的依赖客户端状态”，不是修复基础服务。因此恢复成功条件以该业务进程 `/readyz` 恢复为主，同时要求 `/healthz`、主入口以及已启用的 `/watchdogz` 正常。
 
 ### 5.3 `/watchdogz`：拟新增的进程内部有效性探针
 
-当前 `/healthz` 由独立 metrics server提供，即使某个关键消费者退出也可能继续200。为覆盖“HTTP活着但业务内部已失活”，新增 `/watchdogz`，仍放在 metrics端口，并且不得依赖外部基础设施。
+当前代码已经有 `/healthz` 和 `/readyz`，尚未实现 `/watchdogz`。`/watchdogz` 是本设计建议新增的进程内部有效性探针，用于覆盖“HTTP活着但业务内部关键循环已失活”的场景。
+
+它不是替代 `/healthz` 或 `/readyz`：
+
+- `/healthz`：证明进程和metrics HTTP server还活着；
+- `/readyz`：证明进程到外部依赖的就绪状态；
+- `/watchdogz`：证明进程内部关键循环、消费者、调度器仍在持续运行。
+
+`/watchdogz` 仍放在 metrics端口，并且不得依赖外部基础设施。第一阶段如果暂不实现该接口，Watchdog配置必须将对应 `watchdog_enabled=false`，探测结果记为 `skipped(not_implemented)`，不能因为接口不存在触发重启。Phase 2 增加内部组件心跳后，再启用该探针。
 
 #### 5.3.1 检查内容
 
@@ -456,7 +464,7 @@ type RuntimeComponent interface {
 
 #### 5.3.3 自动恢复条件
 
-`/watchdogz=503` 连续3次、进程不处于启动/停止/维护状态、宿主资源不过载、共享依赖没有同时故障时，可以恢复该业务容器。
+`/watchdogz=503` 连续3次、进程不处于启动/停止/维护状态、宿主资源不过载、共享依赖没有同时故障时，可以恢复该业务容器。若配置中 `watchdog_enabled=false`，该探针不参与异常计数和恢复判定。
 
 ### 5.4 主业务入口和TCP探针
 
@@ -467,7 +475,7 @@ Watchdog还应直接验证“真正承载业务的 listener是否存在”，避
 | web | 宿主 `127.0.0.1:8081/` HTTP GET；容器内 `:8090/stub_status`；可选静态资源探测 |
 | app | 宿主 `127.0.0.1:18081` 或容器网络IP `:8081` TCP connect；新增无依赖内部入口探针后再做HTTP验证 |
 | acs | 宿主或容器网络 `:7557` TCP connect；只验证accept能力，不发真实Inform |
-| worker | 无主业务端口，以 `/watchdogz` 和内部组件心跳为主 |
+| worker | 无主业务端口；第一阶段以 `/healthz`、Docker状态和消费进度辅助判断，Phase 2 以 `/watchdogz` 内部组件心跳为主 |
 
 TCP成功只证明端口在监听，不能证明协议处理正确；TCP失败加 `/healthz` 成功，说明主listener与metrics server状态不一致，是业务进程恢复的重要证据。
 
@@ -787,6 +795,26 @@ flowchart TD
     O -->|否| Q[不喂狗<br/>等待systemd重启Watchdog]
 ```
 
+流程图节点说明：
+
+| 节点 | 说明 |
+|---|---|
+| `10s ticker + 0-2s jitter` | 到扫描周期后启动一轮检测；抖动用于避免多实例同时打依赖服务 |
+| `读取配置/状态/维护窗口` | 加载热生效后的配置、连续失败计数、冷却/退避/隔离状态和维护模式 |
+| `Docker _ping + list + inspect` | 先确认Docker控制面是否可信，并读取容器running、health、RestartCount、OOMKilled等事实 |
+| `DOCKER_UNAVAILABLE` | Docker控制面不可用时，Watchdog无法可靠恢复容器，因此冻结容器动作，只上报 |
+| `宿主资源动作抑制检查` | 只判断当前是否适合重启容器；CPU/内存/磁盘/inode/I/O PSI critical时冻结动作，不治理宿主机 |
+| `计算本轮到期探针` | 按每个探针自己的周期和开关决定本轮要跑哪些检查，未到期或未启用的探针跳过 |
+| `有界异步执行HTTP/TCP/依赖探针` | 并发执行只读探针，包括 `/healthz`、`/readyz`、已启用的 `/watchdogz`、TCP和基础服务探测 |
+| `归一化结果并更新连续失败计数` | 把结果统一成 success/failure/expected_failure/skipped/suppressed；只有failure增加连续失败 |
+| `聚合共享依赖/大面积异常` | 判断是否多个业务服务指向同一个基础依赖，避免批量重启业务容器 |
+| `是否允许恢复` | 检查门限、预算、冷却、维护、生命周期锁、宿主资源和Docker状态 |
+| `获取生命周期锁/重新Inspect目标` | 动作前再次确认容器身份，避免发布过程中误操作旧容器 |
+| `执行一个恢复动作` | 同一轮最多恢复一个目标，防止重启风暴 |
+| `RECOVERING/STARTING窗口` | 恢复期间探针失败记为预期失败，不累加新异常 |
+| `持久化state/events并暴露指标` | 把状态、预算、隔离、事件和指标落盘/暴露 |
+| `sd_notify WATCHDOG=1` | 只有本轮完整结束才喂systemd；主循环卡死则不喂狗，由systemd重启Watchdog |
+
 ### 9.2 同步/异步检测模型
 
 多个检测需要混合使用同步和异步，不能简单全同步，也不能无限异步。
@@ -819,14 +847,14 @@ flowchart TD
 | `web` 管理入口 `127.0.0.1:8081/` | 10s | 3s | 异步 | 3次 | 若app自身健康，恢复 `web` |
 | `web` ACS入口 `127.0.0.1:8080` TCP | 10s | 2s | 异步 | 3次 | 若acs自身健康，恢复 `web` |
 | `web` 容器内 `:8090/stub_status` | 10s | 2s | 异步 | 3次 | 判定Nginx自身异常，恢复 `web` |
-| `app` `/healthz`、`/watchdogz` | 10s | 2s | 异步 | 3次 | 判定进程或内部关键循环异常，恢复 `app` 候选 |
+| `app` `/healthz`；`/watchdogz` 在Phase 2启用后参与 | 10s | 2s | 异步 | 3次 | 判定进程或内部关键循环异常，恢复 `app` 候选 |
 | `app` 主入口TCP `127.0.0.1:18081` 或容器 `:8081` | 10s | 2s | 异步 | 3次 | 与 `/healthz` 不一致时，判定主listener异常 |
 | `app` `/readyz` | 15s | 6s | 异步 | 3次 | 只进入依赖分析；基础服务健康且重连窗口结束后才恢复 `app` |
-| `acs` `/healthz`、`/watchdogz` | 10s | 2s | 异步 | 3次 | 判定ACS进程或内部关键循环异常 |
+| `acs` `/healthz`；`/watchdogz` 在Phase 2启用后参与 | 10s | 2s | 异步 | 3次 | 判定ACS进程或内部关键循环异常 |
 | `acs` 主入口TCP `127.0.0.1:7557` 或容器 `:7557` | 10s | 2s | 异步 | 3次 | 只验证accept能力，不发真实Inform |
 | `acs` `/readyz` | 15s | 6s | 异步 | 3次 | 只进入依赖分析；注意ACS实例恢复互斥 |
 | `acs-candidate` 容器网络探针 | 10s | 2s | 异步 | 3次 | 通过容器网络IP探测，不依赖宿主端口映射 |
-| `worker` `/healthz`、`/watchdogz` | 15s | 3s | 异步 | 4次 | 判定worker进程或内部消费者循环异常 |
+| `worker` `/healthz`；`/watchdogz` 在Phase 2启用后参与 | 15s | 3s | 异步 | 4次 | 判定worker进程或内部消费者循环异常 |
 | `worker` `/readyz` | 15s | 6s | 异步 | 4次 | 只进入依赖分析，默认不直接触发worker重启 |
 | Redis轻量探测 `PING` | 10s | 1s | 异步依赖池 | 5次 | 与合成探针共同确认后，redis可进入恢复候选 |
 | PostgreSQL/TSDB轻量探测 | 10s | 2s | 异步依赖池 | 5次 | 默认只告警；自动重启需显式开启 |
@@ -849,7 +877,7 @@ flowchart TD
 4. 同步探测Docker控制面：执行 `_ping`、按Compose label列出容器、Inspect目标容器。
 5. 同步执行宿主资源安全门禁：检查磁盘、inode、内存、I/O PSI、Docker root是否只读。达到critical时冻结主动恢复，只上报，不执行宿主机治理动作。
 6. 计算到期探针：按每个探针自己的周期和 `next_due` 判断是否执行；恢复窗口内仍可探测，但按窗口规则解释结果。
-7. 有界异步执行只读探针：HTTP、TCP、`/healthz`、`/readyz`、`/watchdogz`、基础服务轻量探测和到期的合成探针。
+7. 有界异步执行只读探针：HTTP、TCP、`/healthz`、`/readyz`、已启用的 `/watchdogz`、基础服务轻量探测和到期的合成探针。
 8. 归一化结果：每个探针只产生 `success`、`failure`、`expected_failure`、`skipped`、`suppressed` 五类结果。
 9. 更新计数：只对 `failure` 增加连续失败；`success` 清零对应探针连续失败；`expected_failure` 不增加也不清零；`suppressed` 记录事件但不触发恢复。
 10. 聚合根因：如果两个及以上业务服务在同一分析窗口指向同一依赖，进入 `SHARED_INCIDENT`，暂停业务容器恢复。
@@ -873,7 +901,7 @@ flowchart TD
 业务服务的“可重启异常”至少需要满足以下任一组合：
 
 1. `/healthz` 连续失败达到门限；
-2. `/watchdogz` 连续失败达到门限；
+2. 已启用的 `/watchdogz` 连续失败达到门限；
 3. 主TCP/HTTP入口连续失败达到门限，且不是Docker网络、宿主资源或发布维护导致；
 4. 容器非running超过30秒，Docker restart policy没有自行恢复；
 5. Docker health连续unhealthy，并且 Watchdog自己的 `/healthz` 或主入口复核也失败；
@@ -910,9 +938,9 @@ COOLDOWN 120s  继续探测和上报，但不再次自动重启
 | 服务 | Docker停止超时 | 启动宽限 | 验证成功条件 | 冷却时间 | 失败后退避 |
 |---|---:|---:|---|---:|---|
 | web | 30s | 60s | `8081`入口和 `stub_status` 连续2次成功 | 2m | 2m、10m |
-| app | 15s | 90s | `/healthz`、主入口、`/watchdogz`连续2次成功 | 2m | 2m、10m |
-| acs | 20s | 120s | `/healthz`、ACS TCP、`/watchdogz`连续2次成功 | 3m | 2m、10m |
-| worker | 30s | 180s | `/healthz`、`/watchdogz`连续2次成功 | 5m | 5m、15m |
+| app | 15s | 90s | `/healthz`、主入口、已启用的 `/watchdogz` 连续2次成功 | 2m | 2m、10m |
+| acs | 20s | 120s | `/healthz`、ACS TCP、已启用的 `/watchdogz` 连续2次成功 | 3m | 2m、10m |
+| worker | 30s | 180s | `/healthz`、已启用的 `/watchdogz` 连续2次成功 | 5m | 5m、15m |
 
 除 `CLIENT_DEPENDENCY_PATH_FAILED` 场景外，`/readyz` 不作为业务容器恢复成功的必要条件。若进程级探针已经恢复但 `/readyz` 仍失败，应转为依赖事件；如果本次恢复原因就是客户端依赖路径异常，则必须要求该业务进程 `/readyz` 恢复。
 
@@ -974,7 +1002,7 @@ COOLDOWN 120s  继续探测和上报，但不再次自动重启
 个别业务仍未恢复  才按app/acs/worker顺序逐个评估业务容器恢复
 ```
 
-依赖恢复期间，受影响业务服务的 `/readyz` 失败不增加业务异常计数。若某个业务服务同时出现 `/healthz` 或 `/watchdogz` 失败，仍记录进程异常，但动作要等共享依赖流程完成后再评估，除非该进程已经完全退出且Docker无法恢复。
+依赖恢复期间，受影响业务服务的 `/readyz` 失败不增加业务异常计数。若某个业务服务同时出现 `/healthz` 或已启用的 `/watchdogz` 失败，仍记录进程异常，但动作要等共享依赖流程完成后再评估，除非该进程已经完全退出且Docker无法恢复。
 
 如果共享依赖事件中，根因基础服务的轻量探测和合成读写连续成功，则不能恢复基础服务。此时事件转为 `CLIENT_DEPENDENCY_PATH_FAILED` 或 `NETWORK_PATH_SUSPECT`：
 
@@ -1068,6 +1096,8 @@ for ticker.C {
 | 验证窗口 | 30s | 30s | 30s | 30s |
 | 冷却时间 | 2m | 2m | 3m | 5m |
 | 自动恢复预算 | 3次/15m | 3次/15m | 2次/15m | 2次/30m |
+
+`/watchdogz` stale是Phase 2新增内部有效性探针后的默认值。当前代码未实现 `/watchdogz` 时，应在配置中保持 `watchdog_enabled=false`，不参与第一阶段恢复判定。
 
 ACS primary与candidate共用一个全局恢复互斥锁，任何时候最多恢复一个ACS实例。
 
@@ -1276,7 +1306,7 @@ app恢复必须考虑现有 GPV handoff：
 2. 确认不是升级、迁移或人工维护；
 3. 尝试现有GPV handoff；
 4. 对当前容器ID执行优雅restart，使用Compose配置的30秒停止窗口；
-5. 验证 `/healthz`、主TCP listener和 `/watchdogz`；
+5. 验证 `/healthz`、主TCP listener和已启用的 `/watchdogz`；
 6. 再验证 `/readyz`，依赖异常只记录，不重复重启app。
 
 建议给 `svc.sh` 增加明确的 `recover <service>` 接口，复用安全前置动作，同时保证只操作指定服务、不触发迁移任务和整栈重建。
@@ -1300,7 +1330,7 @@ app恢复必须考虑现有 GPV handoff：
 worker没有主业务HTTP端口，必须组合：
 
 - `/healthz`；
-- `/watchdogz`内部组件心跳；
+- Phase 2新增的 `/watchdogz` 内部组件心跳；
 - Docker状态和OOM；
 - 队列确有输入时的消费进度。
 
@@ -1479,7 +1509,7 @@ Watchdog配置采用“内置默认profile + 配置文件覆盖”的方式：
 | 全局扫描 | 扫描周期、deadline、抖动、并发上限、全局恢复预算 | 默认10秒扫描，20秒deadline |
 | 主要业务服务 | 是否检测、是否自动恢复、HTTP/TCP/内部探针周期、超时、连续失败门限、启动宽限、冷却、退避、预算 | 默认全部检测并允许有限自动恢复 |
 | 基础依赖服务 | 是否检测、轻量探针周期、合成读写周期、连续失败门限、启动宽限、恢复预算 | 默认全部检测；PostgreSQL/TSDB自动恢复默认关闭 |
-| 单个探针 | `/healthz`、`/readyz`、`/watchdogz`、TCP、Docker health、合成读写是否启用及门限 | 默认启用适用于该服务的探针 |
+| 单个探针 | `/healthz`、`/readyz`、`/watchdogz`、TCP、Docker health、合成读写是否启用及门限 | 默认启用适用于该服务且已经实现的探针 |
 | 恢复策略 | 单服务恢复开关、全局最大动作数、服务级重启预算、ACS互斥组、维护锁路径 | 默认串行恢复且有预算限制 |
 | 热加载 | 是否监听配置文件、reload防抖、失败后是否保留旧配置 | 默认开启热加载，失败保留旧配置 |
 
@@ -1570,7 +1600,8 @@ targets:
     health_url: http://127.0.0.1:9091/healthz
     ready_enabled: true
     ready_url: http://127.0.0.1:9091/readyz
-    watchdog_enabled: true
+    # 当前代码尚未实现 /watchdogz；Phase 2 增加内部组件心跳后改为 true。
+    watchdog_enabled: false
     watchdog_url: http://127.0.0.1:9091/watchdogz
     tcp_enabled: true
     main_tcp_probe: 127.0.0.1:18081
@@ -1599,7 +1630,8 @@ targets:
     health_url: http://127.0.0.1:9095/healthz
     ready_enabled: true
     ready_url: http://127.0.0.1:9095/readyz
-    watchdog_enabled: true
+    # 当前代码尚未实现 /watchdogz；Phase 2 增加内部组件心跳后改为 true。
+    watchdog_enabled: false
     watchdog_url: http://127.0.0.1:9095/watchdogz
     tcp_enabled: true
     main_tcp_probe: 127.0.0.1:7557
@@ -1632,7 +1664,8 @@ targets:
       watchdog_path: /watchdogz
     health_enabled: true
     ready_enabled: true
-    watchdog_enabled: true
+    # 当前代码尚未实现 /watchdogz；Phase 2 增加内部组件心跳后改为 true。
+    watchdog_enabled: false
     health_interval: 10s
     watchdog_interval: 10s
     ready_interval: 15s
@@ -1657,7 +1690,8 @@ targets:
     health_url: http://127.0.0.1:9092/healthz
     ready_enabled: true
     ready_url: http://127.0.0.1:9092/readyz
-    watchdog_enabled: true
+    # 当前代码尚未实现 /watchdogz；Phase 2 增加内部组件心跳后改为 true。
+    watchdog_enabled: false
     watchdog_url: http://127.0.0.1:9092/watchdogz
     health_interval: 15s
     watchdog_interval: 15s
@@ -1989,11 +2023,12 @@ Docker API建议使用官方或主流稳定Go客户端，并固定与当前Docke
 - 实现状态机、预算、维护模式和生命周期锁；
 - 只自动恢复web、app、acs单实例、acs-candidate、worker；
 - `/readyz` 失败只触发根因分析和告警，不立即重启业务或有状态服务；
+- `/watchdogz` 未实现前默认 `watchdog_enabled=false`，不作为Phase 1恢复门限；
 - 修正现有crash loop告警中的systemd处置文案，使其符合当前Docker Compose部署和Docker `RestartCount` 诊断方式。
 
 ### Phase 2：内部有效性与共享依赖
 
-- 增加 `/watchdogz` 和关键组件心跳；
+- 增加 `/watchdogz` 和关键组件心跳，并把对应 `watchdog_enabled` 切为true；
 - 增加PG、Redis、NATS、MinIO直接探测；
 - 实现共享依赖故障聚合；
 - 实现基础服务健康但业务依赖路径异常时的业务进程恢复；
