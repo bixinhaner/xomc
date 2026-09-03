@@ -28837,6 +28837,54 @@ WHERE c.operation_type IN ('ADD', 'RMV')
   AND c.deprecated_at IS NULL
   AND COALESCE(c.target_object, '') <> '';
 
+-- Active Intelligence is a first-class System Management page. Keep the menu
+-- in the baseline seed so direct-entry tabs and refresh restoration resolve
+-- the correct title from the same dynamic menu source as the sidebar.
+INSERT INTO public.menus (
+	id, name, type, permission_key, parent_id, sort_order, route_path,
+	component_path, icon, show_status, status, created_at, updated_at, name_i18n,
+	feature_code
+) VALUES (
+	'aaaa0008-1000-0000-0000-000000000011',
+	'主动智能',
+	'menu',
+	'system:active-intelligence',
+	'11111111-1111-1111-1111-111111111108',
+	8,
+	'/system/active-intelligence',
+	'system/ActiveIntelligence',
+	'RobotOutlined',
+	'show',
+	'normal',
+	NOW(),
+	NOW(),
+	'{"en-US":"Active Intelligence","zh-CN":"主动智能"}'::jsonb,
+	ARRAY['CODE_SYSTEM_SETTINGS']
+)
+ON CONFLICT (id) DO UPDATE SET
+	name = EXCLUDED.name,
+	type = EXCLUDED.type,
+	permission_key = EXCLUDED.permission_key,
+	parent_id = EXCLUDED.parent_id,
+	sort_order = EXCLUDED.sort_order,
+	route_path = EXCLUDED.route_path,
+	component_path = EXCLUDED.component_path,
+	icon = EXCLUDED.icon,
+	show_status = EXCLUDED.show_status,
+	status = EXCLUDED.status,
+	name_i18n = EXCLUDED.name_i18n,
+	feature_code = EXCLUDED.feature_code,
+	updated_at = NOW();
+
+INSERT INTO public.role_menus (id, role_id, menu_id, created_at)
+VALUES (
+	'aaaa0008-2111-0000-0000-000000000011',
+	'10000000-0000-0000-0000-000000000001',
+	'aaaa0008-1000-0000-0000-000000000011',
+	NOW()
+)
+ON CONFLICT (role_id, menu_id) DO NOTHING;
+
 COMMIT;
 
 -- +goose Down

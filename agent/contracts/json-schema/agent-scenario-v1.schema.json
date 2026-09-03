@@ -1,0 +1,301 @@
+{
+  "$id": "https://agentstudio.example/schemas/agent-scenario-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgentScenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "agentstudio.scenario/v1"
+    },
+    "kind": {
+      "const": "AgentScenario"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "name",
+        "version"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{2,79}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trigger",
+        "rollout",
+        "agent",
+        "delivery",
+        "limits"
+      ],
+      "properties": {
+        "trigger": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "eventType"
+          ],
+          "properties": {
+            "eventType": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_.-]+\\.v[0-9]+$"
+            }
+          }
+        },
+        "match": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "all": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "$ref": "#/definitions/predicate"
+              }
+            },
+            "any": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "$ref": "#/definitions/predicate"
+              }
+            }
+          }
+        },
+        "dedupe": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "keyTemplate",
+            "cooldownSeconds"
+          ],
+          "properties": {
+            "keyTemplate": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "cooldownSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 604800
+            }
+          }
+        },
+        "rollout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "percentage"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "disabled",
+                "shadow",
+                "active"
+              ]
+            },
+            "percentage": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "resourceGroupAllowlist": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "string",
+                "maxLength": 160
+              }
+            }
+          }
+        },
+        "agent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agentMode",
+            "runtimeClass",
+            "skills",
+            "promptFile",
+            "outputSchemaFile",
+            "presentationFile",
+            "allowedOperations",
+            "timeoutSeconds",
+            "maxToolCalls"
+          ],
+          "properties": {
+            "agentMode": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "runtimeClass": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "skills": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {
+                "type": "string",
+                "maxLength": 160
+              }
+            },
+            "promptFile": {
+              "type": "string",
+              "pattern": "^prompts/"
+            },
+            "outputSchemaFile": {
+              "type": "string",
+              "pattern": "^schemas/"
+            },
+            "presentationFile": {
+              "type": "string",
+              "pattern": "^presentation/"
+            },
+            "allowedOperations": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 200,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 200
+              }
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 600
+            },
+            "maxToolCalls": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            },
+            "maxOutputBytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 262144,
+              "default": 65536
+            }
+          }
+        },
+        "delivery": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "surfaces",
+            "expiresAfterSeconds"
+          ],
+          "properties": {
+            "surfaces": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "attention",
+                  "task-detail",
+                  "access-review",
+                  "alarm-detail",
+                  "device-detail",
+                  "dashboard",
+                  "message-center"
+                ]
+              }
+            },
+            "expiresAfterSeconds": {
+              "type": "integer",
+              "minimum": 300,
+              "maximum": 7776000
+            }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maxConcurrentRuns",
+            "maxRunsPerHour"
+          ],
+          "properties": {
+            "maxConcurrentRuns": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "maxRunsPerHour": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "predicate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "op",
+        "value"
+      ],
+      "properties": {
+        "field": {
+          "type": "string",
+          "pattern": "^(event|data|resource|tenant)\\.[A-Za-z0-9_.-]+$"
+        },
+        "op": {
+          "enum": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "exists",
+            "notExists",
+            "gte",
+            "lte"
+          ]
+        },
+        "value": {}
+      }
+    }
+  }
+}

@@ -103,6 +103,35 @@ func NewToolExecutor(handler http.Handler, routes RouteProvider, jwt *admin.JWTS
 	return &ToolExecutor{handler: handler, routes: routes, jwt: jwt}
 }
 
+// HandbookDigest returns the digest of the exact runtime API handbook used by
+// ToolExecutor. Background Connector events pin this value so a Run never
+// silently switches API contracts halfway through an investigation.
+func (e *ToolExecutor) HandbookDigest() (string, error) {
+	manifest, err := e.handbookManifest()
+	if err != nil {
+		return "", fmt.Errorf("load runtime handbook digest: %w", err)
+	}
+	return manifest.HandbookDigest, nil
+}
+
+// HandbookMetadata exposes the immutable package coordinates required by a
+// remote background agent to download the exact API contract pinned to an
+// event. It intentionally contains no user or connector credentials.
+func (e *ToolExecutor) HandbookMetadata() (map[string]any, error) {
+	manifest, err := e.handbookManifest()
+	if err != nil {
+		return nil, fmt.Errorf("load runtime handbook metadata: %w", err)
+	}
+	return map[string]any{
+		"schemaVersion": manifest.SchemaVersion, "catalogVersion": manifest.CatalogVersion,
+		"handbookDigest": manifest.HandbookDigest, "totalOperations": manifest.TotalOperations,
+		"manifestPath": manifest.ManifestPath, "chunkPathTemplate": manifest.ChunkPath,
+		"archiveFormat": manifest.ArchiveFormat, "archiveBytes": manifest.ArchiveBytes,
+		"chunkBytes": manifest.ChunkBytes, "totalChunks": manifest.TotalChunks,
+		"contentRoot": manifest.ContentRoot, "packageAvailable": true,
+	}, nil
+}
+
 func (e *ToolExecutor) Execute(ctx context.Context, claims *admin.Claims, request ToolRequest, policy agentconfig.RuntimePolicy) ToolResult {
 	result := ToolResult{RunID: request.RunID, ToolCallID: request.ToolCallID}
 	output, err := e.execute(ctx, claims, request.Input, policy)
@@ -334,11 +363,21 @@ func (e *ToolExecutor) callLocalAPI(
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	tokenPair, err := e.jwt.GenerateTokenPair(claims)
+	accessToken := ""
+	var err error
+	if hasBackgroundAgentScope(claims.Scopes) {
+		accessToken, _, err = e.jwt.GenerateBackgroundAgentToken(claims)
+	} else {
+		var tokenPair *admin.TokenPair
+		tokenPair, err = e.jwt.GenerateTokenPair(claims)
+		if tokenPair != nil {
+			accessToken = tokenPair.AccessToken
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("create local access token: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+tokenPair.AccessToken)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
 
 	rec := httptest.NewRecorder()
 	e.handler.ServeHTTP(rec, req)
@@ -362,6 +401,15 @@ func (e *ToolExecutor) callLocalAPI(
 		}, nil
 	}
 	return decodeLimitedResponse(rec.Body.Bytes(), policy.MaxResponseBytes)
+}
+
+func hasBackgroundAgentScope(scopes []string) bool {
+	for _, scope := range scopes {
+		if strings.HasPrefix(scope, "agent-background:") {
+			return true
+		}
+	}
+	return false
 }
 
 func downloadableResponse(header http.Header, requestPath string) (string, string, bool) {

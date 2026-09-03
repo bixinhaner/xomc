@@ -39,6 +39,14 @@ export default function AppShell() {
   const agentVisibility = useAgentVisibilityConfig();
   const agentVisible = agentVisibility.data?.visible === true;
 
+  useEffect(() => {
+    const openFinding = () => {
+      if (agentVisible) setAgentOpen(true);
+    };
+    window.addEventListener('xomc:open-agent-finding', openFinding);
+    return () => window.removeEventListener('xomc:open-agent-finding', openFinding);
+  }, [agentVisible]);
+
   const { isMobile, isTablet } = useResponsive();
   const { isTouchPrimary } = useIsTouchDevice();
 

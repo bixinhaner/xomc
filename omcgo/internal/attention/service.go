@@ -281,6 +281,15 @@ func itemRank(item Item) int {
 		return 300
 	case KindDeviceAccessReview:
 		return 200
+	case KindAgentFinding:
+		switch item.Severity {
+		case "critical":
+			return 450
+		case "major":
+			return 350
+		default:
+			return 250
+		}
 	default:
 		return 0
 	}

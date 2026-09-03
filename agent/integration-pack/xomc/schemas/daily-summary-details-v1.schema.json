@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "windowStart",
+    "windowEnd",
+    "topItems",
+    "scopeDescription"
+  ],
+  "properties": {
+    "windowStart": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "windowEnd": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "scopeDescription": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "topItems": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "category",
+          "title",
+          "reason"
+        ],
+        "properties": {
+          "category": {
+            "enum": [
+              "alarm",
+              "task",
+              "device",
+              "access_review",
+              "other"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "resourceRole": {
+            "type": "string",
+            "maxLength": 80
+          }
+        }
+      }
+    }
+  }
+}

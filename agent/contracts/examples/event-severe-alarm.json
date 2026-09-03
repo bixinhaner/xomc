@@ -1,0 +1,31 @@
+{
+  "contractVersion": "1.0",
+  "eventId": "evt-event-severe-alarm-01JQ8G7N6K1A",
+  "eventType": "omc.alarm.severe-raised.v1",
+  "source": "xomc-prod-01",
+  "occurredAt": "2026-08-27T02:16:30Z",
+  "traceId": "01JQ8G7N6K1A2B3C4D5E6F7G8H",
+  "integrationPack": {
+    "key": "com.baicells.xomc",
+    "version": "1.0.0",
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "handbookDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "tenantRef": "operator-demo",
+  "resources": [
+    {
+      "type": "alarm",
+      "id": "alarm-88",
+      "role": "alarm"
+    },
+    {
+      "type": "device",
+      "id": "device-22",
+      "role": "device"
+    }
+  ],
+  "data": {
+    "severity": "critical",
+    "alarmCode": "CELL_UNAVAILABLE"
+  }
+}

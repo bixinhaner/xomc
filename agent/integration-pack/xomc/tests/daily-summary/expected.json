@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "1.0",
+  "scenarioKey": "daily-operations-summary",
+  "scenarioVersion": 1,
+  "title": "每日运维摘要",
+  "summary": "今日最需关注的是 2 条严重告警和 3 个重复失败任务。",
+  "severity": "high",
+  "confidence": 0.9,
+  "facts": [
+    {
+      "id": "fact-1",
+      "text": "任务在设备离线期间失败。",
+      "evidenceRefs": [
+        "tool:get.devices.by_id"
+      ]
+    },
+    {
+      "id": "fact-2",
+      "text": "近 24 小时存在 3 次同类失败。",
+      "evidenceRefs": [
+        "tool:get.devices.tasks"
+      ]
+    }
+  ],
+  "hypotheses": [
+    {
+      "id": "hyp-1",
+      "text": "设备连接中断是本次失败的主要原因。",
+      "confidence": 0.86,
+      "evidenceRefs": [
+        "fact-1",
+        "fact-2"
+      ]
+    }
+  ],
+  "resourceRefs": [
+    {
+      "type": "task",
+      "id": "task-123",
+      "role": "task",
+      "label": "配置任务"
+    },
+    {
+      "type": "device",
+      "id": "device-456",
+      "role": "device",
+      "label": "SN001"
+    }
+  ],
+  "details": {
+    "windowStart": "2026-08-26T00:00:00Z",
+    "windowEnd": "2026-08-27T00:00:00Z",
+    "scopeDescription": "NE Group ng-1 当前可见范围",
+    "topItems": [
+      {
+        "category": "alarm",
+        "title": "2 条 critical 告警未恢复",
+        "reason": "持续超过 30 分钟",
+        "resourceRole": "scope"
+      },
+      {
+        "category": "task",
+        "title": "3 个重复失败任务",
+        "reason": "均与设备离线相关",
+        "resourceRole": "scope"
+      }
+    ]
+  },
+  "suggestedActions": [
+    {
+      "type": "open-resource",
+      "label": "查看任务",
+      "resourceRole": "task"
+    },
+    {
+      "type": "continue-agent",
+      "label": "继续询问 Agent",
+      "promptKey": "task-failure-followup"
+    },
+    {
+      "type": "dismiss",
+      "label": "忽略"
+    }
+  ],
+  "presentation": {
+    "surfaces": [
+      "attention",
+      "task-detail"
+    ],
+    "sections": [
+      "summary",
+      "facts",
+      "hypotheses",
+      "details",
+      "resources",
+      "suggestedActions"
+    ],
+    "icon": "task-error"
+  }
+}

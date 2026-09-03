@@ -1,0 +1,83 @@
+{
+  "$id": "https://agentstudio.example/schemas/tool-result-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ToolInvocationResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "leaseToken",
+    "workerId",
+    "status",
+    "httpStatus",
+    "output",
+    "truncated",
+    "resultBytes",
+    "completedAt",
+    "traceId"
+  ],
+  "properties": {
+    "contractVersion": {
+      "const": "1.0"
+    },
+    "leaseToken": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 512
+    },
+    "workerId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "status": {
+      "enum": [
+        "succeeded",
+        "failed"
+      ]
+    },
+    "httpStatus": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 599
+    },
+    "output": {},
+    "truncated": {
+      "type": "boolean"
+    },
+    "resultBytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 262144
+    },
+    "error": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "traceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    }
+  }
+}

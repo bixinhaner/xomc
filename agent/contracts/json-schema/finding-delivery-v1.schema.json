@@ -1,0 +1,70 @@
+{
+  "$id": "https://agentstudio.example/schemas/finding-delivery-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FindingDeliveryLeaseItem",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "deliveryId",
+    "findingId",
+    "runId",
+    "scenarioKey",
+    "packageDigest",
+    "handbookDigest",
+    "finding",
+    "leaseToken",
+    "leaseExpiresAt",
+    "traceId"
+  ],
+  "properties": {
+    "contractVersion": {
+      "const": "1.0"
+    },
+    "deliveryId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "findingId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "scenarioKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "packageDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "handbookDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "finding": {
+      "$ref": "agent-finding-v1.schema.json"
+    },
+    "leaseToken": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 512
+    },
+    "leaseExpiresAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "traceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    }
+  }
+}

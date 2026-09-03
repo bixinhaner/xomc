@@ -1,0 +1,77 @@
+openapi: 3.1.0
+info:
+  title: xOMC Agent Finding API
+  version: 1.0.0
+servers:
+  - url: /api/v1
+paths:
+  /agent/findings:
+    get:
+      operationId: listAgentFindings
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, resolved, expired] }
+        - name: userState
+          in: query
+          schema: { type: string, enum: [unread, read, dismissed] }
+        - name: severity
+          in: query
+          schema: { type: string, enum: [info, low, medium, high, critical] }
+        - name: resourceType
+          in: query
+          schema: { type: string }
+        - name: resourceId
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Visible findings
+  /agent/findings/{id}:
+    get:
+      operationId: getAgentFinding
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      responses:
+        '200': { description: Finding detail }
+        '404': { description: Not found or not visible }
+  /agent/findings/{id}/read:
+    post:
+      operationId: readAgentFinding
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      responses:
+        '204': { description: Marked read }
+  /agent/findings/{id}/dismiss:
+    post:
+      operationId: dismissAgentFinding
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      responses:
+        '204': { description: Dismissed for current user }
+  /agent/findings/{id}/restore:
+    post:
+      operationId: restoreAgentFinding
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      responses:
+        '204': { description: Restored to read state }
+  /dashboard/attention:
+    get:
+      operationId: getDashboardAttention
+      description: Existing API extended with source=ai_finding rows after RBAC filtering.
+      responses:
+        '200': { description: Attention rows }
+components:
+  parameters:
+    FindingId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }

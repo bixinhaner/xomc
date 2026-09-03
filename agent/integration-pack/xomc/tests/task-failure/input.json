@@ -1,0 +1,34 @@
+{
+  "contractVersion": "1.0",
+  "eventId": "evt-task-failed-01JQ8G7N6K1A",
+  "eventType": "omc.task.failed.v1",
+  "source": "xomc-prod-01",
+  "occurredAt": "2026-08-27T02:16:30Z",
+  "traceId": "01JQ8G7N6K1A2B3C4D5E6F7G8H",
+  "integrationPack": {
+    "key": "com.baicells.xomc",
+    "version": "1.0.0",
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "handbookDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "tenantRef": "operator-demo",
+  "resources": [
+    {
+      "type": "task",
+      "id": "task-123",
+      "role": "task",
+      "label": "配置任务 task-123"
+    },
+    {
+      "type": "device",
+      "id": "device-456",
+      "role": "device",
+      "label": "SN001"
+    }
+  ],
+  "data": {
+    "taskType": "set_parameter_values",
+    "errorCode": "device_offline",
+    "failureMessage": "device offline"
+  }
+}

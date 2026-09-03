@@ -1,0 +1,69 @@
+{
+  "$id": "https://agentstudio.example/schemas/finding-delivery-ack-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FindingDeliveryAck",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "leaseToken",
+    "workerId",
+    "status",
+    "committedAt",
+    "traceId"
+  ],
+  "properties": {
+    "contractVersion": {
+      "const": "1.0"
+    },
+    "leaseToken": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 512
+    },
+    "workerId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "status": {
+      "enum": [
+        "delivered",
+        "rejected"
+      ]
+    },
+    "localFindingId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 160
+    },
+    "error": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    },
+    "committedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "traceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    }
+  }
+}

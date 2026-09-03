@@ -16,6 +16,15 @@ const dynamicKpiMenu: Menu = {
   status: 'normal',
 };
 
+const dynamicActiveIntelligenceMenu: Menu = {
+  ...dynamicKpiMenu,
+  id: 'active-intelligence',
+  name: '主动智能',
+  nameI18n: { 'zh-CN': '主动智能', 'en-US': 'Active Intelligence' },
+  permissionKey: 'system:active-intelligence',
+  routePath: '/system/active-intelligence',
+};
+
 describe('resolveRouteTab', () => {
   it('resolves a visible dynamic menu route for an address-bar deep link', () => {
     expect(resolveRouteTab({
@@ -30,6 +39,24 @@ describe('resolveRouteTab', () => {
       key: '/system/kpi-config',
       label: '首页 KPI 配置',
       path: '/system/kpi-config',
+      closable: true,
+      labelRaw: true,
+    });
+  });
+
+  it('keeps the active-intelligence tab after a direct link or refresh', () => {
+    expect(resolveRouteTab({
+      pathname: '/system/active-intelligence',
+      dynamicMenuEnabled: true,
+      dynamicMenus: [dynamicActiveIntelligenceMenu],
+      staticNav: NAV_CONFIG,
+      locale: 'zh-CN',
+      isAdmin: true,
+      isSuperAdmin: false,
+    })).toEqual({
+      key: '/system/active-intelligence',
+      label: '主动智能',
+      path: '/system/active-intelligence',
       closable: true,
       labelRaw: true,
     });

@@ -1,0 +1,99 @@
+{
+  "contractVersion": "1.0",
+  "deliveryId": "delivery-01JQ8GAD3Q",
+  "findingId": "finding-01JQ8GACFZ",
+  "runId": "run-01JQ8G8AZZ",
+  "scenarioKey": "task-failure-analysis",
+  "packageDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "handbookDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "finding": {
+    "schemaVersion": "1.0",
+    "scenarioKey": "task-failure-analysis",
+    "scenarioVersion": 1,
+    "title": "任务失败主要由设备离线导致",
+    "summary": "任务执行窗口内设备 SN001 处于离线状态，且近 24 小时已有 3 次同类失败。建议先恢复设备连通性，再由用户在 AgentPanel 中确认是否重试。",
+    "severity": "high",
+    "confidence": 0.86,
+    "facts": [
+      {
+        "id": "fact-1",
+        "text": "任务在设备离线期间失败。",
+        "evidenceRefs": [
+          "tool:get.devices.by_id"
+        ]
+      },
+      {
+        "id": "fact-2",
+        "text": "近 24 小时存在 3 次同类失败。",
+        "evidenceRefs": [
+          "tool:get.devices.tasks"
+        ]
+      }
+    ],
+    "hypotheses": [
+      {
+        "id": "hyp-1",
+        "text": "设备连接中断是本次失败的主要原因。",
+        "confidence": 0.86,
+        "evidenceRefs": [
+          "fact-1",
+          "fact-2"
+        ]
+      }
+    ],
+    "resourceRefs": [
+      {
+        "type": "task",
+        "id": "task-123",
+        "role": "task",
+        "label": "配置任务"
+      },
+      {
+        "type": "device",
+        "id": "device-456",
+        "role": "device",
+        "label": "SN001"
+      }
+    ],
+    "details": {
+      "failureCategory": "device_offline",
+      "taskId": "task-123",
+      "deviceId": "device-456",
+      "recentFailureCount": 3
+    },
+    "suggestedActions": [
+      {
+        "type": "open-resource",
+        "label": "查看任务",
+        "resourceRole": "task"
+      },
+      {
+        "type": "continue-agent",
+        "label": "继续询问 Agent",
+        "promptKey": "task-failure-followup"
+      },
+      {
+        "type": "dismiss",
+        "label": "忽略"
+      }
+    ],
+    "presentation": {
+      "surfaces": [
+        "attention",
+        "task-detail"
+      ],
+      "sections": [
+        "summary",
+        "facts",
+        "hypotheses",
+        "details",
+        "resources",
+        "suggestedActions"
+      ],
+      "icon": "task-error"
+    }
+  },
+  "leaseToken": "delivery-lease-token-abcdefghijklmnopqrstuvwxyz1234",
+  "leaseExpiresAt": "2026-08-27T02:19:00Z",
+  "traceId": "01JQ8G7N6K1A2B3C4D5E6F7G8H"
+}

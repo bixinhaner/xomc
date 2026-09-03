@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "failureCategory",
+    "taskId",
+    "deviceId",
+    "recentFailureCount"
+  ],
+  "properties": {
+    "failureCategory": {
+      "enum": [
+        "device_offline",
+        "timeout",
+        "permission_denied",
+        "contract_mismatch",
+        "parameter_invalid",
+        "temporary_failure",
+        "unknown"
+      ]
+    },
+    "taskId": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "deviceId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 160
+    },
+    "recentFailureCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "errorCode": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 160
+    },
+    "recommendedNextStep": {
+      "type": "string",
+      "maxLength": 500
+    }
+  }
+}

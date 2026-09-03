@@ -1,0 +1,16 @@
+icon: task-error
+titleTemplate: 任务失败分析：${details.failureCategory}
+defaultSurface: task-detail
+sections:
+- summary
+- facts
+- hypotheses
+- details
+- resources
+- suggestedActions
+actions:
+- open-finding
+- open-resource
+- continue-agent
+- dismiss
+- copy-summary

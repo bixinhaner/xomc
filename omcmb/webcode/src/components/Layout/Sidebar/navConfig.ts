@@ -207,6 +207,7 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'sys-op-log',      label: 'nav.system.logAudit',       path: '/system/operation-log' },
       { key: 'sys-config',      label: 'nav.system.config',         path: '/system/config' },
       { key: 'sys-ui-custom',   label: 'nav.system.uiCustom',       path: '/system/ui-custom' },
+      { key: 'sys-active-intelligence', label: 'nav.system.activeIntelligence', path: '/system/active-intelligence', requireAdmin: true },
       // { key: 'sys-home',        label: 'nav.system.dashboard',      path: '/system/dashboard' },  // 隐藏系统仪表板
       // { key: 'sys-operator',    label: 'nav.system.operators',      path: '/system/operators' },  // 隐藏运营商管理
       // { key: 'sys-cert',        label: 'nav.system.certificates',   path: '/system/certificates' },  // 隐藏证书管理

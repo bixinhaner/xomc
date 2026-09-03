@@ -88,7 +88,7 @@ func TestAdminConfigMasksServiceToken(t *testing.T) {
 	require.True(t, cfg.ServiceTokenConfigured)
 }
 
-func TestAdminConfigUsesBuiltInConnectionDefaults(t *testing.T) {
+func TestAdminConfigUsesSafeConnectionDefaultsWithoutEmbeddedCredential(t *testing.T) {
 	store := newFakeConfigStore(nil)
 	svc := NewService(store, store, nil, nil)
 
@@ -96,7 +96,7 @@ func TestAdminConfigUsesBuiltInConnectionDefaults(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, DefaultAgentStudioBaseURL, cfg.AgentStudioBaseURL)
-	require.True(t, cfg.ServiceTokenConfigured)
+	require.False(t, cfg.ServiceTokenConfigured)
 	require.Equal(t, DefaultConnectorSlug, cfg.ConnectorSlug)
 	require.Equal(t, StatusDisabled, cfg.Status)
 }

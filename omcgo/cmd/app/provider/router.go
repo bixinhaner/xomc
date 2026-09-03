@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/agentbridge"
 	"github.com/omcgo/omcgo/internal/agentruntime"
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/authz"
@@ -419,6 +420,51 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	ad.agentConfigHandler.RegisterRuntimeRoutes(v1)
 	agentRuntimeHandler.RegisterRoutes(v1)
 
+	// 主动智能后台桥接常驻但动态读取 Connector 配置。未连接时所有出站调用
+	// fail closed；管理员完成同步后无需重启 OMC，worker 下一轮即可接管。
+	outboxRepo := agentbridge.NewOutboxRepository(c.PgPool)
+	findingRepo := agentbridge.NewFindingRepository(c.PgPool)
+	bridgeClient := agentbridge.NewClient(ad.agentConfigHandler.Service(), http.DefaultClient)
+	executor := agentRuntimeHandler.ToolExecutor()
+	subscriber := agentbridge.NewEventSubscriber(c.EventBus, c.PgPool, outboxRepo, ad.agentConfigHandler.Service(), executor, c.Logger)
+	if err := subscriber.Subscribe(); err != nil {
+		return fmt.Errorf("initialize proactive agent event subscriber: %w", err)
+	}
+	if c.AlarmEngine != nil {
+		c.AlarmEngine.SetRaisedHook(subscriber.HandleSevereAlarm)
+	}
+	hostname, hostnameErr := os.Hostname()
+	if hostnameErr != nil || hostname == "" {
+		hostname = "unknown"
+	}
+	workerID := fmt.Sprintf("xomc-%s-%d", hostname, os.Getpid())
+	forwarder := agentbridge.NewEventForwarder(outboxRepo, bridgeClient, c.Logger)
+	toolWorker := agentbridge.NewToolWorker(bridgeClient, c.PgPool, executor, workerID, c.Logger)
+	findingWorker := agentbridge.NewFindingWorker(bridgeClient, findingRepo, workerID, c.Logger)
+	heartbeatWorker := agentbridge.NewHeartbeatWorker(bridgeClient, executor.HandbookDigest, workerID, c.Logger)
+	dailySummaryScheduler := agentbridge.NewDailySummaryScheduler(outboxRepo, ad.agentConfigHandler.Service(), executor, c.Logger)
+	forwarder.Start()
+	toolWorker.Start()
+	findingWorker.Start()
+	heartbeatWorker.Start()
+	dailySummaryScheduler.Start()
+	c.GS.Register("agent-event-forwarder", 1, func(context.Context) error { return forwarder.Close() })
+	c.GS.Register("agent-tool-worker", 1, func(context.Context) error { return toolWorker.Close() })
+	c.GS.Register("agent-finding-worker", 1, func(context.Context) error { return findingWorker.Close() })
+	c.GS.Register("agent-heartbeat-worker", 1, func(context.Context) error { return heartbeatWorker.Close() })
+	c.GS.Register("agent-daily-summary-scheduler", 1, func(context.Context) error { return dailySummaryScheduler.Close() })
+	c.miscDeps.agentFindingHandler = agentbridge.NewFindingHandler(findingRepo, authz.NewResolver(c.PermService))
+	c.miscDeps.agentAdminHandler = agentbridge.NewAdminHandler(bridgeClient)
+
+	agentTarget, agentTargetErr := ad.agentConfigHandler.Service().GetRuntimeTarget(context.Background())
+	if agentTargetErr != nil {
+		c.Logger.Warn("load proactive agent bridge config", zap.Error(agentTargetErr))
+	} else if agentTarget != nil && agentTarget.Enabled && agentTarget.AgentStudioServiceToken != "" {
+		c.Logger.Info("proactive agent bridge started", zap.String("connector_id", agentTarget.ConnectorID))
+	} else {
+		c.Logger.Info("proactive agent bridge waiting for connector configuration")
+	}
+
 	// Helper: authenticated sub-group.
 	//
 	// RequireAPIPermission 按标准路由模板 + HTTP 方法执行端点级 Casbin 鉴权。
@@ -427,6 +473,12 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 		g := v1.Group("")
 		g.Use(admin.RequireAPIPermission(ad.roleRepo))
 		return g
+	}
+	if c.miscDeps.agentFindingHandler != nil {
+		c.miscDeps.agentFindingHandler.RegisterRoutes(permGroup("devices"))
+	}
+	if c.miscDeps.agentAdminHandler != nil {
+		c.miscDeps.agentAdminHandler.RegisterRoutes(permGroup("system"))
 	}
 
 	// P7-B：featGroup 在 permGroup 基础上叠加 license feature 准入控制。

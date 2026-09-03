@@ -1,0 +1,17 @@
+icon: alarm-critical
+titleTemplate: 严重告警解释：${details.alarmCode}
+defaultSurface: alarm-detail
+sections:
+- summary
+- impact
+- facts
+- hypotheses
+- details
+- resources
+- suggestedActions
+actions:
+- open-finding
+- open-resource
+- continue-agent
+- dismiss
+- copy-summary

@@ -27,6 +27,7 @@ type Kind string
 const (
 	KindActiveAlarm        Kind = "active_alarm"
 	KindDeviceAccessReview Kind = "device_access_review"
+	KindAgentFinding       Kind = "agent_finding"
 )
 
 type Action string
@@ -34,6 +35,7 @@ type Action string
 const (
 	ActionViewAlarm       Action = "view_alarm"
 	ActionReviewCandidate Action = "review_device_candidate"
+	ActionViewFinding     Action = "view_agent_finding"
 )
 
 type Response struct {

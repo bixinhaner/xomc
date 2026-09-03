@@ -11,10 +11,19 @@ const mocks = vi.hoisted(() => ({
   useAttentionPage: vi.fn(),
 }));
 
-vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
+vi.mock('react-router-dom', () => ({
+  useNavigate: () => mocks.navigate,
+  useLocation: () => ({ pathname: '/dashboard', search: '' }),
+}));
 vi.mock('@core/hooks/api/useAttention', () => ({
   useAttentionSummary: mocks.useAttentionSummary,
   useAttentionPage: mocks.useAttentionPage,
+}));
+vi.mock('@core/hooks/api/useAgentFindings', () => ({
+  useAgentFinding: () => ({ data: undefined, isPending: false, isError: false, refetch: vi.fn() }),
+  useMarkAgentFindingRead: () => ({ mutate: vi.fn(), isPending: false }),
+  useDismissAgentFinding: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useContinueAgentFinding: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 vi.mock('@/hooks/useT', () => ({ useT: () => (key: string) => key }));
 vi.mock('@core/utils/systemTime', () => ({ formatSystemTime: (value: string) => value }));

@@ -1,0 +1,109 @@
+{
+  "$id": "https://agentstudio.example/schemas/tool-invocation-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ToolInvocationLeaseItem",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "invocationId",
+    "runId",
+    "scenarioKey",
+    "packageDigest",
+    "handbookDigest",
+    "operationId",
+    "method",
+    "path",
+    "arguments",
+    "resourceScope",
+    "leaseToken",
+    "leaseExpiresAt",
+    "deadlineAt",
+    "traceId"
+  ],
+  "properties": {
+    "contractVersion": {
+      "const": "1.0"
+    },
+    "invocationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "scenarioKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "packageDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "handbookDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "operationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "method": {
+      "const": "GET"
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^/api/v1/",
+      "maxLength": 500
+    },
+    "arguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "object"
+        },
+        "query": {
+          "type": "object"
+        },
+        "body": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "resourceScope": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "$ref": "resource-ref-v1.schema.json"
+      }
+    },
+    "leaseToken": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 512
+    },
+    "leaseExpiresAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "deadlineAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "traceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    }
+  }
+}

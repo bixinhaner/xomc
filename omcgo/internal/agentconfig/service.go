@@ -224,9 +224,6 @@ func (s *Service) loadValues(ctx context.Context) (map[string]string, error) {
 	if strings.TrimSpace(values[KeyAgentStudioBaseURL]) == "" {
 		values[KeyAgentStudioBaseURL] = DefaultAgentStudioBaseURL
 	}
-	if strings.TrimSpace(values[KeyAgentStudioServiceToken]) == "" {
-		values[KeyAgentStudioServiceToken] = DefaultAgentStudioServiceToken
-	}
 	// Connector provisioning is shared infrastructure, not an instance-level user choice.
 	values[KeyConnectorSlug] = DefaultConnectorSlug
 	return values, nil

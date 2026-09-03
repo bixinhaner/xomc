@@ -2,10 +2,12 @@ export type AttentionSectionKey = 'abnormalities' | 'todos';
 export type AttentionSectionStatus = 'ok' | 'partial' | 'error';
 export type AttentionKind =
   | 'active_alarm'
-  | 'device_access_review';
+  | 'device_access_review'
+  | 'agent_finding';
 export type AttentionAction =
   | 'view_alarm'
-  | 'review_device_candidate';
+  | 'review_device_candidate'
+  | 'view_agent_finding';
 
 export interface AttentionTarget {
   type: string;

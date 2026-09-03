@@ -1,0 +1,49 @@
+apiVersion: agentstudio.integration/v1
+kind: IntegrationPackage
+metadata:
+  key: com.baicells.xomc
+  name: xOMC Agent Integration
+  version: 1.0.0
+  owner: xOMC Team
+  description: xOMC proactive read-only analysis scenarios for Agent Studio.
+compatibility:
+  contractVersion: '1.0'
+  connectorType: xomc
+  connectorVersion: '>=1.1.0'
+  agentStudio: '>=1.0.0'
+runtime:
+  agentMode: external-operations
+  runtimeClasses:
+  - background-analysis
+  locale: zh-CN
+  timezone: Asia/Shanghai
+contents:
+  scenarios:
+  - scenarios/task-failure-analysis.yaml
+  - scenarios/access-review-assistant.yaml
+  - scenarios/severe-alarm-explanation.yaml
+  - scenarios/daily-operations-summary.yaml
+  prompts:
+  - prompts/task-failure-analysis.md
+  - prompts/access-review-assistant.md
+  - prompts/severe-alarm-explanation.md
+  - prompts/daily-operations-summary.md
+  schemas:
+  - schemas/task-failure-details-v1.schema.json
+  - schemas/access-review-details-v1.schema.json
+  - schemas/severe-alarm-details-v1.schema.json
+  - schemas/daily-summary-details-v1.schema.json
+  presentation:
+  - presentation/task-failure.yaml
+  - presentation/access-review.yaml
+  - presentation/severe-alarm.yaml
+  - presentation/daily-summary.yaml
+  tests:
+  - tests/task-failure/input.json
+  - tests/task-failure/expected.json
+  - tests/access-review/input.json
+  - tests/access-review/expected.json
+  - tests/severe-alarm/input.json
+  - tests/severe-alarm/expected.json
+  - tests/daily-summary/input.json
+  - tests/daily-summary/expected.json

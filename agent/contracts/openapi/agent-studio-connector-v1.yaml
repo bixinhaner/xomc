@@ -1,0 +1,215 @@
+openapi: 3.1.0
+info:
+  title: Agent Studio Connector Protocol
+  version: 1.0.0
+  description: >-
+    xOMC 主动向 Agent Studio 上报事件/Handbook，并通过出站长轮询领取
+    ToolInvocation 与 FindingDelivery。所有写业务动作均不在 V1 协议内。
+servers:
+  - url: https://agent-studio.example.com
+security:
+  - ConnectorBearer: []
+paths:
+  /api/action-connectors/{connectorId}/events:
+    post:
+      operationId: acceptConnectorEvent
+      parameters:
+        - $ref: '#/components/parameters/ConnectorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../json-schema/connector-event-v1.schema.json'
+      responses:
+        '201':
+          description: Event accepted or idempotently replayed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [receiptId, eventId, status, matchedScenarios, suppressedScenarios]
+                properties:
+                  receiptId: { type: string }
+                  eventId: { type: string }
+                  status: { enum: [accepted, replayed] }
+                  matchedScenarios: { type: array, items: { type: string } }
+                  suppressedScenarios: { type: array, items: { type: string } }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/action-connectors/{connectorId}/handbooks/{digest}:
+    head:
+      operationId: hasHandbook
+      parameters:
+        - $ref: '#/components/parameters/ConnectorId'
+        - $ref: '#/components/parameters/Digest'
+      responses:
+        '200': { description: Handbook present }
+        '404': { description: Handbook absent }
+    put:
+      operationId: uploadHandbook
+      parameters:
+        - $ref: '#/components/parameters/ConnectorId'
+        - $ref: '#/components/parameters/Digest'
+      requestBody:
+        required: true
+        content:
+          application/zip:
+            schema: { type: string, format: binary }
+      responses:
+        '201': { description: Stored and verified }
+        '204': { description: Already present }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/action-connectors/{connectorId}/tool-invocations/lease:
+    post:
+      operationId: leaseToolInvocations
+      parameters:
+        - $ref: '#/components/parameters/ConnectorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workerId, maxItems, waitSeconds, leaseSeconds, contractVersions]
+              properties:
+                workerId: { type: string, maxLength: 160 }
+                maxItems: { type: integer, minimum: 1, maximum: 32 }
+                waitSeconds: { type: integer, minimum: 0, maximum: 30 }
+                leaseSeconds: { type: integer, minimum: 10, maximum: 120 }
+                contractVersions: { type: array, items: { type: string }, minItems: 1 }
+      responses:
+        '200':
+          description: Lease batch
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '../json-schema/tool-invocation-v1.schema.json'
+  /api/action-connectors/{connectorId}/tool-invocations/{invocationId}/result:
+    post:
+      operationId: submitToolInvocationResult
+      parameters:
+        - $ref: '#/components/parameters/ConnectorId'
+        - name: invocationId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../json-schema/tool-result-v1.schema.json'
+      responses:
+        '200': { description: Accepted or idempotently replayed }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/action-connectors/{connectorId}/findings/lease:
+    post:
+      operationId: leaseFindingDeliveries
+      parameters:
+        - $ref: '#/components/parameters/ConnectorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workerId, maxItems, waitSeconds, leaseSeconds]
+              properties:
+                workerId: { type: string, maxLength: 160 }
+                maxItems: { type: integer, minimum: 1, maximum: 32 }
+                waitSeconds: { type: integer, minimum: 0, maximum: 30 }
+                leaseSeconds: { type: integer, minimum: 10, maximum: 120 }
+      responses:
+        '200':
+          description: Delivery batch
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '../json-schema/finding-delivery-v1.schema.json'
+  /api/action-connectors/{connectorId}/findings/{deliveryId}/ack:
+    post:
+      operationId: acknowledgeFindingDelivery
+      parameters:
+        - $ref: '#/components/parameters/ConnectorId'
+        - name: deliveryId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../json-schema/finding-delivery-ack-v1.schema.json'
+      responses:
+        '200': { description: Accepted or idempotently replayed }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/action-connectors/{connectorId}/heartbeat:
+    post:
+      operationId: connectorHeartbeat
+      parameters:
+        - $ref: '#/components/parameters/ConnectorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workerId, connectorVersion, status, reportedAt]
+              properties:
+                workerId: { type: string }
+                connectorVersion: { type: string }
+                status: { enum: [ready, degraded, draining] }
+                reportedAt: { type: string, format: date-time }
+                metadata: { type: object }
+      responses:
+        '204': { description: Heartbeat recorded }
+components:
+  securitySchemes:
+    ConnectorBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ConnectorId:
+      name: connectorId
+      in: path
+      required: true
+      schema: { type: string, maxLength: 160 }
+    Digest:
+      name: digest
+      in: path
+      required: true
+      schema: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+  responses:
+    Conflict:
+      description: Version, digest, lease, or idempotency conflict
+      content:
+        application/json:
+          schema: { $ref: '../json-schema/error-response-v1.schema.json' }
+    Unprocessable:
+      description: Contract or schema validation failed
+      content:
+        application/json:
+          schema: { $ref: '../json-schema/error-response-v1.schema.json' }
+    RateLimited:
+      description: Connector or scenario rate limited
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content:
+        application/json:
+          schema: { $ref: '../json-schema/error-response-v1.schema.json' }

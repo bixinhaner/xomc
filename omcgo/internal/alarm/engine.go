@@ -25,6 +25,7 @@ type AlarmEngine struct {
 	eventBus        event.EventBus
 	metrics         *AlarmMetrics
 	filterEngine    *FilterEngine // optional; nil 时跳过过滤逻辑（向后兼容）
+	raisedHook      func(context.Context, *model.Alarm) error
 	logger          *zap.Logger
 }
 
@@ -54,6 +55,12 @@ func (e *AlarmEngine) SetMetrics(m *AlarmMetrics) {
 // 调用方负责构造 FilterEngine（带 dispatcher / dead-letter / metrics）。nil 时跳过过滤。
 func (e *AlarmEngine) SetFilterEngine(fe *FilterEngine) {
 	e.filterEngine = fe
+}
+
+// SetRaisedHook adds a durable side-effect after a new alarm is persisted.
+// The hook must be idempotent and must not control the alarm lifecycle.
+func (e *AlarmEngine) SetRaisedHook(hook func(context.Context, *model.Alarm) error) {
+	e.raisedHook = hook
 }
 
 // severityLabel converts an AlarmSeverity to a Prometheus label string.
@@ -258,6 +265,11 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) (err erro
 			if pubErr := e.eventBus.Publish(ctx, event.SubjectAlarmEmailRaised, emailEvt); pubErr != nil {
 				e.logger.Warn("publish alarm.email.raised failed", zap.Error(pubErr))
 			}
+		}
+	}
+	if e.raisedHook != nil {
+		if hookErr := e.raisedHook(ctx, alarm); hookErr != nil {
+			e.logger.Warn("run alarm raised hook", zap.Error(hookErr), zap.String("alarm_id", alarm.ID.String()))
 		}
 	}
 
