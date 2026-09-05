@@ -12,10 +12,12 @@
     "ufte - 删除",
     "ufte：删除指定资源记录",
     "ufte",
+    "统一文件传输",
     "tasks"
   ],
   "tags": [
     "ufte",
+    "统一文件传输",
     "tasks"
   ],
   "risk": "high",
@@ -73,6 +75,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.ufte.tasks",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ufte.tasks.by_id.retry",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks/:id/retry",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.ufte.tasks.by_id.start",
+      "method": "PUT",
+      "path": "/api/v1/ufte/tasks/:id/start",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.ufte.tasks.by_id.suspend",
+      "method": "PUT",
+      "path": "/api/v1/ufte/tasks/:id/suspend",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.ufte.tasks.by_id.terminate",
+      "method": "PUT",
+      "path": "/api/v1/ufte/tasks/:id/terminate",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

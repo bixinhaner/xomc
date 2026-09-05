@@ -91,6 +91,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.products.orphan_devices",
+      "method": "GET",
+      "path": "/api/v1/products/orphan-devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.products.orphan_devices.rematch",
+      "method": "POST",
+      "path": "/api/v1/products/orphan-devices/rematch",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.products",
+      "method": "POST",
+      "path": "/api/v1/products",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.products",
+      "method": "GET",
+      "path": "/api/v1/products",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.products.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/products/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

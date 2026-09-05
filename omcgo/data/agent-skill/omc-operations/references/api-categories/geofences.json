@@ -1,0 +1,393 @@
+{
+  "schemaVersion": "1.0",
+  "category": "geofences",
+  "title": "geofences",
+  "operations": [
+    {
+      "operationId": "get.geofences",
+      "method": "GET",
+      "path": "/api/v1/geofences",
+      "title": "geofences - 列表",
+      "summary": "geofences - 列表",
+      "description": "geofences：按筛选条件查询资源列表",
+      "intents": [
+        "geofences - 列表",
+        "geofences：按筛选条件查询资源列表",
+        "geofences"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.geofences.json"
+    },
+    {
+      "operationId": "get.geofences.availability",
+      "method": "GET",
+      "path": "/api/v1/geofences/availability",
+      "title": "geofences - 列表",
+      "summary": "geofences - 列表",
+      "description": "geofences：按筛选条件查询资源列表",
+      "intents": [
+        "geofences - 列表",
+        "geofences：按筛选条件查询资源列表",
+        "geofences",
+        "availability"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.geofences.availability.json"
+    },
+    {
+      "operationId": "get.geofences.by_id",
+      "method": "GET",
+      "path": "/api/v1/geofences/:id",
+      "title": "geofences - 详情",
+      "summary": "geofences - 详情",
+      "description": "geofences：查询指定资源的详细信息",
+      "intents": [
+        "geofences - 详情",
+        "geofences：查询指定资源的详细信息",
+        "geofences"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.geofences.by_id.json"
+    },
+    {
+      "operationId": "get.geofences.by_id.bindings",
+      "method": "GET",
+      "path": "/api/v1/geofences/:id/bindings",
+      "title": "geofences - GET",
+      "summary": "geofences - GET",
+      "description": "geofences：执行 GET 请求对应的业务操作",
+      "intents": [
+        "geofences - GET",
+        "geofences：执行 GET 请求对应的业务操作",
+        "geofences",
+        "bindings"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.geofences.by_id.bindings.json"
+    },
+    {
+      "operationId": "get.geofences.by_id.bindings.export",
+      "method": "GET",
+      "path": "/api/v1/geofences/:id/bindings/export",
+      "title": "geofences - 导出",
+      "summary": "geofences - 导出",
+      "description": "geofences：按条件导出业务数据",
+      "intents": [
+        "geofences - 导出",
+        "geofences：按条件导出业务数据",
+        "geofences",
+        "bindings",
+        "export"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.geofences.by_id.bindings.export.json"
+    },
+    {
+      "operationId": "get.geofences.by_id.control_actions",
+      "method": "GET",
+      "path": "/api/v1/geofences/:id/control-actions",
+      "title": "geofences - controlactions",
+      "summary": "geofences - controlactions",
+      "description": "geofences：处理controlactions相关数据",
+      "intents": [
+        "geofences - controlactions",
+        "geofences：处理controlactions相关数据",
+        "geofences",
+        "control-actions",
+        "control actions"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.geofences.by_id.control_actions.json"
+    },
+    {
+      "operationId": "get.geofences.by_id.versions",
+      "method": "GET",
+      "path": "/api/v1/geofences/:id/versions",
+      "title": "geofences - GET",
+      "summary": "geofences - GET",
+      "description": "geofences：执行 GET 请求对应的业务操作",
+      "intents": [
+        "geofences - GET",
+        "geofences：执行 GET 请求对应的业务操作",
+        "geofences"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.geofences.by_id.versions.json"
+    },
+    {
+      "operationId": "get.geofences.map",
+      "method": "GET",
+      "path": "/api/v1/geofences/map",
+      "title": "geofences - 列表",
+      "summary": "geofences - 列表",
+      "description": "geofences：按筛选条件查询资源列表",
+      "intents": [
+        "geofences - 列表",
+        "geofences：按筛选条件查询资源列表",
+        "geofences",
+        "map"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.geofences.map.json"
+    },
+    {
+      "operationId": "get.geofences.settings",
+      "method": "GET",
+      "path": "/api/v1/geofences/settings",
+      "title": "geofences - 列表",
+      "summary": "geofences - 列表",
+      "description": "geofences：按筛选条件查询资源列表",
+      "intents": [
+        "geofences - 列表",
+        "geofences：按筛选条件查询资源列表",
+        "geofences",
+        "settings"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.geofences.settings.json"
+    },
+    {
+      "operationId": "patch.geofences.by_id",
+      "method": "PATCH",
+      "path": "/api/v1/geofences/:id",
+      "title": "geofences - 部分更新",
+      "summary": "geofences - 部分更新",
+      "description": "geofences：更新指定资源的部分字段",
+      "intents": [
+        "geofences - 部分更新",
+        "geofences：更新指定资源的部分字段",
+        "geofences"
+      ],
+      "risk": "low",
+      "document": "api-docs/patch.geofences.by_id.json"
+    },
+    {
+      "operationId": "post.geofences",
+      "method": "POST",
+      "path": "/api/v1/geofences",
+      "title": "geofences - 创建",
+      "summary": "geofences - 创建",
+      "description": "geofences：创建新的资源记录",
+      "intents": [
+        "geofences - 创建",
+        "geofences：创建新的资源记录",
+        "geofences"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.geofences.json"
+    },
+    {
+      "operationId": "post.geofences.by_id.archive",
+      "method": "POST",
+      "path": "/api/v1/geofences/:id/archive",
+      "title": "geofences - POST",
+      "summary": "geofences - POST",
+      "description": "geofences：执行 POST 请求对应的业务操作",
+      "intents": [
+        "geofences - POST",
+        "geofences：执行 POST 请求对应的业务操作",
+        "geofences",
+        "archive"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.geofences.by_id.archive.json"
+    },
+    {
+      "operationId": "post.geofences.by_id.archive_preview",
+      "method": "POST",
+      "path": "/api/v1/geofences/:id/archive-preview",
+      "title": "geofences - archive预览",
+      "summary": "geofences - archive预览",
+      "description": "geofences：处理archive预览相关数据",
+      "intents": [
+        "geofences - archive预览",
+        "geofences：处理archive预览相关数据",
+        "geofences",
+        "archive-preview",
+        "archive preview"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.geofences.by_id.archive_preview.json"
+    },
+    {
+      "operationId": "post.geofences.by_id.binding_preview",
+      "method": "POST",
+      "path": "/api/v1/geofences/:id/binding-preview",
+      "title": "geofences - binding预览",
+      "summary": "geofences - binding预览",
+      "description": "geofences：处理binding预览相关数据",
+      "intents": [
+        "geofences - binding预览",
+        "geofences：处理binding预览相关数据",
+        "geofences",
+        "binding-preview",
+        "binding preview"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.geofences.by_id.binding_preview.json"
+    },
+    {
+      "operationId": "post.geofences.by_id.bindings",
+      "method": "POST",
+      "path": "/api/v1/geofences/:id/bindings",
+      "title": "geofences - POST",
+      "summary": "geofences - POST",
+      "description": "geofences：执行 POST 请求对应的业务操作",
+      "intents": [
+        "geofences - POST",
+        "geofences：执行 POST 请求对应的业务操作",
+        "geofences",
+        "bindings"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.geofences.by_id.bindings.json"
+    },
+    {
+      "operationId": "post.geofences.by_id.candidate_preview",
+      "method": "POST",
+      "path": "/api/v1/geofences/:id/candidate-preview",
+      "title": "geofences - candidate预览",
+      "summary": "geofences - candidate预览",
+      "description": "geofences：处理candidate预览相关数据",
+      "intents": [
+        "geofences - candidate预览",
+        "geofences：处理candidate预览相关数据",
+        "geofences",
+        "candidate-preview",
+        "candidate preview"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.geofences.by_id.candidate_preview.json"
+    },
+    {
+      "operationId": "post.geofences.by_id.disable",
+      "method": "POST",
+      "path": "/api/v1/geofences/:id/disable",
+      "title": "geofences - POST",
+      "summary": "geofences - POST",
+      "description": "geofences：执行 POST 请求对应的业务操作",
+      "intents": [
+        "geofences - POST",
+        "geofences：执行 POST 请求对应的业务操作",
+        "geofences",
+        "disable"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.geofences.by_id.disable.json"
+    },
+    {
+      "operationId": "post.geofences.by_id.disable_preview",
+      "method": "POST",
+      "path": "/api/v1/geofences/:id/disable-preview",
+      "title": "geofences - disable预览",
+      "summary": "geofences - disable预览",
+      "description": "geofences：处理disable预览相关数据",
+      "intents": [
+        "geofences - disable预览",
+        "geofences：处理disable预览相关数据",
+        "geofences",
+        "disable-preview",
+        "disable preview"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.geofences.by_id.disable_preview.json"
+    },
+    {
+      "operationId": "post.geofences.by_id.enable",
+      "method": "POST",
+      "path": "/api/v1/geofences/:id/enable",
+      "title": "geofences - 启用",
+      "summary": "geofences - 启用",
+      "description": "geofences：启用指定资源",
+      "intents": [
+        "geofences - 启用",
+        "geofences：启用指定资源",
+        "geofences",
+        "enable"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.geofences.by_id.enable.json"
+    },
+    {
+      "operationId": "post.geofences.by_id.enable_preview",
+      "method": "POST",
+      "path": "/api/v1/geofences/:id/enable-preview",
+      "title": "geofences - 启用预览",
+      "summary": "geofences - 启用预览",
+      "description": "geofences：处理启用预览相关数据",
+      "intents": [
+        "geofences - 启用预览",
+        "geofences：处理启用预览相关数据",
+        "geofences",
+        "enable-preview",
+        "enable preview"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.geofences.by_id.enable_preview.json"
+    },
+    {
+      "operationId": "post.geofences.by_id.publish",
+      "method": "POST",
+      "path": "/api/v1/geofences/:id/publish",
+      "title": "geofences - POST",
+      "summary": "geofences - POST",
+      "description": "geofences：执行 POST 请求对应的业务操作",
+      "intents": [
+        "geofences - POST",
+        "geofences：执行 POST 请求对应的业务操作",
+        "geofences",
+        "publish"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.geofences.by_id.publish.json"
+    },
+    {
+      "operationId": "post.geofences.by_id.versions",
+      "method": "POST",
+      "path": "/api/v1/geofences/:id/versions",
+      "title": "geofences - POST",
+      "summary": "geofences - POST",
+      "description": "geofences：执行 POST 请求对应的业务操作",
+      "intents": [
+        "geofences - POST",
+        "geofences：执行 POST 请求对应的业务操作",
+        "geofences"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.geofences.by_id.versions.json"
+    },
+    {
+      "operationId": "post.geofences.settings.preview",
+      "method": "POST",
+      "path": "/api/v1/geofences/settings/preview",
+      "title": "geofences - 预览",
+      "summary": "geofences - 预览",
+      "description": "geofences：预览文件、配置或导出结果",
+      "intents": [
+        "geofences - 预览",
+        "geofences：预览文件、配置或导出结果",
+        "geofences",
+        "settings",
+        "preview"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.geofences.settings.preview.json"
+    },
+    {
+      "operationId": "put.geofences.settings",
+      "method": "PUT",
+      "path": "/api/v1/geofences/settings",
+      "title": "geofences - 批量更新",
+      "summary": "geofences - 批量更新",
+      "description": "geofences：批量更新资源数据",
+      "intents": [
+        "geofences - 批量更新",
+        "geofences：批量更新资源数据",
+        "geofences",
+        "settings"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.geofences.settings.json"
+    }
+  ]
+}

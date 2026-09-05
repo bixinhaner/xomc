@@ -5,12 +5,13 @@
   "path": "/api/v1/station-logs/:id",
   "handler": "github.com/omcgo/omcgo/internal/stationlog.(*Handler).Delete-fm",
   "category": "station-logs",
-  "title": "station-logs - 删除",
-  "summary": "station-logs - 删除",
-  "description": "station-logs：删除指定资源记录 Handler: Delete godoc\n@Summary  删除日志文件（MinIO 文件 + 标记记录已删除）\n@Tags     station-logs\n@Param    id        path   string  true   \"日志文件 ID（UUID）\"\n@Param    log_type  query  string  false  \"日志类型: running（默认）| fault\"\n@Success  200 {object} map[string]interface{}\n@Router   /station-logs/{id} [delete]",
+  "title": "删除日志文件（MinIO 文件 + 标记记录已删除）",
+  "summary": "删除日志文件（MinIO 文件 + 标记记录已删除）",
+  "description": "station-logs：删除指定资源记录",
   "intents": [
     "station-logs - 删除",
-    "station-logs：删除指定资源记录 Handler: Delete godoc\n@Summary  删除日志文件（MinIO 文件 + 标记记录已删除）\n@Tags     station-logs\n@Param    id        path   string  true   \"日志文件 ID（UUID）\"\n@Param    log_type  query  string  false  \"日志类型: running（默认）| fault\"\n@Success  200 {object} map[string]interface{}\n@Router   /station-logs/{id} [delete]",
+    "删除日志文件（MinIO 文件 + 标记记录已删除）",
+    "station-logs：删除指定资源记录",
     "station-logs",
     "station logs"
   ],
@@ -20,7 +21,7 @@
   "risk": "high",
   "confirmationRequired": true,
   "idempotent": true,
-  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：station-logs - 删除",
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：删除日志文件（MinIO 文件 + 标记记录已删除）",
   "pathParams": [
     {
       "name": "id",
@@ -72,6 +73,20 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.station_logs",
+      "method": "GET",
+      "path": "/api/v1/station-logs",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.station_logs.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/station-logs/:id/download",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

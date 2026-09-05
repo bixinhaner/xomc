@@ -101,6 +101,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.topology.edges.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/topology/edges/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.topology.edges",
+      "method": "POST",
+      "path": "/api/v1/topology/edges",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.topology.edges",
+      "method": "GET",
+      "path": "/api/v1/topology/edges",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.topology.edges.by_id",
+      "method": "GET",
+      "path": "/api/v1/topology/edges/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.topology.nodes.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/topology/nodes/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

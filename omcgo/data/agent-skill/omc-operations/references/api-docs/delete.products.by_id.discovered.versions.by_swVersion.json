@@ -80,6 +80,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.products.by_id.discovered",
+      "method": "DELETE",
+      "path": "/api/v1/products/:id/discovered",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.products.by_id.discovered",
+      "method": "GET",
+      "path": "/api/v1/products/:id/discovered",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.products.by_id.discovered.versions",
+      "method": "GET",
+      "path": "/api/v1/products/:id/discovered/versions",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.products.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/products/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.products",
+      "method": "POST",
+      "path": "/api/v1/products",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

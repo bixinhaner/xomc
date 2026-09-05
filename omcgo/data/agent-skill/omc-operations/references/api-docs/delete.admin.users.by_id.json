@@ -58,6 +58,38 @@
     "request": "openapi",
     "response": "openapi"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.admin.users.by_id.roles.by_roleId",
+      "method": "DELETE",
+      "path": "/api/v1/admin/users/:id/roles/:roleId",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.admin.users",
+      "method": "POST",
+      "path": "/api/v1/admin/users",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.admin.users.by_id.copy",
+      "method": "POST",
+      "path": "/api/v1/admin/users/:id/copy",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.admin.users.by_id.lock",
+      "method": "POST",
+      "path": "/api/v1/admin/users/:id/lock",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.admin.users.by_id.reset_password",
+      "method": "POST",
+      "path": "/api/v1/admin/users/:id/reset-password",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",

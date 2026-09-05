@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "1.0",
+  "category": "notification",
+  "title": "notification",
+  "operations": [
+    {
+      "operationId": "post.admin.notification.email.test",
+      "method": "POST",
+      "path": "/api/v1/admin/notification/email/test",
+      "title": "notification - 测试",
+      "summary": "notification - 测试",
+      "description": "notification：发送测试请求验证配置",
+      "intents": [
+        "notification - 测试",
+        "notification：发送测试请求验证配置",
+        "notification",
+        "admin",
+        "email",
+        "test"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.notification.email.test.json"
+    }
+  ]
+}

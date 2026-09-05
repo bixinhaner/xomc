@@ -1,8 +1,77 @@
 {
   "schemaVersion": "1.0",
   "category": "provisioning",
-  "title": "provisioning",
+  "title": "自动开站",
   "operations": [
+    {
+      "operationId": "delete.provisioning.policies.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/provisioning/policies/:id",
+      "title": "自动开站 - 删除",
+      "summary": "自动开站 - 删除",
+      "description": "自动开站：删除指定资源记录",
+      "intents": [
+        "自动开站 - 删除",
+        "自动开站：删除指定资源记录",
+        "provisioning",
+        "自动开站",
+        "policies"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.provisioning.policies.by_id.json"
+    },
+    {
+      "operationId": "get.provisioning.policies",
+      "method": "GET",
+      "path": "/api/v1/provisioning/policies",
+      "title": "自动开站 - 列表",
+      "summary": "自动开站 - 列表",
+      "description": "自动开站：按筛选条件查询资源列表",
+      "intents": [
+        "自动开站 - 列表",
+        "自动开站：按筛选条件查询资源列表",
+        "provisioning",
+        "自动开站",
+        "policies"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.provisioning.policies.json"
+    },
+    {
+      "operationId": "get.provisioning.policies.by_id",
+      "method": "GET",
+      "path": "/api/v1/provisioning/policies/:id",
+      "title": "自动开站 - 详情",
+      "summary": "自动开站 - 详情",
+      "description": "自动开站：查询指定资源的详细信息",
+      "intents": [
+        "自动开站 - 详情",
+        "自动开站：查询指定资源的详细信息",
+        "provisioning",
+        "自动开站",
+        "policies"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.provisioning.policies.by_id.json"
+    },
+    {
+      "operationId": "get.provisioning.policies.by_id.devices",
+      "method": "GET",
+      "path": "/api/v1/provisioning/policies/:id/devices",
+      "title": "自动开站 - GET",
+      "summary": "自动开站 - GET",
+      "description": "自动开站：执行 GET 请求对应的业务操作",
+      "intents": [
+        "自动开站 - GET",
+        "自动开站：执行 GET 请求对应的业务操作",
+        "provisioning",
+        "自动开站",
+        "policies",
+        "devices"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.provisioning.policies.by_id.devices.json"
+    },
     {
       "operationId": "get.provisioning.tasks",
       "method": "GET",
@@ -40,6 +109,114 @@
       "document": "api-docs/get.provisioning.tasks.by_id.json"
     },
     {
+      "operationId": "get.provisioning.xml_downloads.by_id",
+      "method": "GET",
+      "path": "/api/v1/provisioning/xml-downloads/:id",
+      "title": "自动开站 - xmldownloads详情",
+      "summary": "自动开站 - xmldownloads详情",
+      "description": "自动开站：查询或维护指定对象的xmldownloads详情数据",
+      "intents": [
+        "自动开站 - xmldownloads详情",
+        "自动开站：查询或维护指定对象的xmldownloads详情数据",
+        "provisioning",
+        "自动开站",
+        "xml-downloads",
+        "xml downloads"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.provisioning.xml_downloads.by_id.json"
+    },
+    {
+      "operationId": "get.provisioning.xml_files.by_id",
+      "method": "GET",
+      "path": "/api/v1/provisioning/xml-files/:id",
+      "title": "自动开站 - xmlfiles详情",
+      "summary": "自动开站 - xmlfiles详情",
+      "description": "自动开站：查询或维护指定对象的xmlfiles详情数据",
+      "intents": [
+        "自动开站 - xmlfiles详情",
+        "自动开站：查询或维护指定对象的xmlfiles详情数据",
+        "provisioning",
+        "自动开站",
+        "xml-files",
+        "xml files"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.provisioning.xml_files.by_id.json"
+    },
+    {
+      "operationId": "get.provisioning.xml_files.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/provisioning/xml-files/:id/download",
+      "title": "自动开站 - 下载",
+      "summary": "自动开站 - 下载",
+      "description": "自动开站：下载文件或导出结果",
+      "intents": [
+        "自动开站 - 下载",
+        "自动开站：下载文件或导出结果",
+        "provisioning",
+        "自动开站",
+        "xml-files",
+        "download",
+        "xml files"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.provisioning.xml_files.by_id.download.json"
+    },
+    {
+      "operationId": "patch.provisioning.policies.by_id.enabled",
+      "method": "PATCH",
+      "path": "/api/v1/provisioning/policies/:id/enabled",
+      "title": "自动开站 - PATCH",
+      "summary": "自动开站 - PATCH",
+      "description": "自动开站：执行 PATCH 请求对应的业务操作",
+      "intents": [
+        "自动开站 - PATCH",
+        "自动开站：执行 PATCH 请求对应的业务操作",
+        "provisioning",
+        "自动开站",
+        "policies",
+        "enabled"
+      ],
+      "risk": "low",
+      "document": "api-docs/patch.provisioning.policies.by_id.enabled.json"
+    },
+    {
+      "operationId": "post.provisioning.policies",
+      "method": "POST",
+      "path": "/api/v1/provisioning/policies",
+      "title": "自动开站 - 创建",
+      "summary": "自动开站 - 创建",
+      "description": "自动开站：创建新的资源记录",
+      "intents": [
+        "自动开站 - 创建",
+        "自动开站：创建新的资源记录",
+        "provisioning",
+        "自动开站",
+        "policies"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.provisioning.policies.json"
+    },
+    {
+      "operationId": "post.provisioning.policies.by_id.execute",
+      "method": "POST",
+      "path": "/api/v1/provisioning/policies/:id/execute",
+      "title": "自动开站 - 执行",
+      "summary": "自动开站 - 执行",
+      "description": "自动开站：执行指定命令、脚本或任务",
+      "intents": [
+        "自动开站 - 执行",
+        "自动开站：执行指定命令、脚本或任务",
+        "provisioning",
+        "自动开站",
+        "policies",
+        "execute"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.provisioning.policies.by_id.execute.json"
+    },
+    {
       "operationId": "post.provisioning.tasks",
       "method": "POST",
       "path": "/api/v1/provisioning/tasks",
@@ -75,6 +252,23 @@
       ],
       "risk": "low",
       "document": "api-docs/post.provisioning.tasks.by_id.retry.json"
+    },
+    {
+      "operationId": "put.provisioning.policies.by_id",
+      "method": "PUT",
+      "path": "/api/v1/provisioning/policies/:id",
+      "title": "自动开站 - 更新",
+      "summary": "自动开站 - 更新",
+      "description": "自动开站：更新指定资源的完整配置",
+      "intents": [
+        "自动开站 - 更新",
+        "自动开站：更新指定资源的完整配置",
+        "provisioning",
+        "自动开站",
+        "policies"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.provisioning.policies.by_id.json"
     }
   ]
 }

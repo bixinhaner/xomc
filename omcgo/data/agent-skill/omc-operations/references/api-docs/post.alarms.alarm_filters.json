@@ -152,6 +152,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.alarms.alarm_filters.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/alarms/alarm-filters/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.alarms.alarm_filters.by_id.toggle",
+      "method": "POST",
+      "path": "/api/v1/alarms/alarm-filters/:id/toggle",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.alarms.alarm_filters.by_id",
+      "method": "PUT",
+      "path": "/api/v1/alarms/alarm-filters/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.alarms.alarm_filters",
+      "method": "GET",
+      "path": "/api/v1/alarms/alarm-filters",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.alarms.alarm_filters.by_id",
+      "method": "GET",
+      "path": "/api/v1/alarms/alarm-filters/:id",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

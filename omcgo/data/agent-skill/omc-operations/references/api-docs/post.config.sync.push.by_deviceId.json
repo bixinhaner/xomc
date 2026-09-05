@@ -95,6 +95,38 @@
     "request": "openapi",
     "response": "openapi"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.config.sync.pull.by_deviceId",
+      "method": "POST",
+      "path": "/api/v1/config/sync/pull/:deviceId",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.config.sync.status.by_deviceId",
+      "method": "GET",
+      "path": "/api/v1/config/sync/status/:deviceId",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.config.baselines.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/config/baselines/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.config.baselines",
+      "method": "POST",
+      "path": "/api/v1/config/baselines",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.config.tasks",
+      "method": "POST",
+      "path": "/api/v1/config/tasks",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",

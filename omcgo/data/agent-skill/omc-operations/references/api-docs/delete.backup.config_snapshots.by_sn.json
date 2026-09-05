@@ -76,6 +76,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.backup.config_snapshots",
+      "method": "GET",
+      "path": "/api/v1/backup/config-snapshots",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.backup.config_snapshots.by_sn",
+      "method": "GET",
+      "path": "/api/v1/backup/config-snapshots/:sn",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.backup.config_snapshots.by_sn.download",
+      "method": "GET",
+      "path": "/api/v1/backup/config-snapshots/:sn/download",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.backup.config_snapshots.batch_delete",
+      "method": "POST",
+      "path": "/api/v1/backup/config-snapshots/batch-delete",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.backup.config_snapshots.batch_download",
+      "method": "POST",
+      "path": "/api/v1/backup/config-snapshots/batch-download",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

@@ -85,6 +85,10 @@
         "is_keep_config": {
           "type": "boolean"
         },
+        "product_class_hint": {
+          "description": "ProductClassHint is used by UFTE when firmware metadata does not carry a\nconcrete product_class. It keeps read-side task classification aligned\nwith the selected task template/product scope.",
+          "type": "string"
+        },
         "rollback_on_failure": {
           "description": "RollbackOnFailure (T-0021): when true (and Strategy=\"canary\"), a stage\nthat exceeds its failure threshold will pause AND auto-trigger a\nrollback for the already-promoted devices. Default false.",
           "type": "boolean"
@@ -156,6 +160,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.upgrade_tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/upgrade-tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.upgrade_tasks.by_id.abort_canary",
+      "method": "POST",
+      "path": "/api/v1/upgrade-tasks/:id/abort-canary",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.upgrade_tasks.by_id.advance",
+      "method": "POST",
+      "path": "/api/v1/upgrade-tasks/:id/advance",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.upgrade_tasks.by_id.pause_canary",
+      "method": "POST",
+      "path": "/api/v1/upgrade-tasks/:id/pause-canary",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.upgrade_tasks.by_id.resume_canary",
+      "method": "POST",
+      "path": "/api/v1/upgrade-tasks/:id/resume-canary",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

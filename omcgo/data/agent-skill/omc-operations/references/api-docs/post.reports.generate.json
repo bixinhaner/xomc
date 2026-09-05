@@ -86,6 +86,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.reports.definitions.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/reports/definitions/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.reports.definitions",
+      "method": "POST",
+      "path": "/api/v1/reports/definitions",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "put.reports.definitions.by_id",
+      "method": "PUT",
+      "path": "/api/v1/reports/definitions/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.reports.definitions",
+      "method": "GET",
+      "path": "/api/v1/reports/definitions",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.reports.definitions.by_id",
+      "method": "GET",
+      "path": "/api/v1/reports/definitions/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

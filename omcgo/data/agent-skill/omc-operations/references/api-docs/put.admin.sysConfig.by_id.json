@@ -97,6 +97,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.admin.sysConfig.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/admin/sysConfig/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.admin.sysConfig",
+      "method": "POST",
+      "path": "/api/v1/admin/sysConfig",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.admin.sysConfig",
+      "method": "GET",
+      "path": "/api/v1/admin/sysConfig",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.admin.sysConfig.by_id",
+      "method": "GET",
+      "path": "/api/v1/admin/sysConfig/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.admin.sysConfig.batch",
+      "method": "POST",
+      "path": "/api/v1/admin/sysConfig/batch",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

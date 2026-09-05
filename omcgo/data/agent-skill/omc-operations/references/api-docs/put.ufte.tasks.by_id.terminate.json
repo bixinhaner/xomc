@@ -12,11 +12,13 @@
     "ufte - PUT",
     "ufte：执行 PUT 请求对应的业务操作",
     "ufte",
+    "统一文件传输",
     "tasks",
     "terminate"
   ],
   "tags": [
     "ufte",
+    "统一文件传输",
     "tasks",
     "terminate"
   ],
@@ -75,6 +77,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.ufte.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/ufte/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ufte.tasks",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.ufte.tasks",
+      "method": "GET",
+      "path": "/api/v1/ufte/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ufte.tasks.batch_delete",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks/batch-delete",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.ufte.tasks.by_id.retry",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks/:id/retry",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

@@ -94,6 +94,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.alarms.active.batch.acknowledge",
+      "method": "POST",
+      "path": "/api/v1/alarms/active/batch/acknowledge",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.alarms.history.batch.delete",
+      "method": "POST",
+      "path": "/api/v1/alarms/history/batch/delete",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.alarms.history.batch.unacknowledge",
+      "method": "POST",
+      "path": "/api/v1/alarms/history/batch/unacknowledge",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.alarms.history",
+      "method": "GET",
+      "path": "/api/v1/alarms/history",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.alarms.active.batch.clear",
+      "method": "POST",
+      "path": "/api/v1/alarms/active/batch/clear",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

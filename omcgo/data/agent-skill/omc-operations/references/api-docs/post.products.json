@@ -51,6 +51,7 @@
           "type": "boolean"
         },
         "indicator_device_type": {
+          "description": "IndicatorDeviceType 非必填：核心网等非无线产品不区分制式、无 KPI 指标库，传空串。\n入库前小写归一；CHECK 仅允许 ''/enb/gsm/gnb。空串时 KPI 路由器软返回空路由。",
           "type": "string"
         },
         "indicator_platform": {
@@ -88,7 +89,6 @@
       },
       "required": [
         "alarm_ne_type",
-        "indicator_device_type",
         "name"
       ],
       "type": "object"
@@ -134,6 +134,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.products.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/products/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.products.by_id.discovered",
+      "method": "DELETE",
+      "path": "/api/v1/products/:id/discovered",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.products.by_id.discovered.versions.by_swVersion",
+      "method": "DELETE",
+      "path": "/api/v1/products/:id/discovered/versions/:swVersion",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.products.by_id.patterns.by_patternId",
+      "method": "DELETE",
+      "path": "/api/v1/products/:id/patterns/:patternId",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.products.by_id.patterns",
+      "method": "POST",
+      "path": "/api/v1/products/:id/patterns",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

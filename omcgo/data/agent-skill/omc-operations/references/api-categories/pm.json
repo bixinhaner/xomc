@@ -99,10 +99,10 @@
       "path": "/api/v1/pm/adhoc/tasks",
       "title": "性能 PM - 列表",
       "summary": "性能 PM - 列表",
-      "description": "性能 PM：按筛选条件查询资源列表 Handler: List GET /pm/adhoc/tasks?mode=\u0026status=\u0026limit=\u0026offset=\u0026all=true\n\nT-0164 收尾 G7-Gap-7：默认按 creator=current_user 过滤（\"我的任务\"），\nadmin 角色传 ?all=true 可看全部任务（运维 / 审计场景）。",
+      "description": "性能 PM：按筛选条件查询资源列表 Handler: List GET /pm/adhoc/tasks?mode=\u0026status=\u0026limit=\u0026offset=\n\n默认返回：内置任务 + 当前用户 private 自定义任务 + 所有 public 自定义任务。\n超管（source='builtIn'）由后端登录态自动识别，可看全部任务（运维 / 审计场景）。",
       "intents": [
         "性能 PM - 列表",
-        "性能 PM：按筛选条件查询资源列表 Handler: List GET /pm/adhoc/tasks?mode=\u0026status=\u0026limit=\u0026offset=\u0026all=true\n\nT-0164 收尾 G7-Gap-7：默认按 creator=current_user 过滤（\"我的任务\"），\nadmin 角色传 ?all=true 可看全部任务（运维 / 审计场景）。",
+        "性能 PM：按筛选条件查询资源列表 Handler: List GET /pm/adhoc/tasks?mode=\u0026status=\u0026limit=\u0026offset=\n\n默认返回：内置任务 + 当前用户 private 自定义任务 + 所有 public 自定义任务。\n超管（source='builtIn'）由后端登录态自动识别，可看全部任务（运维 / 审计场景）。",
         "pm",
         "性能",
         "adhoc",
@@ -150,25 +150,6 @@
       "document": "api-docs/get.pm.adhoc.tasks.by_id.filter_options.json"
     },
     {
-      "operationId": "get.pm.adhoc.tasks.by_id.progress",
-      "method": "GET",
-      "path": "/api/v1/pm/adhoc/tasks/:id/progress",
-      "title": "性能 PM - GET",
-      "summary": "性能 PM - GET",
-      "description": "性能 PM：执行 GET 请求对应的业务操作 Handler: Progress GET /pm/adhoc/tasks/:id/progress（SSE）\n\n订阅 pm.adhoc.progress 与 pm.adhoc.completed 主题，过滤匹配 task_id 的事件流给客户端。\n客户端 EventSource 'progress'/'completed' 事件名分别接收。",
-      "intents": [
-        "性能 PM - GET",
-        "性能 PM：执行 GET 请求对应的业务操作 Handler: Progress GET /pm/adhoc/tasks/:id/progress（SSE）\n\n订阅 pm.adhoc.progress 与 pm.adhoc.completed 主题，过滤匹配 task_id 的事件流给客户端。\n客户端 EventSource 'progress'/'completed' 事件名分别接收。",
-        "pm",
-        "性能",
-        "adhoc",
-        "tasks",
-        "progress"
-      ],
-      "risk": "read",
-      "document": "api-docs/get.pm.adhoc.tasks.by_id.progress.json"
-    },
-    {
       "operationId": "get.pm.adhoc.tasks.by_id.results",
       "method": "GET",
       "path": "/api/v1/pm/adhoc/tasks/:id/results",
@@ -186,25 +167,6 @@
       ],
       "risk": "read",
       "document": "api-docs/get.pm.adhoc.tasks.by_id.results.json"
-    },
-    {
-      "operationId": "get.pm.adhoc.tasks.by_id.runs",
-      "method": "GET",
-      "path": "/api/v1/pm/adhoc/tasks/:id/runs",
-      "title": "性能 PM - 执行历史",
-      "summary": "性能 PM - 执行历史",
-      "description": "性能 PM：查询脚本或命令执行历史 Handler: Runs GET /pm/adhoc/tasks/:id/runs?limit=\u0026offset=\n\n返回该任务运行历史，倒序 started_at，支持分页（T-0186）。",
-      "intents": [
-        "性能 PM - 执行历史",
-        "性能 PM：查询脚本或命令执行历史 Handler: Runs GET /pm/adhoc/tasks/:id/runs?limit=\u0026offset=\n\n返回该任务运行历史，倒序 started_at，支持分页（T-0186）。",
-        "pm",
-        "性能",
-        "adhoc",
-        "tasks",
-        "runs"
-      ],
-      "risk": "read",
-      "document": "api-docs/get.pm.adhoc.tasks.by_id.runs.json"
     },
     {
       "operationId": "get.pm.counters",
@@ -391,11 +353,11 @@
       "path": "/api/v1/pm/kpi/definitions",
       "title": "List KPI definitions",
       "summary": "List KPI definitions",
-      "description": "性能 PM：查询或维护定义数据 Handler: ListKPIDefinitions 返回 KPI 元数据目录，供前端\"性能管理→指标列表\"等界面消费。\n\nT-0164-P1 改造前：数据源是 carrier 适配器代码里硬编码的 KPIDefinitions 列表。\n现在改为枚举 perf_indicators_{enb,gsm,gnb}（is_counter='0' 的行），\nplatform_name 维度的具体公式在 KPIEngine 计算路径上由 router 路由解析，\n这里只暴露\"系统支持哪些 KPI 指标\"。\n\n查询参数（向后兼容老前端的 carrier 模糊搜索）：\n  - keyword：name/cn_name/id 模糊匹配\n  - device_type：ENB / GSM / GNB（不传 → 三表合并枚举）\n  - include_counters：可选开关（缺省 false）。false 时维持 is_counter='0'（仅 KPI），\n    行为与历史完全一致；true 时不按 is_counter 过滤，返回 KPI + 计数器，供向导穿梭框消费。\n\n响应每条在历史字段（name/display_name/formula/unit）之外，补 id（= perf_indicators 行 ID，\nK/C 编号）与 is_counter（\"0\" KPI / \"1\" 计数器）。默认调用方只读历史字段，零回归。",
+      "description": "性能 PM：查询或维护定义数据 Handler: ListKPIDefinitions 返回 KPI 元数据目录，供前端\"性能管理→指标列表\"等界面消费。\n\nT-0164-P1 改造前：数据源是 carrier 适配器代码里硬编码的 KPIDefinitions 列表。\n现在改为枚举 perf_indicators_{enb,gsm,gnb}（is_counter='0' 的行），\nplatform_name 维度的具体公式在 KPIEngine 计算路径上由 router 路由解析，\n这里只暴露\"系统支持哪些 KPI 指标\"。\n\n查询参数（向后兼容老前端的 carrier 模糊搜索）：\n  - keyword：name/cn_name/id 模糊匹配\n  - device_type：ENB / GSM / GNB（不传 → 三表合并枚举）\n  - include_counters：可选开关（缺省 false）。false 时维持 is_counter='0'（仅 KPI），\n    行为与历史完全一致；true 时不按 is_counter 过滤，返回 KPI + 计数器，供向导穿梭框消费。\n  - only_enabled：可选开关（缺省 false）。true 时只返回 operator_code='default' 下已启用指标，\n    供性能查询、设备性能查看、首页 KPI 配置和自定义聚合候选使用。\n\n响应每条在历史字段（name/display_name/formula/unit）之外，补 id（= perf_indicators 行 ID，\nK/C 编号）与 is_counter（\"0\" KPI / \"1\" 计数器）。默认调用方只读历史字段，零回归。",
       "intents": [
         "性能 PM - 定义",
         "List KPI definitions",
-        "性能 PM：查询或维护定义数据 Handler: ListKPIDefinitions 返回 KPI 元数据目录，供前端\"性能管理→指标列表\"等界面消费。\n\nT-0164-P1 改造前：数据源是 carrier 适配器代码里硬编码的 KPIDefinitions 列表。\n现在改为枚举 perf_indicators_{enb,gsm,gnb}（is_counter='0' 的行），\nplatform_name 维度的具体公式在 KPIEngine 计算路径上由 router 路由解析，\n这里只暴露\"系统支持哪些 KPI 指标\"。\n\n查询参数（向后兼容老前端的 carrier 模糊搜索）：\n  - keyword：name/cn_name/id 模糊匹配\n  - device_type：ENB / GSM / GNB（不传 → 三表合并枚举）\n  - include_counters：可选开关（缺省 false）。false 时维持 is_counter='0'（仅 KPI），\n    行为与历史完全一致；true 时不按 is_counter 过滤，返回 KPI + 计数器，供向导穿梭框消费。\n\n响应每条在历史字段（name/display_name/formula/unit）之外，补 id（= perf_indicators 行 ID，\nK/C 编号）与 is_counter（\"0\" KPI / \"1\" 计数器）。默认调用方只读历史字段，零回归。",
+        "性能 PM：查询或维护定义数据 Handler: ListKPIDefinitions 返回 KPI 元数据目录，供前端\"性能管理→指标列表\"等界面消费。\n\nT-0164-P1 改造前：数据源是 carrier 适配器代码里硬编码的 KPIDefinitions 列表。\n现在改为枚举 perf_indicators_{enb,gsm,gnb}（is_counter='0' 的行），\nplatform_name 维度的具体公式在 KPIEngine 计算路径上由 router 路由解析，\n这里只暴露\"系统支持哪些 KPI 指标\"。\n\n查询参数（向后兼容老前端的 carrier 模糊搜索）：\n  - keyword：name/cn_name/id 模糊匹配\n  - device_type：ENB / GSM / GNB（不传 → 三表合并枚举）\n  - include_counters：可选开关（缺省 false）。false 时维持 is_counter='0'（仅 KPI），\n    行为与历史完全一致；true 时不按 is_counter 过滤，返回 KPI + 计数器，供向导穿梭框消费。\n  - only_enabled：可选开关（缺省 false）。true 时只返回 operator_code='default' 下已启用指标，\n    供性能查询、设备性能查看、首页 KPI 配置和自定义聚合候选使用。\n\n响应每条在历史字段（name/display_name/formula/unit）之外，补 id（= perf_indicators 行 ID，\nK/C 编号）与 is_counter（\"0\" KPI / \"1\" 计数器）。默认调用方只读历史字段，零回归。",
         "pm",
         "性能",
         "kpi",
@@ -410,10 +372,10 @@
       "path": "/api/v1/pm/metrics/aggregated",
       "title": "性能 PM - 聚合",
       "summary": "性能 PM - 聚合",
-      "description": "性能 PM：查询聚合后的统计数据 Handler: ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - start_time / end_time：RFC3339\n  - limit / offset\n\n没注入 aggregator（兼容老部署）时返 503。",
+      "description": "性能 PM：查询聚合后的统计数据 Handler: ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - technology / technologies：制式过滤（lte/nr/gsm）\n  - start_time / end_time：RFC3339\n  - limit / offset\n  - page_by=pivot_row：limit / offset 按透视表行 key 分页，total 返回透视表行总数\n  - count_mode=n_plus_one：取 limit+1 判断 truncated，不执行精确 COUNT\n\n没注入 aggregator（兼容老部署）时返 503。",
       "intents": [
         "性能 PM - 聚合",
-        "性能 PM：查询聚合后的统计数据 Handler: ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - start_time / end_time：RFC3339\n  - limit / offset\n\n没注入 aggregator（兼容老部署）时返 503。",
+        "性能 PM：查询聚合后的统计数据 Handler: ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - technology / technologies：制式过滤（lte/nr/gsm）\n  - start_time / end_time：RFC3339\n  - limit / offset\n  - page_by=pivot_row：limit / offset 按透视表行 key 分页，total 返回透视表行总数\n  - count_mode=n_plus_one：取 limit+1 判断 truncated，不执行精确 COUNT\n\n没注入 aggregator（兼容老部署）时返 503。",
         "pm",
         "性能",
         "metrics",
@@ -535,10 +497,10 @@
       "path": "/api/v1/pm/adhoc/tasks/:id",
       "title": "性能 PM - 部分更新",
       "summary": "性能 PM - 部分更新",
-      "description": "性能 PM：更新指定资源的部分字段 Handler: Update PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
+      "description": "性能 PM：更新指定资源的部分字段 Handler: Update PUT/PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
       "intents": [
         "性能 PM - 部分更新",
-        "性能 PM：更新指定资源的部分字段 Handler: Update PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
+        "性能 PM：更新指定资源的部分字段 Handler: Update PUT/PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
         "pm",
         "性能",
         "adhoc",
@@ -1055,6 +1017,25 @@
       ],
       "risk": "low",
       "document": "api-docs/post.pm.thresholds.json"
+    },
+    {
+      "operationId": "put.pm.adhoc.tasks.by_id",
+      "method": "PUT",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "title": "Update PM adhoc task definition",
+      "summary": "Update PM adhoc task definition",
+      "description": "保存自定义聚合任务定义。自建任务可更新名称、设备、指标、粒度、可见性、对象白名单和时间窗；内置任务只更新 metric_paths，其余结构性字段由后端忽略。 Handler: Update PUT/PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
+      "intents": [
+        "性能 PM - 更新",
+        "Update PM adhoc task definition",
+        "保存自定义聚合任务定义。自建任务可更新名称、设备、指标、粒度、可见性、对象白名单和时间窗；内置任务只更新 metric_paths，其余结构性字段由后端忽略。 Handler: Update PUT/PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
+        "pm",
+        "性能",
+        "adhoc",
+        "tasks"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.pm.adhoc.tasks.by_id.json"
     },
     {
       "operationId": "put.pm.thresholds.by_id",

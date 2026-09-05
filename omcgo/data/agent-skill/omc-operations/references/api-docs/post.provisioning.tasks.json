@@ -130,6 +130,38 @@
     "request": "openapi",
     "response": "openapi"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.provisioning.tasks.by_id.retry",
+      "method": "POST",
+      "path": "/api/v1/provisioning/tasks/:id/retry",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.provisioning.tasks",
+      "method": "GET",
+      "path": "/api/v1/provisioning/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.provisioning.tasks.by_id",
+      "method": "GET",
+      "path": "/api/v1/provisioning/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.provisioning.policies.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/provisioning/policies/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "patch.provisioning.policies.by_id.enabled",
+      "method": "PATCH",
+      "path": "/api/v1/provisioning/policies/:id/enabled",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",

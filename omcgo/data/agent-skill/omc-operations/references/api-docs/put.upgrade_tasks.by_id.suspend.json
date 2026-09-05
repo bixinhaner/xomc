@@ -76,6 +76,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.upgrade_tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/upgrade-tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.upgrade_tasks",
+      "method": "POST",
+      "path": "/api/v1/upgrade-tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.upgrade_tasks",
+      "method": "GET",
+      "path": "/api/v1/upgrade-tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.upgrade_tasks.by_id",
+      "method": "GET",
+      "path": "/api/v1/upgrade-tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.upgrade_tasks.by_id.abort_canary",
+      "method": "POST",
+      "path": "/api/v1/upgrade-tasks/:id/abort-canary",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

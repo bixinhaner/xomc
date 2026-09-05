@@ -100,6 +100,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.pm.query_templates.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/pm/query-templates/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "patch.pm.query_templates.by_id",
+      "method": "PATCH",
+      "path": "/api/v1/pm/query-templates/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.pm.query_templates",
+      "method": "GET",
+      "path": "/api/v1/pm/query-templates",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.pm.query_templates.by_id",
+      "method": "GET",
+      "path": "/api/v1/pm/query-templates/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.pm.adhoc.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

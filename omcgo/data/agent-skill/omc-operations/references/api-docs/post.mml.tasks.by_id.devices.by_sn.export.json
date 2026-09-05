@@ -84,6 +84,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.mml.tasks.by_id.devices.by_sn.export.download",
+      "method": "GET",
+      "path": "/api/v1/mml/tasks/:id/devices/:sn/export/download",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.mml.tasks.by_id.export",
+      "method": "POST",
+      "path": "/api/v1/mml/tasks/:id/export",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.mml.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mml/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.mml.tasks.by_id.export.download",
+      "method": "GET",
+      "path": "/api/v1/mml/tasks/:id/export/download",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.mml.tasks",
+      "method": "POST",
+      "path": "/api/v1/mml/tasks",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

@@ -7,10 +7,10 @@
   "category": "dashboard",
   "title": "仪表盘 - KPItimeseries",
   "summary": "仪表盘 - KPItimeseries",
-  "description": "仪表盘：处理KPItimeseries相关数据 Handler: GetKPITimeSeries handles GET /api/v1/dashboard/kpi-time-series?kpi_names=...\u0026start_time=...\u0026end_time=...",
+  "description": "仪表盘：处理KPItimeseries相关数据 Handler: GetKPITimeSeries handles GET /api/v1/dashboard/kpi-time-series?kpi_names=...\u0026start_time=...\u0026end_time=...\u0026granularity=...",
   "intents": [
     "仪表盘 - KPItimeseries",
-    "仪表盘：处理KPItimeseries相关数据 Handler: GetKPITimeSeries handles GET /api/v1/dashboard/kpi-time-series?kpi_names=...\u0026start_time=...\u0026end_time=...",
+    "仪表盘：处理KPItimeseries相关数据 Handler: GetKPITimeSeries handles GET /api/v1/dashboard/kpi-time-series?kpi_names=...\u0026start_time=...\u0026end_time=...\u0026granularity=...",
     "dashboard",
     "仪表盘",
     "kpi-time-series",
@@ -34,6 +34,18 @@
       "type": "string"
     },
     {
+      "name": "granularity",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "include_partial",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
       "name": "kpi_names",
       "in": "query",
       "required": false,
@@ -41,6 +53,12 @@
     },
     {
       "name": "start_time",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "technology",
       "in": "query",
       "required": false,
       "type": "string"
@@ -87,7 +105,39 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
-  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "emptyResult": "空数组或 total=0 只说明该操作在当前用户权限和本次过滤条件下没有返回记录，不能单独证明业务对象、源数据或系统能力不存在。先核对参数、标识符、时间范围和权限；若用户目标仍未回答，再沿 relatedOperations 选择汇总、明细、原始或派生数据操作补充证据。",
+  "relatedOperations": [
+    {
+      "operationId": "get.dashboard.alarm_efficiency",
+      "method": "GET",
+      "path": "/api/v1/dashboard/alarm-efficiency",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.dashboard.alarm_heatmap",
+      "method": "GET",
+      "path": "/api/v1/dashboard/alarm-heatmap",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.dashboard.alarm_heatmap_by_severity",
+      "method": "GET",
+      "path": "/api/v1/dashboard/alarm-heatmap-by-severity",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.dashboard.alarm_trend",
+      "method": "GET",
+      "path": "/api/v1/dashboard/alarm-trend",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.dashboard.alarm_type_pie",
+      "method": "GET",
+      "path": "/api/v1/dashboard/alarm-type-pie",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

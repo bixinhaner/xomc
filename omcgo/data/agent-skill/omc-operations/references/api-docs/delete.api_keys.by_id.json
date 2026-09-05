@@ -72,6 +72,20 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.api_keys",
+      "method": "POST",
+      "path": "/api/v1/api-keys",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.api_keys",
+      "method": "GET",
+      "path": "/api/v1/api-keys",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

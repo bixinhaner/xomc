@@ -78,6 +78,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.backup.ftp_configs.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/backup/ftp-configs/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.backup.ftp_configs",
+      "method": "POST",
+      "path": "/api/v1/backup/ftp-configs",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.backup.ftp_configs.by_id",
+      "method": "PUT",
+      "path": "/api/v1/backup/ftp-configs/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.backup.ftp_configs",
+      "method": "GET",
+      "path": "/api/v1/backup/ftp-configs",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.backup.config_snapshots.by_sn",
+      "method": "DELETE",
+      "path": "/api/v1/backup/config-snapshots/:sn",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

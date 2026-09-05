@@ -131,6 +131,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.param_models.standard.by_path",
+      "method": "DELETE",
+      "path": "/api/v1/param-models/standard/:path",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.param_models.standard",
+      "method": "POST",
+      "path": "/api/v1/param-models/standard",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.param_models.standard",
+      "method": "GET",
+      "path": "/api/v1/param-models/standard",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.param_models.standard.by_path",
+      "method": "GET",
+      "path": "/api/v1/param-models/standard/:path",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.param_models",
+      "method": "GET",
+      "path": "/api/v1/param-models",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

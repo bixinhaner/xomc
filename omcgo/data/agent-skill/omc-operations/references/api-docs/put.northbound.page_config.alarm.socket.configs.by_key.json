@@ -1,0 +1,221 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "put.northbound.page_config.alarm.socket.configs.by_key",
+  "method": "PUT",
+  "path": "/api/v1/northbound/page-config/alarm/socket/configs/:key",
+  "handler": "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).UpdateSocketAlarmConfig-fm",
+  "category": "northbound",
+  "title": "北向接口 - 更新",
+  "summary": "北向接口 - 更新",
+  "description": "北向接口：更新指定资源的完整配置",
+  "intents": [
+    "北向接口 - 更新",
+    "北向接口：更新指定资源的完整配置",
+    "northbound",
+    "北向接口",
+    "page-config",
+    "alarm",
+    "socket",
+    "configs",
+    "page config"
+  ],
+  "tags": [
+    "northbound",
+    "北向接口",
+    "page-config",
+    "alarm",
+    "socket",
+    "configs"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：北向接口 - 更新",
+  "pathParams": [
+    {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :key"
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "SocketAlarmConfig",
+      "properties": {
+        "accounts": {
+          "items": {
+            "goType": "SocketAccount",
+            "properties": {
+              "channel": {
+                "type": "string"
+              },
+              "credential": {
+                "type": "string"
+              },
+              "credential_set": {
+                "type": "boolean"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "key": {
+                "type": "string"
+              },
+              "purpose": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "username": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "client_sync_enabled": {
+          "type": "boolean"
+        },
+        "created_at": {
+          "format": "date-time",
+          "goType": "time.Time",
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "heartbeat_seconds": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "heartbeat_times": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "idle_timeout_seconds": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "key": {
+          "type": "string"
+        },
+        "listen_ip": {
+          "type": "string"
+        },
+        "listen_port": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "max_clients": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "realtime_push_enabled": {
+          "type": "boolean"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "goType": "time.Time",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "relatedOperations": [
+    {
+      "operationId": "post.northbound.page_config.alarm.socket.configs.by_key.test",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/alarm/socket/configs/:key/test",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.northbound.page_config.alarm.socket.configs",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/alarm/socket/configs",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.northbound.page_config.alarm.snmp.targets.by_key.test",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/alarm/snmp/targets/:key/test",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.northbound.page_config.api.configs.by_key.test",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/api/configs/:key/test",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "put.northbound.page_config.alarm.snmp.targets.by_key",
+      "method": "PUT",
+      "path": "/api/v1/northbound/page-config/alarm/snmp/targets/:key",
+      "relation": "same-domain"
+    }
+  ],
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

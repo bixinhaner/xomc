@@ -98,6 +98,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.gnb.pm.indicatormg.exportAllIndicator",
+      "method": "POST",
+      "path": "/api/v1/gnb/pm/indicatormg/exportAllIndicator",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.pm.indicatormg.addIndicatorGroup",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/addIndicatorGroup",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.pm.indicatormg.addOrModifyIndicator",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/addOrModifyIndicator",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.pm.indicatormg.delIndicator",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/delIndicator",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.pm.indicatormg.delIndicatorGroup",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/delIndicatorGroup",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

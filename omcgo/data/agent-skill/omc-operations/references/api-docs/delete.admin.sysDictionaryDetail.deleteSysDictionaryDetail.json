@@ -74,6 +74,32 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.admin.sysDictionaryDetail.createSysDictionaryDetail",
+      "method": "POST",
+      "path": "/api/v1/admin/sysDictionaryDetail/createSysDictionaryDetail",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "put.admin.sysDictionaryDetail.updateSysDictionaryDetail",
+      "method": "PUT",
+      "path": "/api/v1/admin/sysDictionaryDetail/updateSysDictionaryDetail",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.admin.sysDictionaryDetail.findSysDictionaryDetail",
+      "method": "GET",
+      "path": "/api/v1/admin/sysDictionaryDetail/findSysDictionaryDetail",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.admin.sysDictionaryDetail.getSysDictionaryDetailList",
+      "method": "GET",
+      "path": "/api/v1/admin/sysDictionaryDetail/getSysDictionaryDetailList",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

@@ -12,11 +12,13 @@
     "ufte - 重试",
     "ufte：重试失败任务或消息",
     "ufte",
+    "统一文件传输",
     "tasks",
     "retry"
   ],
   "tags": [
     "ufte",
+    "统一文件传输",
     "tasks",
     "retry"
   ],
@@ -75,6 +77,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.ufte.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/ufte/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ufte.tasks",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.ufte.tasks",
+      "method": "GET",
+      "path": "/api/v1/ufte/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ufte.tasks.batch_delete",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks/batch-delete",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "put.ufte.tasks.by_id.start",
+      "method": "PUT",
+      "path": "/api/v1/ufte/tasks/:id/start",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

@@ -108,6 +108,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.mr.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mr/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.mr.tasks.by_id.stop",
+      "method": "POST",
+      "path": "/api/v1/mr/tasks/:id/stop",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.mr.tasks",
+      "method": "GET",
+      "path": "/api/v1/mr/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.mr.tasks.by_id",
+      "method": "GET",
+      "path": "/api/v1/mr/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.mr.tasks.by_id.progress",
+      "method": "GET",
+      "path": "/api/v1/mr/tasks/:id/progress",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

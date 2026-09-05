@@ -112,6 +112,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.mml.templates.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mml/templates/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.mml.templates.by_id.paths.by_pathId",
+      "method": "DELETE",
+      "path": "/api/v1/mml/templates/:id/paths/:pathId",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "patch.mml.templates.by_id.paths.by_pathId",
+      "method": "PATCH",
+      "path": "/api/v1/mml/templates/:id/paths/:pathId",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.mml.templates.by_id.clone",
+      "method": "POST",
+      "path": "/api/v1/mml/templates/:id/clone",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.mml.templates.by_id.paths.batch",
+      "method": "POST",
+      "path": "/api/v1/mml/templates/:id/paths/batch",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

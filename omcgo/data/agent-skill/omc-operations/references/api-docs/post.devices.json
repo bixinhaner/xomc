@@ -147,6 +147,38 @@
     "request": "openapi",
     "response": "openapi"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.devices.batch",
+      "method": "DELETE",
+      "path": "/api/v1/devices/batch",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.devices.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/devices/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.devices.recycle.permanent",
+      "method": "DELETE",
+      "path": "/api/v1/devices/recycle/permanent",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.devices.tasks.by_task_id",
+      "method": "DELETE",
+      "path": "/api/v1/devices/tasks/:task_id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "patch.devices.recycle.restore",
+      "method": "PATCH",
+      "path": "/api/v1/devices/recycle/restore",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",

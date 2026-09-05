@@ -100,6 +100,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.device_groups",
+      "method": "POST",
+      "path": "/api/v1/device-groups",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.device_groups.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/device-groups/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.device_groups.by_id.devices",
+      "method": "DELETE",
+      "path": "/api/v1/device-groups/:id/devices",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.device_groups.by_id.devices",
+      "method": "POST",
+      "path": "/api/v1/device-groups/:id/devices",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.device_groups.move_devices",
+      "method": "POST",
+      "path": "/api/v1/device-groups/move-devices",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

@@ -14,6 +14,7 @@
         "ufte - tasktypes删除",
         "ufte：查询或维护指定对象的tasktypes删除数据",
         "ufte",
+        "统一文件传输",
         "task-types",
         "task types"
       ],
@@ -31,6 +32,7 @@
         "ufte - 删除",
         "ufte：删除指定资源记录",
         "ufte",
+        "统一文件传输",
         "tasks"
       ],
       "risk": "high",
@@ -47,6 +49,7 @@
         "ufte - devicecandidates",
         "ufte：处理devicecandidates相关数据",
         "ufte",
+        "统一文件传输",
         "device-candidates",
         "device candidates"
       ],
@@ -57,13 +60,15 @@
       "operationId": "get.ufte.devices",
       "method": "GET",
       "path": "/api/v1/ufte/devices",
-      "title": "ufte - 列表",
-      "summary": "ufte - 列表",
-      "description": "ufte：按筛选条件查询资源列表",
+      "title": "查询传输任务设备执行明细与失败原因",
+      "summary": "查询传输任务设备执行明细与失败原因",
+      "description": "可按 taskId、category、typeCode 和 status 筛选；失败记录返回 failureReason 和设备上报的原始 failureDetail，适用于日志收集、升级、备份和恢复任务排障。",
       "intents": [
         "ufte - 列表",
-        "ufte：按筛选条件查询资源列表",
+        "查询传输任务设备执行明细与失败原因",
+        "可按 taskId、category、typeCode 和 status 筛选；失败记录返回 failureReason 和设备上报的原始 failureDetail，适用于日志收集、升级、备份和恢复任务排障。",
         "ufte",
+        "统一文件传输",
         "devices"
       ],
       "risk": "read",
@@ -80,6 +85,7 @@
         "ufte - 导出",
         "ufte：按条件导出业务数据 Handler: ExportDevices 真流式导出设备子任务列表为 CSV。\n\n复用 ListDevices 过滤条件；走 Service.StreamDeviceItems 不在内存累积全量行，\n每命中一条立刻写 csv.Writer，每 500 行 Flush 一次把字节推到客户端 HTTP 流，\n大数据集下浏览器能边下边显进度，服务端内存占用稳定（≈ 1 批 + caches）。\n\n为什么不让前端 pageSize=10000：① backend 可能限上限 ② JSON 序列化大量行内存\n膨胀 ③ 客户端拼 CSV 字段含 , \" 换行 时转义易错。后端 csv.Writer 标准库自动转义。",
         "ufte",
+        "统一文件传输",
         "devices",
         "export"
       ],
@@ -97,6 +103,7 @@
         "ufte - 列表",
         "ufte：按筛选条件查询资源列表",
         "ufte",
+        "统一文件传输",
         "overview"
       ],
       "risk": "read",
@@ -113,6 +120,7 @@
         "ufte - tasktypes",
         "ufte：处理tasktypes相关数据",
         "ufte",
+        "统一文件传输",
         "task-types",
         "task types"
       ],
@@ -123,13 +131,15 @@
       "operationId": "get.ufte.tasks",
       "method": "GET",
       "path": "/api/v1/ufte/tasks",
-      "title": "ufte - 列表",
-      "summary": "ufte - 列表",
-      "description": "ufte：按筛选条件查询资源列表",
+      "title": "查询传输中心任务",
+      "summary": "查询传输中心任务",
+      "description": "查询统一文件传输任务汇总；日志收集任务使用 category=station_log 和 typeCode=RUNTIME_LOG_COLLECT，结束任务的 result 可区分成功、部分成功和失败。",
       "intents": [
         "ufte - 列表",
-        "ufte：按筛选条件查询资源列表",
+        "查询传输中心任务",
+        "查询统一文件传输任务汇总；日志收集任务使用 category=station_log 和 typeCode=RUNTIME_LOG_COLLECT，结束任务的 result 可区分成功、部分成功和失败。",
         "ufte",
+        "统一文件传输",
         "tasks"
       ],
       "risk": "read",
@@ -146,6 +156,7 @@
         "ufte - tasktypes",
         "ufte：处理tasktypes相关数据",
         "ufte",
+        "统一文件传输",
         "task-types",
         "task types"
       ],
@@ -163,6 +174,7 @@
         "ufte - 创建",
         "ufte：创建新的资源记录",
         "ufte",
+        "统一文件传输",
         "tasks"
       ],
       "risk": "low",
@@ -179,6 +191,7 @@
         "ufte - 批量删除",
         "ufte：处理批量删除相关数据 Handler: BatchDeleteTasks 批量删除任务；单条失败不影响其他。",
         "ufte",
+        "统一文件传输",
         "tasks",
         "batch-delete",
         "batch delete"
@@ -197,6 +210,7 @@
         "ufte - 重试",
         "ufte：重试失败任务或消息",
         "ufte",
+        "统一文件传输",
         "tasks",
         "retry"
       ],
@@ -214,6 +228,7 @@
         "ufte - tasktypes更新",
         "ufte：查询或维护指定对象的tasktypes更新数据",
         "ufte",
+        "统一文件传输",
         "task-types",
         "task types"
       ],
@@ -231,6 +246,7 @@
         "ufte - 启动",
         "ufte：启动任务、流程或服务",
         "ufte",
+        "统一文件传输",
         "tasks",
         "start"
       ],
@@ -248,6 +264,7 @@
         "ufte - PUT",
         "ufte：执行 PUT 请求对应的业务操作",
         "ufte",
+        "统一文件传输",
         "tasks",
         "suspend"
       ],
@@ -265,6 +282,7 @@
         "ufte - PUT",
         "ufte：执行 PUT 请求对应的业务操作",
         "ufte",
+        "统一文件传输",
         "tasks",
         "terminate"
       ],

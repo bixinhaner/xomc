@@ -88,6 +88,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.indicators",
+      "method": "POST",
+      "path": "/api/v1/indicators",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.indicators",
+      "method": "GET",
+      "path": "/api/v1/indicators",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.indicators.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/indicators/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.indicators.by_id.formulas.by_platform",
+      "method": "DELETE",
+      "path": "/api/v1/indicators/:id/formulas/:platform",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.indicators.files.*loadedFrom",
+      "method": "DELETE",
+      "path": "/api/v1/indicators/files/*loadedFrom",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

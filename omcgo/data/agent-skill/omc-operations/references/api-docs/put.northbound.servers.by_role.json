@@ -104,6 +104,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.northbound.servers",
+      "method": "GET",
+      "path": "/api/v1/northbound/servers",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.northbound.servers.active",
+      "method": "PUT",
+      "path": "/api/v1/northbound/servers/active",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.northbound.push.targets.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/northbound/push/targets/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.northbound.v1.device.group",
+      "method": "DELETE",
+      "path": "/api/v1/northbound/v1/device/group",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.northbound.v1.device.group.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/northbound/v1/device/group/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

@@ -1,0 +1,237 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.northbound.page_config.file.profiles",
+  "method": "POST",
+  "path": "/api/v1/northbound/page-config/file/profiles",
+  "handler": "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).CreateFileProfile-fm",
+  "category": "northbound",
+  "title": "北向接口 - 创建",
+  "summary": "北向接口 - 创建",
+  "description": "北向接口：创建新的资源记录",
+  "intents": [
+    "北向接口 - 创建",
+    "北向接口：创建新的资源记录",
+    "northbound",
+    "北向接口",
+    "page-config",
+    "file",
+    "profiles",
+    "page config"
+  ],
+  "tags": [
+    "northbound",
+    "北向接口",
+    "page-config",
+    "file",
+    "profiles"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：北向接口 - 创建",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "FileProfile",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "goType": "time.Time",
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "flags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "groups": {
+          "items": {
+            "goType": "FileGroup",
+            "properties": {
+              "compression_enabled": {
+                "type": "boolean"
+              },
+              "compression_format": {
+                "goType": "CompressionFormat",
+                "type": "string"
+              },
+              "csv_separator": {
+                "type": "string"
+              },
+              "domain": {
+                "goType": "Domain",
+                "type": "string"
+              },
+              "file_name_template": {
+                "type": "string"
+              },
+              "format": {
+                "goType": "OutputFormat",
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "objects": {
+                "items": {
+                  "goType": "ScenarioObject",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "profile": {
+                      "type": "string"
+                    },
+                    "tech": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "path_template": {
+                "type": "string"
+              },
+              "period": {
+                "goType": "Period",
+                "type": "string"
+              },
+              "selected_fields": {
+                "description": "SelectedFields narrows which fields this group exports.\nEmpty/nil = export all fields for each object (default, backward compatible).\nNon-PM domains store FieldDefinition.Key; PM stores metric IDs/paths because\ngenerated columns come from the PM indicator dictionary.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "start_minute": {
+                "goType": "int",
+                "type": "integer"
+              },
+              "start_time": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "scenario_name": {
+          "type": "string"
+        },
+        "scenario_name_en": {
+          "type": "string"
+        },
+        "status": {
+          "goType": "ProfileStatus",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "goType": "time.Time",
+          "type": "string"
+        },
+        "vendor": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "relatedOperations": [
+    {
+      "operationId": "post.northbound.page_config.file.profiles.by_id.run",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/file/profiles/:id/run",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.northbound.page_config.file.profiles.by_id",
+      "method": "PUT",
+      "path": "/api/v1/northbound/page-config/file/profiles/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.northbound.page_config.file.profiles",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/file/profiles",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.northbound.page_config.file.profiles.by_id.preview",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/file/profiles/:id/preview",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.northbound.page_config.inventory.profiles.by_id.run",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/inventory/profiles/:id/run",
+      "relation": "same-domain"
+    }
+  ],
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

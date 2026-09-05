@@ -94,6 +94,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.files.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/files/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.files",
+      "method": "POST",
+      "path": "/api/v1/files",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.files",
+      "method": "GET",
+      "path": "/api/v1/files",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.files.by_id",
+      "method": "GET",
+      "path": "/api/v1/files/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.files.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/files/:id/download",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

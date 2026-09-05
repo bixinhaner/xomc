@@ -7,10 +7,10 @@
   "category": "alarm-definitions",
   "title": "alarm-definitions - filecontent",
   "summary": "alarm-definitions - filecontent",
-  "description": "alarm-definitions：处理filecontent相关数据 Handler: DownloadFile GET /api/v1/alarm-definitions/file-content?loaded_from=alarm-definitions/\u003cfile\u003e.xml\n\n下载 XML 原文件(2026-06-05 操作列下载功能)。builtin 与 custom 均可下载(只读无守门);\n路径校验与 DeleteFile 同口径:validAlarmFilePath + pathContainedIn 双重防遍历。",
+  "description": "alarm-definitions：处理filecontent相关数据 Handler: DownloadFile GET /api/v1/alarm-definitions/file-content\n\n两种模式(#268):\n  - ?loaded_from=alarm-definitions/\u003cfile\u003e.xml — 下载磁盘原文件(builtin 与 custom\n    均可,只读无守门);路径校验与 DeleteFile 同口径:validAlarmFilePath +\n    pathContainedIn 双重防遍历。\n  - ?ne_type=ENB(不带 loaded_from) — 手工新增行没有落盘文件,从 DB 取该\n    ne_type 下 loaded_from 为空的全量定义,动态生成 alarmModel XML 返回。\n    字段与导入格式对齐(severity 用名称 / isShow Y|N / eventType 数字),\n    导出文件可直接回传 upload-xml。",
   "intents": [
     "alarm-definitions - filecontent",
-    "alarm-definitions：处理filecontent相关数据 Handler: DownloadFile GET /api/v1/alarm-definitions/file-content?loaded_from=alarm-definitions/\u003cfile\u003e.xml\n\n下载 XML 原文件(2026-06-05 操作列下载功能)。builtin 与 custom 均可下载(只读无守门);\n路径校验与 DeleteFile 同口径:validAlarmFilePath + pathContainedIn 双重防遍历。",
+    "alarm-definitions：处理filecontent相关数据 Handler: DownloadFile GET /api/v1/alarm-definitions/file-content\n\n两种模式(#268):\n  - ?loaded_from=alarm-definitions/\u003cfile\u003e.xml — 下载磁盘原文件(builtin 与 custom\n    均可,只读无守门);路径校验与 DeleteFile 同口径:validAlarmFilePath +\n    pathContainedIn 双重防遍历。\n  - ?ne_type=ENB(不带 loaded_from) — 手工新增行没有落盘文件,从 DB 取该\n    ne_type 下 loaded_from 为空的全量定义,动态生成 alarmModel XML 返回。\n    字段与导入格式对齐(severity 用名称 / isShow Y|N / eventType 数字),\n    导出文件可直接回传 upload-xml。",
     "alarm-definitions",
     "file-content",
     "alarm definitions",
@@ -28,6 +28,12 @@
   "queryParams": [
     {
       "name": "loaded_from",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "ne_type",
       "in": "query",
       "required": false,
       "type": "string"
@@ -74,7 +80,39 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
-  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "emptyResult": "空数组或 total=0 只说明该操作在当前用户权限和本次过滤条件下没有返回记录，不能单独证明业务对象、源数据或系统能力不存在。先核对参数、标识符、时间范围和权限；若用户目标仍未回答，再沿 relatedOperations 选择汇总、明细、原始或派生数据操作补充证据。",
+  "relatedOperations": [
+    {
+      "operationId": "get.alarm_definitions",
+      "method": "GET",
+      "path": "/api/v1/alarm-definitions",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.alarm_definitions",
+      "method": "POST",
+      "path": "/api/v1/alarm-definitions",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.alarm_definitions.by_identifier",
+      "method": "GET",
+      "path": "/api/v1/alarm-definitions/:identifier",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.alarm_definitions.ne_types",
+      "method": "GET",
+      "path": "/api/v1/alarm-definitions/ne-types",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.alarm_definitions.unknown_stats",
+      "method": "GET",
+      "path": "/api/v1/alarm-definitions/unknown-stats",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

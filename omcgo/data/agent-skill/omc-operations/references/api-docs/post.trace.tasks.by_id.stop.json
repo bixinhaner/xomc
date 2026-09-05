@@ -88,6 +88,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.trace.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/trace/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.trace.tasks",
+      "method": "POST",
+      "path": "/api/v1/trace/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.trace.tasks",
+      "method": "GET",
+      "path": "/api/v1/trace/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.trace.tasks.by_id",
+      "method": "GET",
+      "path": "/api/v1/trace/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.trace.tasks.batch_delete",
+      "method": "POST",
+      "path": "/api/v1/trace/tasks/batch-delete",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

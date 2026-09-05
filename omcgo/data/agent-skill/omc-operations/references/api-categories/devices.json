@@ -107,6 +107,42 @@
       "document": "api-docs/get.devices.by_id.json"
     },
     {
+      "operationId": "get.devices.by_id.antenna_sectors",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/antenna-sectors",
+      "title": "设备 - antennasectors",
+      "summary": "设备 - antennasectors",
+      "description": "设备：处理antennasectors相关数据 Handler: GetAntennaSectors handles GET /api/v1/devices/:id/antenna-sectors.",
+      "intents": [
+        "设备 - antennasectors",
+        "设备：处理antennasectors相关数据 Handler: GetAntennaSectors handles GET /api/v1/devices/:id/antenna-sectors.",
+        "devices",
+        "设备",
+        "antenna-sectors",
+        "antenna sectors"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.by_id.antenna_sectors.json"
+    },
+    {
+      "operationId": "get.devices.by_id.control_actions",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/control-actions",
+      "title": "设备 - controlactions",
+      "summary": "设备 - controlactions",
+      "description": "设备：处理controlactions相关数据 Handler: GetDeviceControlActions returns the durable OMC-control evidence for one device.",
+      "intents": [
+        "设备 - controlactions",
+        "设备：处理controlactions相关数据 Handler: GetDeviceControlActions returns the durable OMC-control evidence for one device.",
+        "devices",
+        "设备",
+        "control-actions",
+        "control actions"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.by_id.control_actions.json"
+    },
+    {
       "operationId": "get.devices.by_id.detail",
       "method": "GET",
       "path": "/api/v1/devices/:id/detail",
@@ -157,6 +193,44 @@
       ],
       "risk": "read",
       "document": "api-docs/get.devices.by_id.license_params.json"
+    },
+    {
+      "operationId": "get.devices.by_id.parameter_sync.active",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/parameter-sync/active",
+      "title": "设备 - parameter同步",
+      "summary": "设备 - parameter同步",
+      "description": "设备：处理parameter同步相关数据",
+      "intents": [
+        "设备 - parameter同步",
+        "设备：处理parameter同步相关数据",
+        "devices",
+        "设备",
+        "parameter-sync",
+        "active",
+        "parameter sync"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.by_id.parameter_sync.active.json"
+    },
+    {
+      "operationId": "get.devices.by_id.parameter_sync.history",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/parameter-sync/history",
+      "title": "设备 - 历史记录",
+      "summary": "设备 - 历史记录",
+      "description": "设备：查询历史数据或操作记录",
+      "intents": [
+        "设备 - 历史记录",
+        "设备：查询历史数据或操作记录",
+        "devices",
+        "设备",
+        "parameter-sync",
+        "history",
+        "parameter sync"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.by_id.parameter_sync.history.json"
     },
     {
       "operationId": "get.devices.by_id.parameters",
@@ -604,6 +678,25 @@
       "document": "api-docs/post.devices.by_id.license_params.refresh.json"
     },
     {
+      "operationId": "post.devices.by_id.location_sync.accept",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/location-sync/accept",
+      "title": "设备 - location同步",
+      "summary": "设备 - location同步",
+      "description": "设备：处理location同步相关数据 Handler: AcceptLocationSync promotes the latest device-reported GPS coordinates to\nthe OMC accepted coordinates after an optimistic version check.",
+      "intents": [
+        "设备 - location同步",
+        "设备：处理location同步相关数据 Handler: AcceptLocationSync promotes the latest device-reported GPS coordinates to\nthe OMC accepted coordinates after an optimistic version check.",
+        "devices",
+        "设备",
+        "location-sync",
+        "accept",
+        "location sync"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.by_id.location_sync.accept.json"
+    },
+    {
       "operationId": "post.devices.by_id.objects.add",
       "method": "POST",
       "path": "/api/v1/devices/:id/objects/add",
@@ -658,16 +751,34 @@
       "document": "api-docs/post.devices.by_id.parameters.discover.json"
     },
     {
+      "operationId": "post.devices.by_id.password.reset",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/password/reset",
+      "title": "设备 - 重置",
+      "summary": "设备 - 重置",
+      "description": "设备：重置状态或配置 Handler: ResetLMTPassword handles POST /api/v1/devices/:id/password/reset.",
+      "intents": [
+        "设备 - 重置",
+        "设备：重置状态或配置 Handler: ResetLMTPassword handles POST /api/v1/devices/:id/password/reset.",
+        "devices",
+        "设备",
+        "password",
+        "reset"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.by_id.password.reset.json"
+    },
+    {
       "operationId": "post.devices.by_id.reboot",
       "method": "POST",
       "path": "/api/v1/devices/:id/reboot",
       "title": "Reboot a device",
       "summary": "Reboot a device",
-      "description": "下发设备重启操作 Handler: RebootDevice handles POST /api/v1/devices/:id/reboot.",
+      "description": "下发设备重启操作",
       "intents": [
         "设备 - 重启",
         "Reboot a device",
-        "下发设备重启操作 Handler: RebootDevice handles POST /api/v1/devices/:id/reboot.",
+        "下发设备重启操作",
         "devices",
         "设备",
         "reboot"
@@ -814,6 +925,24 @@
       ],
       "risk": "low",
       "document": "api-docs/put.devices.by_id.activate.json"
+    },
+    {
+      "operationId": "put.devices.by_id.antenna_sectors.by_sectorNo",
+      "method": "PUT",
+      "path": "/api/v1/devices/:id/antenna-sectors/:sectorNo",
+      "title": "设备 - antennasectors更新",
+      "summary": "设备 - antennasectors更新",
+      "description": "设备：查询或维护指定对象的antennasectors更新数据 Handler: UpdateAntennaSectorPlan saves OMC-local planning values for one sector.",
+      "intents": [
+        "设备 - antennasectors更新",
+        "设备：查询或维护指定对象的antennasectors更新数据 Handler: UpdateAntennaSectorPlan saves OMC-local planning values for one sector.",
+        "devices",
+        "设备",
+        "antenna-sectors",
+        "antenna sectors"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.devices.by_id.antenna_sectors.by_sectorNo.json"
     },
     {
       "operationId": "put.devices.by_id.deactivate",

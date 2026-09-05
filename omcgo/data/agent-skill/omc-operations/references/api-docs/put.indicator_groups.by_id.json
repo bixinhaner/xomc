@@ -94,6 +94,26 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.indicator_groups.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/indicator-groups/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.indicator_groups",
+      "method": "POST",
+      "path": "/api/v1/indicator-groups",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.indicator_groups",
+      "method": "GET",
+      "path": "/api/v1/indicator-groups",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

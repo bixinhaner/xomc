@@ -78,6 +78,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.devices.by_id.license_params",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/license-params",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.devices.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/devices/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.devices",
+      "method": "POST",
+      "path": "/api/v1/devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.devices.by_id",
+      "method": "PUT",
+      "path": "/api/v1/devices/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.devices",
+      "method": "GET",
+      "path": "/api/v1/devices",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

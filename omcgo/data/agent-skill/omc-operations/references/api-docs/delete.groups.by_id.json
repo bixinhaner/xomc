@@ -51,6 +51,38 @@
     "request": "openapi",
     "response": "openapi"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.groups.by_id.devices.by_deviceId",
+      "method": "DELETE",
+      "path": "/api/v1/groups/:id/devices/:deviceId",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.groups",
+      "method": "POST",
+      "path": "/api/v1/groups",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.groups.by_id.devices",
+      "method": "POST",
+      "path": "/api/v1/groups/:id/devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.groups.by_id",
+      "method": "PUT",
+      "path": "/api/v1/groups/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.groups",
+      "method": "GET",
+      "path": "/api/v1/groups",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",

@@ -4,6 +4,139 @@
   "title": "agent",
   "operations": [
     {
+      "operationId": "delete.agent.attachments.by_attachmentID",
+      "method": "DELETE",
+      "path": "/api/v1/agent/attachments/:attachmentID",
+      "title": "agent - 删除",
+      "summary": "agent - 删除",
+      "description": "agent：删除指定资源记录",
+      "intents": [
+        "agent - 删除",
+        "agent：删除指定资源记录",
+        "agent",
+        "attachments"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.agent.attachments.by_attachmentID.json"
+    },
+    {
+      "operationId": "get.agent.admin.overview",
+      "method": "GET",
+      "path": "/api/v1/agent/admin/overview",
+      "title": "agent - 列表",
+      "summary": "agent - 列表",
+      "description": "agent：按筛选条件查询资源列表",
+      "intents": [
+        "agent - 列表",
+        "agent：按筛选条件查询资源列表",
+        "agent",
+        "admin",
+        "overview"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.admin.overview.json"
+    },
+    {
+      "operationId": "get.agent.artifacts.by_artifactID.content",
+      "method": "GET",
+      "path": "/api/v1/agent/artifacts/:artifactID/content",
+      "title": "agent - GET",
+      "summary": "agent - GET",
+      "description": "agent：执行 GET 请求对应的业务操作",
+      "intents": [
+        "agent - GET",
+        "agent：执行 GET 请求对应的业务操作",
+        "agent",
+        "artifacts",
+        "content"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.artifacts.by_artifactID.content.json"
+    },
+    {
+      "operationId": "get.agent.assistants",
+      "method": "GET",
+      "path": "/api/v1/agent/assistants",
+      "title": "agent - 列表",
+      "summary": "agent - 列表",
+      "description": "agent：按筛选条件查询资源列表",
+      "intents": [
+        "agent - 列表",
+        "agent：按筛选条件查询资源列表",
+        "agent",
+        "assistants"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.assistants.json"
+    },
+    {
+      "operationId": "get.agent.assistants.by_id",
+      "method": "GET",
+      "path": "/api/v1/agent/assistants/:id",
+      "title": "agent - 详情",
+      "summary": "agent - 详情",
+      "description": "agent：查询指定资源的详细信息",
+      "intents": [
+        "agent - 详情",
+        "agent：查询指定资源的详细信息",
+        "agent",
+        "assistants"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.assistants.by_id.json"
+    },
+    {
+      "operationId": "get.agent.assistants.by_id.runs",
+      "method": "GET",
+      "path": "/api/v1/agent/assistants/:id/runs",
+      "title": "agent - 执行历史",
+      "summary": "agent - 执行历史",
+      "description": "agent：查询脚本或命令执行历史",
+      "intents": [
+        "agent - 执行历史",
+        "agent：查询脚本或命令执行历史",
+        "agent",
+        "assistants",
+        "runs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.assistants.by_id.runs.json"
+    },
+    {
+      "operationId": "get.agent.assistants.catalog",
+      "method": "GET",
+      "path": "/api/v1/agent/assistants/catalog",
+      "title": "agent - 列表",
+      "summary": "agent - 列表",
+      "description": "agent：按筛选条件查询资源列表",
+      "intents": [
+        "agent - 列表",
+        "agent：按筛选条件查询资源列表",
+        "agent",
+        "assistants",
+        "catalog"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.assistants.catalog.json"
+    },
+    {
+      "operationId": "get.agent.assistants.runs.by_runID",
+      "method": "GET",
+      "path": "/api/v1/agent/assistants/runs/:runID",
+      "title": "agent - 执行历史详情",
+      "summary": "agent - 执行历史详情",
+      "description": "agent：查询或维护指定对象的执行历史详情数据",
+      "intents": [
+        "agent - 执行历史详情",
+        "agent：查询或维护指定对象的执行历史详情数据",
+        "agent",
+        "assistants",
+        "runs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.assistants.runs.by_runID.json"
+    },
+    {
       "operationId": "get.agent.config",
       "method": "GET",
       "path": "/api/v1/agent/config",
@@ -36,15 +169,64 @@
       "document": "api-docs/get.agent.conversation.json"
     },
     {
+      "operationId": "get.agent.conversation.messages",
+      "method": "GET",
+      "path": "/api/v1/agent/conversation/messages",
+      "title": "agent - 列表",
+      "summary": "agent - 列表",
+      "description": "agent：按筛选条件查询资源列表",
+      "intents": [
+        "agent - 列表",
+        "agent：按筛选条件查询资源列表",
+        "agent",
+        "conversation",
+        "messages"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.conversation.messages.json"
+    },
+    {
+      "operationId": "get.agent.findings",
+      "method": "GET",
+      "path": "/api/v1/agent/findings",
+      "title": "agent - 列表",
+      "summary": "agent - 列表",
+      "description": "agent：按筛选条件查询资源列表",
+      "intents": [
+        "agent - 列表",
+        "agent：按筛选条件查询资源列表",
+        "agent",
+        "findings"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.findings.json"
+    },
+    {
+      "operationId": "get.agent.findings.by_id",
+      "method": "GET",
+      "path": "/api/v1/agent/findings/:id",
+      "title": "agent - 详情",
+      "summary": "agent - 详情",
+      "description": "agent：查询指定资源的详细信息",
+      "intents": [
+        "agent - 详情",
+        "agent：查询指定资源的详细信息",
+        "agent",
+        "findings"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.findings.by_id.json"
+    },
+    {
       "operationId": "get.agent.handbook.chunks.by_index",
       "method": "GET",
       "path": "/api/v1/agent/handbook/chunks/:index",
       "title": "agent - 详情",
       "summary": "agent - 详情",
-      "description": "agent：按序号读取当前 OMC 版本的完整 API 手册包分块 Handler: GetHandbookChunk returns one bounded base64 chunk of the immutable API handbook artifact.",
+      "description": "agent：查询指定资源的详细信息 Handler: GetHandbookChunk returns one bounded base64 chunk of the immutable API handbook artifact.",
       "intents": [
         "agent - 详情",
-        "agent：按序号读取当前 OMC 版本的完整 API 手册包分块 Handler: GetHandbookChunk returns one bounded base64 chunk of the immutable API handbook artifact.",
+        "agent：查询指定资源的详细信息 Handler: GetHandbookChunk returns one bounded base64 chunk of the immutable API handbook artifact.",
         "agent",
         "handbook",
         "chunks"
@@ -56,12 +238,12 @@
       "operationId": "get.agent.handbook.manifest",
       "method": "GET",
       "path": "/api/v1/agent/handbook/manifest",
-      "title": "agent - 查询",
-      "summary": "agent - 查询",
-      "description": "agent：查询当前 OMC 版本的完整 API 手册包清单 Handler: GetHandbookManifest returns the immutable API handbook artifact identity and transfer layout.",
+      "title": "agent - 列表",
+      "summary": "agent - 列表",
+      "description": "agent：按筛选条件查询资源列表 Handler: GetHandbookManifest returns the immutable API handbook artifact identity and transfer layout.",
       "intents": [
-        "agent - 查询",
-        "agent：查询当前 OMC 版本的完整 API 手册包清单 Handler: GetHandbookManifest returns the immutable API handbook artifact identity and transfer layout.",
+        "agent - 列表",
+        "agent：按筛选条件查询资源列表 Handler: GetHandbookManifest returns the immutable API handbook artifact identity and transfer layout.",
         "agent",
         "handbook",
         "manifest"
@@ -118,6 +300,177 @@
       "document": "api-docs/get.agent.visibility.json"
     },
     {
+      "operationId": "patch.agent.admin.scenarios.by_scenarioKey",
+      "method": "PATCH",
+      "path": "/api/v1/agent/admin/scenarios/:scenarioKey",
+      "title": "agent - 部分更新",
+      "summary": "agent - 部分更新",
+      "description": "agent：更新指定资源的部分字段",
+      "intents": [
+        "agent - 部分更新",
+        "agent：更新指定资源的部分字段",
+        "agent",
+        "admin",
+        "scenarios"
+      ],
+      "risk": "low",
+      "document": "api-docs/patch.agent.admin.scenarios.by_scenarioKey.json"
+    },
+    {
+      "operationId": "patch.agent.assistants.by_id.state",
+      "method": "PATCH",
+      "path": "/api/v1/agent/assistants/:id/state",
+      "title": "agent - PATCH",
+      "summary": "agent - PATCH",
+      "description": "agent：执行 PATCH 请求对应的业务操作",
+      "intents": [
+        "agent - PATCH",
+        "agent：执行 PATCH 请求对应的业务操作",
+        "agent",
+        "assistants",
+        "state"
+      ],
+      "risk": "low",
+      "document": "api-docs/patch.agent.assistants.by_id.state.json"
+    },
+    {
+      "operationId": "post.agent.admin.runs.by_runID.cancel",
+      "method": "POST",
+      "path": "/api/v1/agent/admin/runs/:runID/cancel",
+      "title": "agent - 取消",
+      "summary": "agent - 取消",
+      "description": "agent：取消未完成的任务或操作",
+      "intents": [
+        "agent - 取消",
+        "agent：取消未完成的任务或操作",
+        "agent",
+        "admin",
+        "runs",
+        "cancel"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.agent.admin.runs.by_runID.cancel.json"
+    },
+    {
+      "operationId": "post.agent.assistants",
+      "method": "POST",
+      "path": "/api/v1/agent/assistants",
+      "title": "agent - 创建",
+      "summary": "agent - 创建",
+      "description": "agent：创建新的资源记录",
+      "intents": [
+        "agent - 创建",
+        "agent：创建新的资源记录",
+        "agent",
+        "assistants"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.agent.assistants.json"
+    },
+    {
+      "operationId": "post.agent.assistants.by_id.messages",
+      "method": "POST",
+      "path": "/api/v1/agent/assistants/:id/messages",
+      "title": "agent - POST",
+      "summary": "agent - POST",
+      "description": "agent：执行 POST 请求对应的业务操作",
+      "intents": [
+        "agent - POST",
+        "agent：执行 POST 请求对应的业务操作",
+        "agent",
+        "assistants",
+        "messages"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.agent.assistants.by_id.messages.json"
+    },
+    {
+      "operationId": "post.agent.assistants.by_id.publish",
+      "method": "POST",
+      "path": "/api/v1/agent/assistants/:id/publish",
+      "title": "agent - POST",
+      "summary": "agent - POST",
+      "description": "agent：执行 POST 请求对应的业务操作",
+      "intents": [
+        "agent - POST",
+        "agent：执行 POST 请求对应的业务操作",
+        "agent",
+        "assistants",
+        "publish"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.agent.assistants.by_id.publish.json"
+    },
+    {
+      "operationId": "post.agent.assistants.by_id.runs",
+      "method": "POST",
+      "path": "/api/v1/agent/assistants/:id/runs",
+      "title": "agent - 执行历史",
+      "summary": "agent - 执行历史",
+      "description": "agent：查询脚本或命令执行历史",
+      "intents": [
+        "agent - 执行历史",
+        "agent：查询脚本或命令执行历史",
+        "agent",
+        "assistants",
+        "runs"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.agent.assistants.by_id.runs.json"
+    },
+    {
+      "operationId": "post.agent.assistants.runs.by_runID.cancel",
+      "method": "POST",
+      "path": "/api/v1/agent/assistants/runs/:runID/cancel",
+      "title": "agent - 取消",
+      "summary": "agent - 取消",
+      "description": "agent：取消未完成的任务或操作",
+      "intents": [
+        "agent - 取消",
+        "agent：取消未完成的任务或操作",
+        "agent",
+        "assistants",
+        "runs",
+        "cancel"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.agent.assistants.runs.by_runID.cancel.json"
+    },
+    {
+      "operationId": "post.agent.assistants.runs.by_runID.read",
+      "method": "POST",
+      "path": "/api/v1/agent/assistants/runs/:runID/read",
+      "title": "agent - 标记已读",
+      "summary": "agent - 标记已读",
+      "description": "agent：将通知或消息标记为已读",
+      "intents": [
+        "agent - 标记已读",
+        "agent：将通知或消息标记为已读",
+        "agent",
+        "assistants",
+        "runs",
+        "read"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.agent.assistants.runs.by_runID.read.json"
+    },
+    {
+      "operationId": "post.agent.attachments",
+      "method": "POST",
+      "path": "/api/v1/agent/attachments",
+      "title": "agent - 创建",
+      "summary": "agent - 创建",
+      "description": "agent：创建新的资源记录",
+      "intents": [
+        "agent - 创建",
+        "agent：创建新的资源记录",
+        "agent",
+        "attachments"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.agent.attachments.json"
+    },
+    {
       "operationId": "post.agent.chat.stream",
       "method": "POST",
       "path": "/api/v1/agent/chat/stream",
@@ -149,6 +502,108 @@
       ],
       "risk": "low",
       "document": "api-docs/post.agent.conversation.json"
+    },
+    {
+      "operationId": "post.agent.findings.by_id.continue",
+      "method": "POST",
+      "path": "/api/v1/agent/findings/:id/continue",
+      "title": "agent - POST",
+      "summary": "agent - POST",
+      "description": "agent：执行 POST 请求对应的业务操作",
+      "intents": [
+        "agent - POST",
+        "agent：执行 POST 请求对应的业务操作",
+        "agent",
+        "findings",
+        "continue"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.agent.findings.by_id.continue.json"
+    },
+    {
+      "operationId": "post.agent.findings.by_id.dismiss",
+      "method": "POST",
+      "path": "/api/v1/agent/findings/:id/dismiss",
+      "title": "agent - POST",
+      "summary": "agent - POST",
+      "description": "agent：执行 POST 请求对应的业务操作",
+      "intents": [
+        "agent - POST",
+        "agent：执行 POST 请求对应的业务操作",
+        "agent",
+        "findings",
+        "dismiss"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.agent.findings.by_id.dismiss.json"
+    },
+    {
+      "operationId": "post.agent.findings.by_id.read",
+      "method": "POST",
+      "path": "/api/v1/agent/findings/:id/read",
+      "title": "agent - 标记已读",
+      "summary": "agent - 标记已读",
+      "description": "agent：将通知或消息标记为已读",
+      "intents": [
+        "agent - 标记已读",
+        "agent：将通知或消息标记为已读",
+        "agent",
+        "findings",
+        "read"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.agent.findings.by_id.read.json"
+    },
+    {
+      "operationId": "post.agent.findings.by_id.restore",
+      "method": "POST",
+      "path": "/api/v1/agent/findings/:id/restore",
+      "title": "agent - 恢复",
+      "summary": "agent - 恢复",
+      "description": "agent：恢复备份、回收站记录或任务状态",
+      "intents": [
+        "agent - 恢复",
+        "agent：恢复备份、回收站记录或任务状态",
+        "agent",
+        "findings",
+        "restore"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.agent.findings.by_id.restore.json"
+    },
+    {
+      "operationId": "post.agent.runs.by_runID.cancel",
+      "method": "POST",
+      "path": "/api/v1/agent/runs/:runID/cancel",
+      "title": "agent - 取消",
+      "summary": "agent - 取消",
+      "description": "agent：取消未完成的任务或操作",
+      "intents": [
+        "agent - 取消",
+        "agent：取消未完成的任务或操作",
+        "agent",
+        "runs",
+        "cancel"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.agent.runs.by_runID.cancel.json"
+    },
+    {
+      "operationId": "put.agent.assistants.by_id.draft",
+      "method": "PUT",
+      "path": "/api/v1/agent/assistants/:id/draft",
+      "title": "agent - PUT",
+      "summary": "agent - PUT",
+      "description": "agent：执行 PUT 请求对应的业务操作",
+      "intents": [
+        "agent - PUT",
+        "agent：执行 PUT 请求对应的业务操作",
+        "agent",
+        "assistants",
+        "draft"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.agent.assistants.by_id.draft.json"
     }
   ]
 }

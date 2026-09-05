@@ -95,6 +95,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.device_groups.by_id.devices",
+      "method": "DELETE",
+      "path": "/api/v1/device-groups/:id/devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.device_groups.by_id.devices",
+      "method": "GET",
+      "path": "/api/v1/device-groups/:id/devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.device_groups.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/device-groups/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.device_groups",
+      "method": "POST",
+      "path": "/api/v1/device-groups",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.device_groups.by_id",
+      "method": "PUT",
+      "path": "/api/v1/device-groups/:id",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

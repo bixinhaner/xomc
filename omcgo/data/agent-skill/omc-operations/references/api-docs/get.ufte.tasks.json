@@ -9,13 +9,16 @@
   "summary": "查询传输中心任务",
   "description": "查询统一文件传输任务汇总；日志收集任务使用 category=station_log 和 typeCode=RUNTIME_LOG_COLLECT，结束任务的 result 可区分成功、部分成功和失败。",
   "intents": [
+    "ufte - 列表",
     "查询传输中心任务",
     "查询统一文件传输任务汇总；日志收集任务使用 category=station_log 和 typeCode=RUNTIME_LOG_COLLECT，结束任务的 result 可区分成功、部分成功和失败。",
     "ufte",
+    "统一文件传输",
     "tasks"
   ],
   "tags": [
     "ufte",
+    "统一文件传输",
     "tasks"
   ],
   "risk": "read",
@@ -130,7 +133,39 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
-  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "emptyResult": "空数组或 total=0 只说明该操作在当前用户权限和本次过滤条件下没有返回记录，不能单独证明业务对象、源数据或系统能力不存在。先核对参数、标识符、时间范围和权限；若用户目标仍未回答，再沿 relatedOperations 选择汇总、明细、原始或派生数据操作补充证据。",
+  "relatedOperations": [
+    {
+      "operationId": "delete.ufte.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/ufte/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ufte.tasks",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ufte.tasks.batch_delete",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks/batch-delete",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ufte.tasks.by_id.retry",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks/:id/retry",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.ufte.tasks.by_id.start",
+      "method": "PUT",
+      "path": "/api/v1/ufte/tasks/:id/start",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

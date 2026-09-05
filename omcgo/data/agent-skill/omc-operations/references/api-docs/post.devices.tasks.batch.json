@@ -44,6 +44,10 @@
         "goType": "CreateTaskRequest",
         "nullable": true,
         "properties": {
+          "admission_class": {
+            "goType": "AdmissionClass",
+            "type": "string"
+          },
           "command_index": {
             "goType": "int",
             "type": "integer"
@@ -69,6 +73,13 @@
             "description": "过期时间（秒）",
             "goType": "int",
             "type": "integer"
+          },
+          "fail_immediately": {
+            "description": "FailImmediately creates a terminal failed task row without enqueueing it.\nIt is used by callers that already know an RPC cannot be delivered, such\nas an MML task targeting an offline device without offline-wait enabled.",
+            "type": "boolean"
+          },
+          "fail_reason": {
+            "type": "string"
           },
           "has_path_translation_miss": {
             "description": "路径翻译元数据（MML fanout 阶段写入；详见 Task.HasPathTranslationMiss 注释）",
@@ -114,7 +125,6 @@
           }
         },
         "required": [
-          "device_sn",
           "method"
         ],
         "type": "object"
@@ -162,6 +172,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.devices.tasks",
+      "method": "POST",
+      "path": "/api/v1/devices/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.devices.tasks",
+      "method": "GET",
+      "path": "/api/v1/devices/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.devices.batch",
+      "method": "DELETE",
+      "path": "/api/v1/devices/batch",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.devices.tasks.by_task_id",
+      "method": "DELETE",
+      "path": "/api/v1/devices/tasks/:task_id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.devices.tasks.by_task_id.retry",
+      "method": "POST",
+      "path": "/api/v1/devices/tasks/:task_id/retry",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

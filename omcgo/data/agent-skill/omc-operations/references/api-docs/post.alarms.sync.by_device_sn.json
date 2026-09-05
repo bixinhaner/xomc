@@ -75,6 +75,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.alarms.alarm_filters.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/alarms/alarm-filters/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.alarms.email_subscriptions.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/alarms/email-subscriptions/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.alarms.active.batch.acknowledge",
+      "method": "POST",
+      "path": "/api/v1/alarms/active/batch/acknowledge",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.alarms.active.batch.clear",
+      "method": "POST",
+      "path": "/api/v1/alarms/active/batch/clear",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.alarms.active.batch.unacknowledge",
+      "method": "POST",
+      "path": "/api/v1/alarms/active/batch/unacknowledge",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

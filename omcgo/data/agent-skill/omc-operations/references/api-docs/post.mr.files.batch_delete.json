@@ -90,6 +90,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.mr.files",
+      "method": "GET",
+      "path": "/api/v1/mr/files",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.mr.files.batch_download",
+      "method": "POST",
+      "path": "/api/v1/mr/files/batch-download",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.mr.files.by_id.batch_download",
+      "method": "POST",
+      "path": "/api/v1/mr/files/by-id/batch-download",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.mr.files.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/mr/files/:id/download",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.mr.files.devices",
+      "method": "GET",
+      "path": "/api/v1/mr/files/devices",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "1.0",
+  "category": "geofence-bindings",
+  "title": "geofence-bindings",
+  "operations": [
+    {
+      "operationId": "delete.geofence_bindings.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/geofence-bindings/:id",
+      "title": "geofence-bindings - 删除",
+      "summary": "geofence-bindings - 删除",
+      "description": "geofence-bindings：删除指定资源记录",
+      "intents": [
+        "geofence-bindings - 删除",
+        "geofence-bindings：删除指定资源记录",
+        "geofence-bindings",
+        "geofence bindings"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.geofence_bindings.by_id.json"
+    },
+    {
+      "operationId": "post.geofence_bindings.by_id.resume",
+      "method": "POST",
+      "path": "/api/v1/geofence-bindings/:id/resume",
+      "title": "geofence-bindings - POST",
+      "summary": "geofence-bindings - POST",
+      "description": "geofence-bindings：执行 POST 请求对应的业务操作",
+      "intents": [
+        "geofence-bindings - POST",
+        "geofence-bindings：执行 POST 请求对应的业务操作",
+        "geofence-bindings",
+        "resume",
+        "geofence bindings"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.geofence_bindings.by_id.resume.json"
+    },
+    {
+      "operationId": "post.geofence_bindings.by_id.suspend",
+      "method": "POST",
+      "path": "/api/v1/geofence-bindings/:id/suspend",
+      "title": "geofence-bindings - POST",
+      "summary": "geofence-bindings - POST",
+      "description": "geofence-bindings：执行 POST 请求对应的业务操作",
+      "intents": [
+        "geofence-bindings - POST",
+        "geofence-bindings：执行 POST 请求对应的业务操作",
+        "geofence-bindings",
+        "suspend",
+        "geofence bindings"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.geofence_bindings.by_id.suspend.json"
+    }
+  ]
+}

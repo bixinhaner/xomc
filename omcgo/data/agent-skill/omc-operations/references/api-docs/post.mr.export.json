@@ -96,6 +96,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.mr.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mr/tasks/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.mr.files.batch_delete",
+      "method": "POST",
+      "path": "/api/v1/mr/files/batch-delete",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.mr.files.batch_download",
+      "method": "POST",
+      "path": "/api/v1/mr/files/batch-download",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.mr.files.by_id.batch_download",
+      "method": "POST",
+      "path": "/api/v1/mr/files/by-id/batch-download",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.mr.tasks",
+      "method": "POST",
+      "path": "/api/v1/mr/tasks",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

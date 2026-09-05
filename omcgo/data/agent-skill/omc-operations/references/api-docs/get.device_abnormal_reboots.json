@@ -5,12 +5,13 @@
   "path": "/api/v1/device-abnormal-reboots",
   "handler": "github.com/omcgo/omcgo/internal/stationlog.(*Handler).ListAbnormalReboots-fm",
   "category": "device-abnormal-reboots",
-  "title": "device-abnormal-reboots - 列表",
-  "summary": "device-abnormal-reboots - 列表",
-  "description": "device-abnormal-reboots：按筛选条件查询资源列表 Handler: ListAbnormalReboots godoc\n@Summary  查询异常重启记录列表\n@Tags     device-abnormal-reboots\n@Produce  json\n@Param    device_id      query  string  false  \"设备 ID（UUID）\"\n@Param    device_sn      query  string  false  \"设备 SN\"\n@Param    record_status  query  string  false  \"记录状态: detected | file_received | collection_failed\"\n@Param    device_type    query  string  false  \"设备类型: eNB | gNB\"\n@Param    start_time     query  string  false  \"起始时间（RFC3339）\"\n@Param    end_time       query  string  false  \"结束时间（RFC3339）\"\n@Param    page           query  int     false  \"页码，默认 1\"\n@Param    page_size      query  int     false  \"每页数量，默认 20\"\n@Success  200 {object} map[string]interface{}\n@Router   /device-abnormal-reboots [get]",
+  "title": "查询异常重启记录列表",
+  "summary": "查询异常重启记录列表",
+  "description": "device-abnormal-reboots：按筛选条件查询资源列表",
   "intents": [
     "device-abnormal-reboots - 列表",
-    "device-abnormal-reboots：按筛选条件查询资源列表 Handler: ListAbnormalReboots godoc\n@Summary  查询异常重启记录列表\n@Tags     device-abnormal-reboots\n@Produce  json\n@Param    device_id      query  string  false  \"设备 ID（UUID）\"\n@Param    device_sn      query  string  false  \"设备 SN\"\n@Param    record_status  query  string  false  \"记录状态: detected | file_received | collection_failed\"\n@Param    device_type    query  string  false  \"设备类型: eNB | gNB\"\n@Param    start_time     query  string  false  \"起始时间（RFC3339）\"\n@Param    end_time       query  string  false  \"结束时间（RFC3339）\"\n@Param    page           query  int     false  \"页码，默认 1\"\n@Param    page_size      query  int     false  \"每页数量，默认 20\"\n@Success  200 {object} map[string]interface{}\n@Router   /device-abnormal-reboots [get]",
+    "查询异常重启记录列表",
+    "device-abnormal-reboots：按筛选条件查询资源列表",
     "device-abnormal-reboots",
     "device abnormal reboots"
   ],
@@ -113,7 +114,27 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
-  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "emptyResult": "空数组或 total=0 只说明该操作在当前用户权限和本次过滤条件下没有返回记录，不能单独证明业务对象、源数据或系统能力不存在。先核对参数、标识符、时间范围和权限；若用户目标仍未回答，再沿 relatedOperations 选择汇总、明细、原始或派生数据操作补充证据。",
+  "relatedOperations": [
+    {
+      "operationId": "get.device_abnormal_reboots.by_id",
+      "method": "GET",
+      "path": "/api/v1/device-abnormal-reboots/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.device_abnormal_reboots.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/device-abnormal-reboots/:id/download",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.device_abnormal_reboots.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/device-abnormal-reboots/:id",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

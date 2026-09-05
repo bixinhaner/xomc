@@ -1,0 +1,113 @@
+{
+  "schemaVersion": "1.0",
+  "category": "imsparam",
+  "title": "imsparam",
+  "operations": [
+    {
+      "operationId": "delete.imsparam.param_files.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/imsparam/param-files/:id",
+      "title": "imsparam - paramfiles删除",
+      "summary": "imsparam - paramfiles删除",
+      "description": "imsparam：查询或维护指定对象的paramfiles删除数据",
+      "intents": [
+        "imsparam - paramfiles删除",
+        "imsparam：查询或维护指定对象的paramfiles删除数据",
+        "imsparam",
+        "param-files",
+        "param files"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.imsparam.param_files.by_id.json"
+    },
+    {
+      "operationId": "get.imsparam.param_files",
+      "method": "GET",
+      "path": "/api/v1/imsparam/param-files",
+      "title": "imsparam - paramfiles",
+      "summary": "imsparam - paramfiles",
+      "description": "imsparam：处理paramfiles相关数据",
+      "intents": [
+        "imsparam - paramfiles",
+        "imsparam：处理paramfiles相关数据",
+        "imsparam",
+        "param-files",
+        "param files"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.imsparam.param_files.json"
+    },
+    {
+      "operationId": "get.imsparam.param_files.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/imsparam/param-files/:id/download",
+      "title": "imsparam - 下载",
+      "summary": "imsparam - 下载",
+      "description": "imsparam：下载文件或导出结果",
+      "intents": [
+        "imsparam - 下载",
+        "imsparam：下载文件或导出结果",
+        "imsparam",
+        "param-files",
+        "download",
+        "param files"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.imsparam.param_files.by_id.download.json"
+    },
+    {
+      "operationId": "get.imsparam.param_types",
+      "method": "GET",
+      "path": "/api/v1/imsparam/param-types",
+      "title": "imsparam - paramtypes",
+      "summary": "imsparam - paramtypes",
+      "description": "imsparam：处理paramtypes相关数据",
+      "intents": [
+        "imsparam - paramtypes",
+        "imsparam：处理paramtypes相关数据",
+        "imsparam",
+        "param-types",
+        "param types"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.imsparam.param_types.json"
+    },
+    {
+      "operationId": "post.imsparam.param_files.batch_delete",
+      "method": "POST",
+      "path": "/api/v1/imsparam/param-files/batch-delete",
+      "title": "imsparam - 批量删除",
+      "summary": "imsparam - 批量删除",
+      "description": "imsparam：处理批量删除相关数据",
+      "intents": [
+        "imsparam - 批量删除",
+        "imsparam：处理批量删除相关数据",
+        "imsparam",
+        "param-files",
+        "batch-delete",
+        "param files",
+        "batch delete"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.imsparam.param_files.batch_delete.json"
+    },
+    {
+      "operationId": "post.imsparam.param_files.import",
+      "method": "POST",
+      "path": "/api/v1/imsparam/param-files/import",
+      "title": "imsparam - 导入",
+      "summary": "imsparam - 导入",
+      "description": "imsparam：导入外部文件或业务数据",
+      "intents": [
+        "imsparam - 导入",
+        "imsparam：导入外部文件或业务数据",
+        "imsparam",
+        "param-files",
+        "import",
+        "param files"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.imsparam.param_files.import.json"
+    }
+  ]
+}

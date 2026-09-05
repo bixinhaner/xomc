@@ -33,7 +33,14 @@
       "description": "替换 URL 路径中的 :task_id"
     }
   ],
-  "queryParams": [],
+  "queryParams": [
+    {
+      "name": "device_sn",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    }
+  ],
   "formParams": [],
   "responses": {
     "2xx": {
@@ -72,9 +79,41 @@
     }
   },
   "contractCoverage": {
-    "request": "path-only",
+    "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.devices.tasks",
+      "method": "POST",
+      "path": "/api/v1/devices/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.devices.tasks.by_task_id.retry",
+      "method": "POST",
+      "path": "/api/v1/devices/tasks/:task_id/retry",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.devices.tasks",
+      "method": "GET",
+      "path": "/api/v1/devices/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.devices.tasks.by_task_id",
+      "method": "GET",
+      "path": "/api/v1/devices/tasks/:task_id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.devices.tasks.batch",
+      "method": "POST",
+      "path": "/api/v1/devices/tasks/batch",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

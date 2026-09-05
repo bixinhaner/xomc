@@ -53,6 +53,38 @@
     "request": "openapi",
     "response": "openapi"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.devices",
+      "method": "POST",
+      "path": "/api/v1/devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.devices.by_id.config_file.sync",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/config-file/sync",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.devices.by_id.license_params.refresh",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/license-params/refresh",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.devices.by_id.location_sync.accept",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/location-sync/accept",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.devices.by_id.objects.add",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/objects/add",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",

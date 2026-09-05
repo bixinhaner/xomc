@@ -33,6 +33,18 @@
       "type": "string"
     },
     {
+      "name": "control_phase",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "control_source",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
       "name": "group_id",
       "in": "query",
       "required": false,
@@ -86,7 +98,39 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
-  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "emptyResult": "空数组或 total=0 只说明该操作在当前用户权限和本次过滤条件下没有返回记录，不能单独证明业务对象、源数据或系统能力不存在。先核对参数、标识符、时间范围和权限；若用户目标仍未回答，再沿 relatedOperations 选择汇总、明细、原始或派生数据操作补充证据。",
+  "relatedOperations": [
+    {
+      "operationId": "get.devices",
+      "method": "GET",
+      "path": "/api/v1/devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.devices",
+      "method": "POST",
+      "path": "/api/v1/devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.mml.tasks.by_id.devices.by_sn.export.download",
+      "method": "GET",
+      "path": "/api/v1/mml/tasks/:id/devices/:sn/export/download",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.ufte.devices.export",
+      "method": "GET",
+      "path": "/api/v1/ufte/devices/export",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.devices.by_id",
+      "method": "GET",
+      "path": "/api/v1/devices/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

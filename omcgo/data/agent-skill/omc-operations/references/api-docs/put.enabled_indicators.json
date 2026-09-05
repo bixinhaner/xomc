@@ -93,6 +93,14 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.enabled_indicators",
+      "method": "GET",
+      "path": "/api/v1/enabled-indicators",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

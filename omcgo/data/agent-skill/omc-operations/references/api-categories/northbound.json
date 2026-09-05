@@ -23,6 +23,96 @@
       "document": "api-docs/delete.northbound.push.targets.by_id.json"
     },
     {
+      "operationId": "delete.northbound.v1.device.group",
+      "method": "DELETE",
+      "path": "/api/v1/northbound/v1/device/group",
+      "title": "北向接口 - 批量删除",
+      "summary": "北向接口 - 批量删除",
+      "description": "北向接口：批量删除资源记录",
+      "intents": [
+        "北向接口 - 批量删除",
+        "北向接口：批量删除资源记录",
+        "northbound",
+        "北向接口",
+        "device",
+        "group"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.northbound.v1.device.group.json"
+    },
+    {
+      "operationId": "delete.northbound.v1.device.group.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/northbound/v1/device/group/:id",
+      "title": "北向接口 - 删除",
+      "summary": "北向接口 - 删除",
+      "description": "北向接口：删除指定资源记录",
+      "intents": [
+        "北向接口 - 删除",
+        "北向接口：删除指定资源记录",
+        "northbound",
+        "北向接口",
+        "device",
+        "group"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.northbound.v1.device.group.by_id.json"
+    },
+    {
+      "operationId": "delete.northbound.v1.device.group.sub",
+      "method": "DELETE",
+      "path": "/api/v1/northbound/v1/device/group/sub",
+      "title": "北向接口 - 批量删除",
+      "summary": "北向接口 - 批量删除",
+      "description": "北向接口：批量删除资源记录",
+      "intents": [
+        "北向接口 - 批量删除",
+        "北向接口：批量删除资源记录",
+        "northbound",
+        "北向接口",
+        "device",
+        "group",
+        "sub"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.northbound.v1.device.group.sub.json"
+    },
+    {
+      "operationId": "delete.northbound.v1.device.register.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/northbound/v1/device/register/:id",
+      "title": "北向接口 - 删除",
+      "summary": "北向接口 - 删除",
+      "description": "北向接口：删除指定资源记录",
+      "intents": [
+        "北向接口 - 删除",
+        "北向接口：删除指定资源记录",
+        "northbound",
+        "北向接口",
+        "device",
+        "register"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.northbound.v1.device.register.by_id.json"
+    },
+    {
+      "operationId": "delete.northbound.v1.user.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/northbound/v1/user/:id",
+      "title": "北向接口 - 删除",
+      "summary": "北向接口 - 删除",
+      "description": "北向接口：删除指定资源记录",
+      "intents": [
+        "北向接口 - 删除",
+        "北向接口：删除指定资源记录",
+        "northbound",
+        "北向接口",
+        "user"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.northbound.v1.user.by_id.json"
+    },
+    {
       "operationId": "get.northbound.export.config.by_deviceId",
       "method": "GET",
       "path": "/api/v1/northbound/export/config/:deviceId",
@@ -40,6 +130,340 @@
       ],
       "risk": "read",
       "document": "api-docs/get.northbound.export.config.by_deviceId.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.alarm.snmp.targets",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/alarm/snmp/targets",
+      "title": "北向接口 - 推送目标",
+      "summary": "北向接口 - 推送目标",
+      "description": "北向接口：查询通知或任务推送目标",
+      "intents": [
+        "北向接口 - 推送目标",
+        "北向接口：查询通知或任务推送目标",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "alarm",
+        "snmp",
+        "targets",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.alarm.snmp.targets.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.alarm.socket.configs",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/alarm/socket/configs",
+      "title": "北向接口 - 列表",
+      "summary": "北向接口 - 列表",
+      "description": "北向接口：按筛选条件查询资源列表",
+      "intents": [
+        "北向接口 - 列表",
+        "北向接口：按筛选条件查询资源列表",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "alarm",
+        "socket",
+        "configs",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.alarm.socket.configs.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.api.clients",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/api/clients",
+      "title": "北向接口 - 列表",
+      "summary": "北向接口 - 列表",
+      "description": "北向接口：按筛选条件查询资源列表",
+      "intents": [
+        "北向接口 - 列表",
+        "北向接口：按筛选条件查询资源列表",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "clients",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.api.clients.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.api.configs",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/api/configs",
+      "title": "北向接口 - 列表",
+      "summary": "北向接口 - 列表",
+      "description": "北向接口：按筛选条件查询资源列表",
+      "intents": [
+        "北向接口 - 列表",
+        "北向接口：按筛选条件查询资源列表",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "configs",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.api.configs.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.api.invocation_logs",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/api/invocation-logs",
+      "title": "北向接口 - APIinvocationlogs",
+      "summary": "北向接口 - APIinvocationlogs",
+      "description": "北向接口：处理invocationlogs相关数据",
+      "intents": [
+        "北向接口 - APIinvocationlogs",
+        "北向接口：处理invocationlogs相关数据",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "invocation-logs",
+        "page config",
+        "invocation logs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.api.invocation_logs.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.api.users",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/api/users",
+      "title": "北向接口 - 列表",
+      "summary": "北向接口 - 列表",
+      "description": "北向接口：按筛选条件查询资源列表",
+      "intents": [
+        "北向接口 - 列表",
+        "北向接口：按筛选条件查询资源列表",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "users",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.api.users.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.delivery.targets",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/delivery/targets",
+      "title": "北向接口 - 推送目标",
+      "summary": "北向接口 - 推送目标",
+      "description": "北向接口：查询通知或任务推送目标",
+      "intents": [
+        "北向接口 - 推送目标",
+        "北向接口：查询通知或任务推送目标",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "delivery",
+        "targets",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.delivery.targets.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.events",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/events",
+      "title": "北向接口 - 列表",
+      "summary": "北向接口 - 列表",
+      "description": "北向接口：按筛选条件查询资源列表",
+      "intents": [
+        "北向接口 - 列表",
+        "北向接口：按筛选条件查询资源列表",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "events",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.events.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.events.by_id",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/events/:id",
+      "title": "北向接口 - 详情",
+      "summary": "北向接口 - 详情",
+      "description": "北向接口：查询指定资源的详细信息",
+      "intents": [
+        "北向接口 - 详情",
+        "北向接口：查询指定资源的详细信息",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "events",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.events.by_id.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.fields",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/fields",
+      "title": "北向接口 - 字段",
+      "summary": "北向接口 - 字段",
+      "description": "北向接口：查询可展示或可导出的字段集合",
+      "intents": [
+        "北向接口 - 字段",
+        "北向接口：查询可展示或可导出的字段集合",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "fields",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.fields.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.file.profiles",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/file/profiles",
+      "title": "北向接口 - 列表",
+      "summary": "北向接口 - 列表",
+      "description": "北向接口：按筛选条件查询资源列表",
+      "intents": [
+        "北向接口 - 列表",
+        "北向接口：按筛选条件查询资源列表",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "file",
+        "profiles",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.file.profiles.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.file.profiles.by_id.preview",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/file/profiles/:id/preview",
+      "title": "北向接口 - 预览",
+      "summary": "北向接口 - 预览",
+      "description": "北向接口：预览文件、配置或导出结果",
+      "intents": [
+        "北向接口 - 预览",
+        "北向接口：预览文件、配置或导出结果",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "file",
+        "profiles",
+        "preview",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.file.profiles.by_id.preview.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.inventory.profiles",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/inventory/profiles",
+      "title": "北向接口 - 列表",
+      "summary": "北向接口 - 列表",
+      "description": "北向接口：按筛选条件查询资源列表",
+      "intents": [
+        "北向接口 - 列表",
+        "北向接口：按筛选条件查询资源列表",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "inventory",
+        "profiles",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.inventory.profiles.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.overview",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/overview",
+      "title": "北向接口 - 列表",
+      "summary": "北向接口 - 列表",
+      "description": "北向接口：按筛选条件查询资源列表",
+      "intents": [
+        "北向接口 - 列表",
+        "北向接口：按筛选条件查询资源列表",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "overview",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.overview.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.runs",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/runs",
+      "title": "北向接口 - 执行历史",
+      "summary": "北向接口 - 执行历史",
+      "description": "北向接口：查询脚本或命令执行历史",
+      "intents": [
+        "北向接口 - 执行历史",
+        "北向接口：查询脚本或命令执行历史",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "runs",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.runs.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.runs.by_id",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/runs/:id",
+      "title": "北向接口 - 执行历史详情",
+      "summary": "北向接口 - 执行历史详情",
+      "description": "北向接口：查询或维护指定对象的执行历史详情数据",
+      "intents": [
+        "北向接口 - 执行历史详情",
+        "北向接口：查询或维护指定对象的执行历史详情数据",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "runs",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.runs.by_id.json"
+    },
+    {
+      "operationId": "get.northbound.page_config.runs.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/runs/:id/download",
+      "title": "北向接口 - 下载",
+      "summary": "北向接口 - 下载",
+      "description": "北向接口：下载文件或导出结果",
+      "intents": [
+        "北向接口 - 下载",
+        "北向接口：下载文件或导出结果",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "runs",
+        "download",
+        "page config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.page_config.runs.by_id.download.json"
     },
     {
       "operationId": "get.northbound.push.deadletter",
@@ -153,6 +577,170 @@
       "document": "api-docs/get.northbound.sync.incremental.json"
     },
     {
+      "operationId": "get.northbound.v1.device.group",
+      "method": "GET",
+      "path": "/api/v1/northbound/v1/device/group",
+      "title": "北向接口 - 列表",
+      "summary": "北向接口 - 列表",
+      "description": "北向接口：按筛选条件查询资源列表",
+      "intents": [
+        "北向接口 - 列表",
+        "北向接口：按筛选条件查询资源列表",
+        "northbound",
+        "北向接口",
+        "device",
+        "group"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.v1.device.group.json"
+    },
+    {
+      "operationId": "get.northbound.v1.device.infos.by_sn",
+      "method": "GET",
+      "path": "/api/v1/northbound/v1/device/infos/:sn",
+      "title": "北向接口 - 详情",
+      "summary": "北向接口 - 详情",
+      "description": "北向接口：查询指定资源的详细信息",
+      "intents": [
+        "北向接口 - 详情",
+        "北向接口：查询指定资源的详细信息",
+        "northbound",
+        "北向接口",
+        "device",
+        "infos"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.v1.device.infos.by_sn.json"
+    },
+    {
+      "operationId": "get.northbound.v1.device.parameters.by_sn",
+      "method": "GET",
+      "path": "/api/v1/northbound/v1/device/parameters/:sn",
+      "title": "北向接口 - 参数详情",
+      "summary": "北向接口 - 参数详情",
+      "description": "北向接口：查询或维护指定对象的参数详情数据",
+      "intents": [
+        "北向接口 - 参数详情",
+        "北向接口：查询或维护指定对象的参数详情数据",
+        "northbound",
+        "北向接口",
+        "device",
+        "parameters"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.v1.device.parameters.by_sn.json"
+    },
+    {
+      "operationId": "get.northbound.v1.device.register.page",
+      "method": "GET",
+      "path": "/api/v1/northbound/v1/device/register/page",
+      "title": "北向接口 - 列表",
+      "summary": "北向接口 - 列表",
+      "description": "北向接口：按筛选条件查询资源列表",
+      "intents": [
+        "北向接口 - 列表",
+        "北向接口：按筛选条件查询资源列表",
+        "northbound",
+        "北向接口",
+        "device",
+        "register",
+        "page"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.v1.device.register.page.json"
+    },
+    {
+      "operationId": "get.northbound.v1.device.status.by_sn",
+      "method": "GET",
+      "path": "/api/v1/northbound/v1/device/status/:sn",
+      "title": "北向接口 - 详情",
+      "summary": "北向接口 - 详情",
+      "description": "北向接口：查询指定资源的详细信息",
+      "intents": [
+        "北向接口 - 详情",
+        "北向接口：查询指定资源的详细信息",
+        "northbound",
+        "北向接口",
+        "device",
+        "status"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.v1.device.status.by_sn.json"
+    },
+    {
+      "operationId": "get.northbound.v1.enodeb.infos.status.by_sn",
+      "method": "GET",
+      "path": "/api/v1/northbound/v1/enodeb/infos/status/:sn",
+      "title": "北向接口 - 详情",
+      "summary": "北向接口 - 详情",
+      "description": "北向接口：查询指定资源的详细信息",
+      "intents": [
+        "北向接口 - 详情",
+        "北向接口：查询指定资源的详细信息",
+        "northbound",
+        "北向接口",
+        "enodeb",
+        "infos",
+        "status"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.v1.enodeb.infos.status.by_sn.json"
+    },
+    {
+      "operationId": "get.northbound.v1.export.config.by_deviceId",
+      "method": "GET",
+      "path": "/api/v1/northbound/v1/export/config/:deviceId",
+      "title": "北向接口 - 导出配置详情",
+      "summary": "北向接口 - 导出配置详情",
+      "description": "北向接口：查询或维护指定对象的导出配置详情数据 Handler: ExportConfig handles config snapshot export for a specific device.",
+      "intents": [
+        "北向接口 - 导出配置详情",
+        "北向接口：查询或维护指定对象的导出配置详情数据 Handler: ExportConfig handles config snapshot export for a specific device.",
+        "northbound",
+        "北向接口",
+        "export",
+        "config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.v1.export.config.by_deviceId.json"
+    },
+    {
+      "operationId": "get.northbound.v1.job.result.by_taskId",
+      "method": "GET",
+      "path": "/api/v1/northbound/v1/job/result/:taskId",
+      "title": "北向接口 - 详情",
+      "summary": "北向接口 - 详情",
+      "description": "北向接口：查询指定资源的详细信息",
+      "intents": [
+        "北向接口 - 详情",
+        "北向接口：查询指定资源的详细信息",
+        "northbound",
+        "北向接口",
+        "job",
+        "result"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.v1.job.result.by_taskId.json"
+    },
+    {
+      "operationId": "get.northbound.v1.sync.full",
+      "method": "GET",
+      "path": "/api/v1/northbound/v1/sync/full",
+      "title": "北向接口 - 全量同步",
+      "summary": "北向接口 - 全量同步",
+      "description": "北向接口：触发全量数据同步",
+      "intents": [
+        "北向接口 - 全量同步",
+        "北向接口：触发全量数据同步",
+        "northbound",
+        "北向接口",
+        "sync",
+        "full"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.northbound.v1.sync.full.json"
+    },
+    {
       "operationId": "post.northbound.export.alarms",
       "method": "POST",
       "path": "/api/v1/northbound/export/alarms",
@@ -189,6 +777,171 @@
       ],
       "risk": "low",
       "document": "api-docs/post.northbound.export.pm.json"
+    },
+    {
+      "operationId": "post.northbound.page_config.alarm.snmp.targets.by_key.test",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/alarm/snmp/targets/:key/test",
+      "title": "北向接口 - 测试",
+      "summary": "北向接口 - 测试",
+      "description": "北向接口：发送测试请求验证配置",
+      "intents": [
+        "北向接口 - 测试",
+        "北向接口：发送测试请求验证配置",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "alarm",
+        "snmp",
+        "targets",
+        "test",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.page_config.alarm.snmp.targets.by_key.test.json"
+    },
+    {
+      "operationId": "post.northbound.page_config.alarm.socket.configs.by_key.test",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/alarm/socket/configs/:key/test",
+      "title": "北向接口 - 测试",
+      "summary": "北向接口 - 测试",
+      "description": "北向接口：发送测试请求验证配置",
+      "intents": [
+        "北向接口 - 测试",
+        "北向接口：发送测试请求验证配置",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "alarm",
+        "socket",
+        "configs",
+        "test",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.page_config.alarm.socket.configs.by_key.test.json"
+    },
+    {
+      "operationId": "post.northbound.page_config.api.configs.by_key.test",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/api/configs/:key/test",
+      "title": "北向接口 - 测试",
+      "summary": "北向接口 - 测试",
+      "description": "北向接口：发送测试请求验证配置",
+      "intents": [
+        "北向接口 - 测试",
+        "北向接口：发送测试请求验证配置",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "configs",
+        "test",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.page_config.api.configs.by_key.test.json"
+    },
+    {
+      "operationId": "post.northbound.page_config.delivery.targets.test",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/delivery/targets/test",
+      "title": "北向接口 - 测试",
+      "summary": "北向接口 - 测试",
+      "description": "北向接口：发送测试请求验证配置",
+      "intents": [
+        "北向接口 - 测试",
+        "北向接口：发送测试请求验证配置",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "delivery",
+        "targets",
+        "test",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.page_config.delivery.targets.test.json"
+    },
+    {
+      "operationId": "post.northbound.page_config.file.profiles",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/file/profiles",
+      "title": "北向接口 - 创建",
+      "summary": "北向接口 - 创建",
+      "description": "北向接口：创建新的资源记录",
+      "intents": [
+        "北向接口 - 创建",
+        "北向接口：创建新的资源记录",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "file",
+        "profiles",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.page_config.file.profiles.json"
+    },
+    {
+      "operationId": "post.northbound.page_config.file.profiles.by_id.run",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/file/profiles/:id/run",
+      "title": "北向接口 - 执行",
+      "summary": "北向接口 - 执行",
+      "description": "北向接口：执行指定任务",
+      "intents": [
+        "北向接口 - 执行",
+        "北向接口：执行指定任务",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "file",
+        "profiles",
+        "run",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.page_config.file.profiles.by_id.run.json"
+    },
+    {
+      "operationId": "post.northbound.page_config.inventory.profiles.by_id.run",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/inventory/profiles/:id/run",
+      "title": "北向接口 - 执行",
+      "summary": "北向接口 - 执行",
+      "description": "北向接口：执行指定任务",
+      "intents": [
+        "北向接口 - 执行",
+        "北向接口：执行指定任务",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "inventory",
+        "profiles",
+        "run",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.page_config.inventory.profiles.by_id.run.json"
+    },
+    {
+      "operationId": "post.northbound.page_config.validate",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/validate",
+      "title": "北向接口 - 校验",
+      "summary": "北向接口 - 校验",
+      "description": "北向接口：校验请求参数或配置内容",
+      "intents": [
+        "北向接口 - 校验",
+        "北向接口：校验请求参数或配置内容",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.page_config.validate.json"
     },
     {
       "operationId": "post.northbound.push.deadletter.by_id.replay",
@@ -249,6 +1002,495 @@
       "document": "api-docs/post.northbound.push.targets.by_id.circuit.reset.json"
     },
     {
+      "operationId": "post.northbound.v1.access.token",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/access/token",
+      "title": "北向接口 - 创建",
+      "summary": "北向接口 - 创建",
+      "description": "北向接口：创建新的资源记录",
+      "intents": [
+        "北向接口 - 创建",
+        "北向接口：创建新的资源记录",
+        "northbound",
+        "北向接口",
+        "access",
+        "token"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.access.token.json"
+    },
+    {
+      "operationId": "post.northbound.v1.device.group",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/device/group",
+      "title": "北向接口 - 创建",
+      "summary": "北向接口 - 创建",
+      "description": "北向接口：创建新的资源记录",
+      "intents": [
+        "北向接口 - 创建",
+        "北向接口：创建新的资源记录",
+        "northbound",
+        "北向接口",
+        "device",
+        "group"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.device.group.json"
+    },
+    {
+      "operationId": "post.northbound.v1.device.group.by_id.devices",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/device/group/:id/devices",
+      "title": "北向接口 - POST",
+      "summary": "北向接口 - POST",
+      "description": "北向接口：执行 POST 请求对应的业务操作",
+      "intents": [
+        "北向接口 - POST",
+        "北向接口：执行 POST 请求对应的业务操作",
+        "northbound",
+        "北向接口",
+        "device",
+        "group",
+        "devices"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.device.group.by_id.devices.json"
+    },
+    {
+      "operationId": "post.northbound.v1.device.group.sub",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/device/group/sub",
+      "title": "北向接口 - 创建",
+      "summary": "北向接口 - 创建",
+      "description": "北向接口：创建新的资源记录",
+      "intents": [
+        "北向接口 - 创建",
+        "北向接口：创建新的资源记录",
+        "northbound",
+        "北向接口",
+        "device",
+        "group",
+        "sub"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.device.group.sub.json"
+    },
+    {
+      "operationId": "post.northbound.v1.device.log.collect.by_sn",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/device/log/collect/:sn",
+      "title": "北向接口 - POST",
+      "summary": "北向接口 - POST",
+      "description": "北向接口：执行 POST 请求对应的业务操作",
+      "intents": [
+        "北向接口 - POST",
+        "北向接口：执行 POST 请求对应的业务操作",
+        "northbound",
+        "北向接口",
+        "device",
+        "log",
+        "collect"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.device.log.collect.by_sn.json"
+    },
+    {
+      "operationId": "post.northbound.v1.device.parameters.query.by_sn",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/device/parameters/query/:sn",
+      "title": "北向接口 - POST",
+      "summary": "北向接口 - POST",
+      "description": "北向接口：执行 POST 请求对应的业务操作",
+      "intents": [
+        "北向接口 - POST",
+        "北向接口：执行 POST 请求对应的业务操作",
+        "northbound",
+        "北向接口",
+        "device",
+        "parameters",
+        "query"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.device.parameters.query.by_sn.json"
+    },
+    {
+      "operationId": "post.northbound.v1.device.query",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/device/query",
+      "title": "北向接口 - 创建",
+      "summary": "北向接口 - 创建",
+      "description": "北向接口：创建新的资源记录",
+      "intents": [
+        "北向接口 - 创建",
+        "北向接口：创建新的资源记录",
+        "northbound",
+        "北向接口",
+        "device",
+        "query"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.device.query.json"
+    },
+    {
+      "operationId": "post.northbound.v1.device.reboot.by_sn",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/device/reboot/:sn",
+      "title": "北向接口 - 重启",
+      "summary": "北向接口 - 重启",
+      "description": "北向接口：下发设备重启操作",
+      "intents": [
+        "北向接口 - 重启",
+        "北向接口：下发设备重启操作",
+        "northbound",
+        "北向接口",
+        "device",
+        "reboot"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.device.reboot.by_sn.json"
+    },
+    {
+      "operationId": "post.northbound.v1.device.register",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/device/register",
+      "title": "北向接口 - 创建",
+      "summary": "北向接口 - 创建",
+      "description": "北向接口：创建新的资源记录",
+      "intents": [
+        "北向接口 - 创建",
+        "北向接口：创建新的资源记录",
+        "northbound",
+        "北向接口",
+        "device",
+        "register"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.device.register.json"
+    },
+    {
+      "operationId": "post.northbound.v1.device.register.page",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/device/register/page",
+      "title": "北向接口 - 创建",
+      "summary": "北向接口 - 创建",
+      "description": "北向接口：创建新的资源记录",
+      "intents": [
+        "北向接口 - 创建",
+        "北向接口：创建新的资源记录",
+        "northbound",
+        "北向接口",
+        "device",
+        "register",
+        "page"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.device.register.page.json"
+    },
+    {
+      "operationId": "post.northbound.v1.device.reset.by_sn",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/device/reset/:sn",
+      "title": "北向接口 - 重置",
+      "summary": "北向接口 - 重置",
+      "description": "北向接口：重置状态或配置",
+      "intents": [
+        "北向接口 - 重置",
+        "北向接口：重置状态或配置",
+        "northbound",
+        "北向接口",
+        "device",
+        "reset"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.device.reset.by_sn.json"
+    },
+    {
+      "operationId": "post.northbound.v1.device.task.by_sn",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/device/task/:sn",
+      "title": "北向接口 - POST",
+      "summary": "北向接口 - POST",
+      "description": "北向接口：执行 POST 请求对应的业务操作",
+      "intents": [
+        "北向接口 - POST",
+        "北向接口：执行 POST 请求对应的业务操作",
+        "northbound",
+        "北向接口",
+        "device",
+        "task"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.device.task.by_sn.json"
+    },
+    {
+      "operationId": "post.northbound.v1.job.result.page",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/job/result/page",
+      "title": "北向接口 - 创建",
+      "summary": "北向接口 - 创建",
+      "description": "北向接口：创建新的资源记录",
+      "intents": [
+        "北向接口 - 创建",
+        "北向接口：创建新的资源记录",
+        "northbound",
+        "北向接口",
+        "job",
+        "result",
+        "page"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.job.result.page.json"
+    },
+    {
+      "operationId": "post.northbound.v1.log.exportLogToCsvFile",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/log/exportLogToCsvFile",
+      "title": "北向接口 - 导出Log To Csv File",
+      "summary": "北向接口 - 导出Log To Csv File",
+      "description": "北向接口：处理导出Log To Csv File相关数据",
+      "intents": [
+        "北向接口 - 导出Log To Csv File",
+        "北向接口：处理导出Log To Csv File相关数据",
+        "northbound",
+        "北向接口",
+        "log",
+        "exportLogToCsvFile"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.log.exportLogToCsvFile.json"
+    },
+    {
+      "operationId": "post.northbound.v1.log.page",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/log/page",
+      "title": "北向接口 - 创建",
+      "summary": "北向接口 - 创建",
+      "description": "北向接口：创建新的资源记录",
+      "intents": [
+        "北向接口 - 创建",
+        "北向接口：创建新的资源记录",
+        "northbound",
+        "北向接口",
+        "log",
+        "page"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.log.page.json"
+    },
+    {
+      "operationId": "post.northbound.v1.user",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/user",
+      "title": "北向接口 - 创建",
+      "summary": "北向接口 - 创建",
+      "description": "北向接口：创建新的资源记录",
+      "intents": [
+        "北向接口 - 创建",
+        "北向接口：创建新的资源记录",
+        "northbound",
+        "北向接口",
+        "user"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.user.json"
+    },
+    {
+      "operationId": "post.northbound.v1.user.users",
+      "method": "POST",
+      "path": "/api/v1/northbound/v1/user/users",
+      "title": "北向接口 - 创建",
+      "summary": "北向接口 - 创建",
+      "description": "北向接口：创建新的资源记录",
+      "intents": [
+        "北向接口 - 创建",
+        "北向接口：创建新的资源记录",
+        "northbound",
+        "北向接口",
+        "user",
+        "users"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.northbound.v1.user.users.json"
+    },
+    {
+      "operationId": "put.northbound.page_config.alarm.snmp.targets.by_key",
+      "method": "PUT",
+      "path": "/api/v1/northbound/page-config/alarm/snmp/targets/:key",
+      "title": "北向接口 - 推送目标更新",
+      "summary": "北向接口 - 推送目标更新",
+      "description": "北向接口：查询或维护指定对象的推送目标更新数据",
+      "intents": [
+        "北向接口 - 推送目标更新",
+        "北向接口：查询或维护指定对象的推送目标更新数据",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "alarm",
+        "snmp",
+        "targets",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.northbound.page_config.alarm.snmp.targets.by_key.json"
+    },
+    {
+      "operationId": "put.northbound.page_config.alarm.socket.configs.by_key",
+      "method": "PUT",
+      "path": "/api/v1/northbound/page-config/alarm/socket/configs/:key",
+      "title": "北向接口 - 更新",
+      "summary": "北向接口 - 更新",
+      "description": "北向接口：更新指定资源的完整配置",
+      "intents": [
+        "北向接口 - 更新",
+        "北向接口：更新指定资源的完整配置",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "alarm",
+        "socket",
+        "configs",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.northbound.page_config.alarm.socket.configs.by_key.json"
+    },
+    {
+      "operationId": "put.northbound.page_config.api.clients",
+      "method": "PUT",
+      "path": "/api/v1/northbound/page-config/api/clients",
+      "title": "北向接口 - 批量更新",
+      "summary": "北向接口 - 批量更新",
+      "description": "北向接口：批量更新资源数据",
+      "intents": [
+        "北向接口 - 批量更新",
+        "北向接口：批量更新资源数据",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "clients",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.northbound.page_config.api.clients.json"
+    },
+    {
+      "operationId": "put.northbound.page_config.api.configs",
+      "method": "PUT",
+      "path": "/api/v1/northbound/page-config/api/configs",
+      "title": "北向接口 - 批量更新",
+      "summary": "北向接口 - 批量更新",
+      "description": "北向接口：批量更新资源数据",
+      "intents": [
+        "北向接口 - 批量更新",
+        "北向接口：批量更新资源数据",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "configs",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.northbound.page_config.api.configs.json"
+    },
+    {
+      "operationId": "put.northbound.page_config.api.configs.by_key",
+      "method": "PUT",
+      "path": "/api/v1/northbound/page-config/api/configs/:key",
+      "title": "北向接口 - 更新",
+      "summary": "北向接口 - 更新",
+      "description": "北向接口：更新指定资源的完整配置",
+      "intents": [
+        "北向接口 - 更新",
+        "北向接口：更新指定资源的完整配置",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "configs",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.northbound.page_config.api.configs.by_key.json"
+    },
+    {
+      "operationId": "put.northbound.page_config.api.users",
+      "method": "PUT",
+      "path": "/api/v1/northbound/page-config/api/users",
+      "title": "北向接口 - 批量更新",
+      "summary": "北向接口 - 批量更新",
+      "description": "北向接口：批量更新资源数据",
+      "intents": [
+        "北向接口 - 批量更新",
+        "北向接口：批量更新资源数据",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "users",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.northbound.page_config.api.users.json"
+    },
+    {
+      "operationId": "put.northbound.page_config.delivery.targets",
+      "method": "PUT",
+      "path": "/api/v1/northbound/page-config/delivery/targets",
+      "title": "北向接口 - 推送目标",
+      "summary": "北向接口 - 推送目标",
+      "description": "北向接口：查询通知或任务推送目标",
+      "intents": [
+        "北向接口 - 推送目标",
+        "北向接口：查询通知或任务推送目标",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "delivery",
+        "targets",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.northbound.page_config.delivery.targets.json"
+    },
+    {
+      "operationId": "put.northbound.page_config.file.profiles.by_id",
+      "method": "PUT",
+      "path": "/api/v1/northbound/page-config/file/profiles/:id",
+      "title": "北向接口 - 更新",
+      "summary": "北向接口 - 更新",
+      "description": "北向接口：更新指定资源的完整配置",
+      "intents": [
+        "北向接口 - 更新",
+        "北向接口：更新指定资源的完整配置",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "file",
+        "profiles",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.northbound.page_config.file.profiles.by_id.json"
+    },
+    {
+      "operationId": "put.northbound.page_config.inventory.profiles.by_id",
+      "method": "PUT",
+      "path": "/api/v1/northbound/page-config/inventory/profiles/:id",
+      "title": "北向接口 - 更新",
+      "summary": "北向接口 - 更新",
+      "description": "北向接口：更新指定资源的完整配置",
+      "intents": [
+        "北向接口 - 更新",
+        "北向接口：更新指定资源的完整配置",
+        "northbound",
+        "北向接口",
+        "page-config",
+        "inventory",
+        "profiles",
+        "page config"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.northbound.page_config.inventory.profiles.by_id.json"
+    },
+    {
       "operationId": "put.northbound.servers.active",
       "method": "PUT",
       "path": "/api/v1/northbound/servers/active",
@@ -282,6 +1524,116 @@
       ],
       "risk": "low",
       "document": "api-docs/put.northbound.servers.by_role.json"
+    },
+    {
+      "operationId": "put.northbound.v1.device.group",
+      "method": "PUT",
+      "path": "/api/v1/northbound/v1/device/group",
+      "title": "北向接口 - 批量更新",
+      "summary": "北向接口 - 批量更新",
+      "description": "北向接口：批量更新资源数据",
+      "intents": [
+        "北向接口 - 批量更新",
+        "北向接口：批量更新资源数据",
+        "northbound",
+        "北向接口",
+        "device",
+        "group"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.northbound.v1.device.group.json"
+    },
+    {
+      "operationId": "put.northbound.v1.device.group.by_id",
+      "method": "PUT",
+      "path": "/api/v1/northbound/v1/device/group/:id",
+      "title": "北向接口 - 更新",
+      "summary": "北向接口 - 更新",
+      "description": "北向接口：更新指定资源的完整配置",
+      "intents": [
+        "北向接口 - 更新",
+        "北向接口：更新指定资源的完整配置",
+        "northbound",
+        "北向接口",
+        "device",
+        "group"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.northbound.v1.device.group.by_id.json"
+    },
+    {
+      "operationId": "put.northbound.v1.device.group.sub",
+      "method": "PUT",
+      "path": "/api/v1/northbound/v1/device/group/sub",
+      "title": "北向接口 - 批量更新",
+      "summary": "北向接口 - 批量更新",
+      "description": "北向接口：批量更新资源数据",
+      "intents": [
+        "北向接口 - 批量更新",
+        "北向接口：批量更新资源数据",
+        "northbound",
+        "北向接口",
+        "device",
+        "group",
+        "sub"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.northbound.v1.device.group.sub.json"
+    },
+    {
+      "operationId": "put.northbound.v1.device.parameters.by_sn",
+      "method": "PUT",
+      "path": "/api/v1/northbound/v1/device/parameters/:sn",
+      "title": "北向接口 - 参数更新",
+      "summary": "北向接口 - 参数更新",
+      "description": "北向接口：查询或维护指定对象的参数更新数据",
+      "intents": [
+        "北向接口 - 参数更新",
+        "北向接口：查询或维护指定对象的参数更新数据",
+        "northbound",
+        "北向接口",
+        "device",
+        "parameters"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.northbound.v1.device.parameters.by_sn.json"
+    },
+    {
+      "operationId": "put.northbound.v1.device.parameters.cellname.by_sn",
+      "method": "PUT",
+      "path": "/api/v1/northbound/v1/device/parameters/cellname/:sn",
+      "title": "北向接口 - 更新",
+      "summary": "北向接口 - 更新",
+      "description": "北向接口：更新指定资源的完整配置",
+      "intents": [
+        "北向接口 - 更新",
+        "北向接口：更新指定资源的完整配置",
+        "northbound",
+        "北向接口",
+        "device",
+        "parameters",
+        "cellname"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.northbound.v1.device.parameters.cellname.by_sn.json"
+    },
+    {
+      "operationId": "put.northbound.v1.user.update",
+      "method": "PUT",
+      "path": "/api/v1/northbound/v1/user/update",
+      "title": "北向接口 - 批量更新",
+      "summary": "北向接口 - 批量更新",
+      "description": "北向接口：批量更新资源数据",
+      "intents": [
+        "北向接口 - 批量更新",
+        "北向接口：批量更新资源数据",
+        "northbound",
+        "北向接口",
+        "user",
+        "update"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.northbound.v1.user.update.json"
     }
   ]
 }

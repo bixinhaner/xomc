@@ -88,6 +88,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.devices.tasks.batch",
+      "method": "POST",
+      "path": "/api/v1/devices/tasks/batch",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.devices",
+      "method": "POST",
+      "path": "/api/v1/devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.devices",
+      "method": "GET",
+      "path": "/api/v1/devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.devices.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/devices/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.devices.recycle.permanent",
+      "method": "DELETE",
+      "path": "/api/v1/devices/recycle/permanent",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

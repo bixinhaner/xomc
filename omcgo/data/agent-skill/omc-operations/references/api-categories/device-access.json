@@ -1,0 +1,705 @@
+{
+  "schemaVersion": "1.0",
+  "category": "device-access",
+  "title": "device-access",
+  "operations": [
+    {
+      "operationId": "delete.device_access.policies.by_versionID",
+      "method": "DELETE",
+      "path": "/api/v1/device-access/policies/:versionID",
+      "title": "device-access - 删除",
+      "summary": "device-access - 删除",
+      "description": "device-access：删除指定资源记录",
+      "intents": [
+        "device-access - 删除",
+        "device-access：删除指定资源记录",
+        "device-access",
+        "policies",
+        "device access"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.device_access.policies.by_versionID.json"
+    },
+    {
+      "operationId": "delete.device_access.policies.by_versionID.rules.by_ruleID.dimensions.by_dimension",
+      "method": "DELETE",
+      "path": "/api/v1/device-access/policies/:versionID/rules/:ruleID/dimensions/:dimension",
+      "title": "device-access - 删除",
+      "summary": "device-access - 删除",
+      "description": "device-access：删除指定资源记录",
+      "intents": [
+        "device-access - 删除",
+        "device-access：删除指定资源记录",
+        "device-access",
+        "policies",
+        "rules",
+        "dimensions",
+        "device access"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.device_access.policies.by_versionID.rules.by_ruleID.dimensions.by_dimension.json"
+    },
+    {
+      "operationId": "get.device_access.access_list",
+      "method": "GET",
+      "path": "/api/v1/device-access/access-list",
+      "title": "device-access - accesslist",
+      "summary": "device-access - accesslist",
+      "description": "device-access：处理accesslist相关数据",
+      "intents": [
+        "device-access - accesslist",
+        "device-access：处理accesslist相关数据",
+        "device-access",
+        "access-list",
+        "device access",
+        "access list"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.access_list.json"
+    },
+    {
+      "operationId": "get.device_access.access_list.template",
+      "method": "GET",
+      "path": "/api/v1/device-access/access-list/template",
+      "title": "device-access - 模板",
+      "summary": "device-access - 模板",
+      "description": "device-access：查询或维护模板数据",
+      "intents": [
+        "device-access - 模板",
+        "device-access：查询或维护模板数据",
+        "device-access",
+        "access-list",
+        "template",
+        "device access",
+        "access list"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.access_list.template.json"
+    },
+    {
+      "operationId": "get.device_access.actions",
+      "method": "GET",
+      "path": "/api/v1/device-access/actions",
+      "title": "device-access - 列表",
+      "summary": "device-access - 列表",
+      "description": "device-access：按筛选条件查询资源列表",
+      "intents": [
+        "device-access - 列表",
+        "device-access：按筛选条件查询资源列表",
+        "device-access",
+        "actions",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.actions.json"
+    },
+    {
+      "operationId": "get.device_access.actions.by_actionID.attempts",
+      "method": "GET",
+      "path": "/api/v1/device-access/actions/:actionID/attempts",
+      "title": "device-access - GET",
+      "summary": "device-access - GET",
+      "description": "device-access：执行 GET 请求对应的业务操作",
+      "intents": [
+        "device-access - GET",
+        "device-access：执行 GET 请求对应的业务操作",
+        "device-access",
+        "actions",
+        "attempts",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.actions.by_actionID.attempts.json"
+    },
+    {
+      "operationId": "get.device_access.candidates",
+      "method": "GET",
+      "path": "/api/v1/device-access/candidates",
+      "title": "device-access - 列表",
+      "summary": "device-access - 列表",
+      "description": "device-access：按筛选条件查询资源列表",
+      "intents": [
+        "device-access - 列表",
+        "device-access：按筛选条件查询资源列表",
+        "device-access",
+        "candidates",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.candidates.json"
+    },
+    {
+      "operationId": "get.device_access.import_templates.by_importType",
+      "method": "GET",
+      "path": "/api/v1/device-access/import-templates/:importType",
+      "title": "device-access - 导入templates详情",
+      "summary": "device-access - 导入templates详情",
+      "description": "device-access：查询或维护指定对象的导入templates详情数据",
+      "intents": [
+        "device-access - 导入templates详情",
+        "device-access：查询或维护指定对象的导入templates详情数据",
+        "device-access",
+        "import-templates",
+        "device access",
+        "import templates"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.import_templates.by_importType.json"
+    },
+    {
+      "operationId": "get.device_access.imports",
+      "method": "GET",
+      "path": "/api/v1/device-access/imports",
+      "title": "device-access - 列表",
+      "summary": "device-access - 列表",
+      "description": "device-access：按筛选条件查询资源列表",
+      "intents": [
+        "device-access - 列表",
+        "device-access：按筛选条件查询资源列表",
+        "device-access",
+        "imports",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.imports.json"
+    },
+    {
+      "operationId": "get.device_access.imports.by_batchID",
+      "method": "GET",
+      "path": "/api/v1/device-access/imports/:batchID",
+      "title": "device-access - 详情",
+      "summary": "device-access - 详情",
+      "description": "device-access：查询指定资源的详细信息",
+      "intents": [
+        "device-access - 详情",
+        "device-access：查询指定资源的详细信息",
+        "device-access",
+        "imports",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.imports.by_batchID.json"
+    },
+    {
+      "operationId": "get.device_access.imports.by_batchID.errors",
+      "method": "GET",
+      "path": "/api/v1/device-access/imports/:batchID/errors",
+      "title": "device-access - GET",
+      "summary": "device-access - GET",
+      "description": "device-access：执行 GET 请求对应的业务操作",
+      "intents": [
+        "device-access - GET",
+        "device-access：执行 GET 请求对应的业务操作",
+        "device-access",
+        "imports",
+        "errors",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.imports.by_batchID.errors.json"
+    },
+    {
+      "operationId": "get.device_access.policies",
+      "method": "GET",
+      "path": "/api/v1/device-access/policies",
+      "title": "device-access - 列表",
+      "summary": "device-access - 列表",
+      "description": "device-access：按筛选条件查询资源列表",
+      "intents": [
+        "device-access - 列表",
+        "device-access：按筛选条件查询资源列表",
+        "device-access",
+        "policies",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.policies.json"
+    },
+    {
+      "operationId": "get.device_access.policies.by_versionID",
+      "method": "GET",
+      "path": "/api/v1/device-access/policies/:versionID",
+      "title": "device-access - 详情",
+      "summary": "device-access - 详情",
+      "description": "device-access：查询指定资源的详细信息",
+      "intents": [
+        "device-access - 详情",
+        "device-access：查询指定资源的详细信息",
+        "device-access",
+        "policies",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.policies.by_versionID.json"
+    },
+    {
+      "operationId": "get.device_access.policies.by_versionID.difference",
+      "method": "GET",
+      "path": "/api/v1/device-access/policies/:versionID/difference",
+      "title": "device-access - GET",
+      "summary": "device-access - GET",
+      "description": "device-access：执行 GET 请求对应的业务操作",
+      "intents": [
+        "device-access - GET",
+        "device-access：执行 GET 请求对应的业务操作",
+        "device-access",
+        "policies",
+        "difference",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.policies.by_versionID.difference.json"
+    },
+    {
+      "operationId": "get.device_access.policies.by_versionID.rules.by_ruleID.dimensions.by_dimension.export",
+      "method": "GET",
+      "path": "/api/v1/device-access/policies/:versionID/rules/:ruleID/dimensions/:dimension/export",
+      "title": "device-access - 导出",
+      "summary": "device-access - 导出",
+      "description": "device-access：按条件导出业务数据",
+      "intents": [
+        "device-access - 导出",
+        "device-access：按条件导出业务数据",
+        "device-access",
+        "policies",
+        "rules",
+        "dimensions",
+        "export",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.policies.by_versionID.rules.by_ruleID.dimensions.by_dimension.export.json"
+    },
+    {
+      "operationId": "get.device_access.settings",
+      "method": "GET",
+      "path": "/api/v1/device-access/settings",
+      "title": "device-access - 列表",
+      "summary": "device-access - 列表",
+      "description": "device-access：按筛选条件查询资源列表",
+      "intents": [
+        "device-access - 列表",
+        "device-access：按筛选条件查询资源列表",
+        "device-access",
+        "settings",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.settings.json"
+    },
+    {
+      "operationId": "get.device_access.states",
+      "method": "GET",
+      "path": "/api/v1/device-access/states",
+      "title": "device-access - 列表",
+      "summary": "device-access - 列表",
+      "description": "device-access：按筛选条件查询资源列表",
+      "intents": [
+        "device-access - 列表",
+        "device-access：按筛选条件查询资源列表",
+        "device-access",
+        "states",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.states.json"
+    },
+    {
+      "operationId": "get.device_access.states.by_serialNumber",
+      "method": "GET",
+      "path": "/api/v1/device-access/states/:serialNumber",
+      "title": "device-access - 详情",
+      "summary": "device-access - 详情",
+      "description": "device-access：查询指定资源的详细信息",
+      "intents": [
+        "device-access - 详情",
+        "device-access：查询指定资源的详细信息",
+        "device-access",
+        "states",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.states.by_serialNumber.json"
+    },
+    {
+      "operationId": "get.device_access.states.by_serialNumber.decisions",
+      "method": "GET",
+      "path": "/api/v1/device-access/states/:serialNumber/decisions",
+      "title": "device-access - GET",
+      "summary": "device-access - GET",
+      "description": "device-access：执行 GET 请求对应的业务操作",
+      "intents": [
+        "device-access - GET",
+        "device-access：执行 GET 请求对应的业务操作",
+        "device-access",
+        "states",
+        "decisions",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.states.by_serialNumber.decisions.json"
+    },
+    {
+      "operationId": "get.device_access.states.by_serialNumber.evidence",
+      "method": "GET",
+      "path": "/api/v1/device-access/states/:serialNumber/evidence",
+      "title": "device-access - GET",
+      "summary": "device-access - GET",
+      "description": "device-access：执行 GET 请求对应的业务操作",
+      "intents": [
+        "device-access - GET",
+        "device-access：执行 GET 请求对应的业务操作",
+        "device-access",
+        "states",
+        "evidence",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.states.by_serialNumber.evidence.json"
+    },
+    {
+      "operationId": "get.device_access.states.by_serialNumber.identity_snapshots",
+      "method": "GET",
+      "path": "/api/v1/device-access/states/:serialNumber/identity-snapshots",
+      "title": "device-access - identitysnapshots",
+      "summary": "device-access - identitysnapshots",
+      "description": "device-access：处理identitysnapshots相关数据",
+      "intents": [
+        "device-access - identitysnapshots",
+        "device-access：处理identitysnapshots相关数据",
+        "device-access",
+        "states",
+        "identity-snapshots",
+        "device access",
+        "identity snapshots"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.states.by_serialNumber.identity_snapshots.json"
+    },
+    {
+      "operationId": "get.device_access.states.by_serialNumber.manual_operations",
+      "method": "GET",
+      "path": "/api/v1/device-access/states/:serialNumber/manual-operations",
+      "title": "device-access - manualoperations",
+      "summary": "device-access - manualoperations",
+      "description": "device-access：处理manualoperations相关数据",
+      "intents": [
+        "device-access - manualoperations",
+        "device-access：处理manualoperations相关数据",
+        "device-access",
+        "states",
+        "manual-operations",
+        "device access",
+        "manual operations"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.states.by_serialNumber.manual_operations.json"
+    },
+    {
+      "operationId": "get.device_access.states.by_serialNumber.notifications",
+      "method": "GET",
+      "path": "/api/v1/device-access/states/:serialNumber/notifications",
+      "title": "device-access - GET",
+      "summary": "device-access - GET",
+      "description": "device-access：执行 GET 请求对应的业务操作",
+      "intents": [
+        "device-access - GET",
+        "device-access：执行 GET 请求对应的业务操作",
+        "device-access",
+        "states",
+        "notifications",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.states.by_serialNumber.notifications.json"
+    },
+    {
+      "operationId": "get.device_access.states.summary",
+      "method": "GET",
+      "path": "/api/v1/device-access/states/summary",
+      "title": "device-access - 汇总",
+      "summary": "device-access - 汇总",
+      "description": "device-access：查询汇总概览数据",
+      "intents": [
+        "device-access - 汇总",
+        "device-access：查询汇总概览数据",
+        "device-access",
+        "states",
+        "summary",
+        "device access"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_access.states.summary.json"
+    },
+    {
+      "operationId": "post.device_access.access_list",
+      "method": "POST",
+      "path": "/api/v1/device-access/access-list",
+      "title": "device-access - accesslist",
+      "summary": "device-access - accesslist",
+      "description": "device-access：处理accesslist相关数据",
+      "intents": [
+        "device-access - accesslist",
+        "device-access：处理accesslist相关数据",
+        "device-access",
+        "access-list",
+        "device access",
+        "access list"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_access.access_list.json"
+    },
+    {
+      "operationId": "post.device_access.access_list.batch_disable",
+      "method": "POST",
+      "path": "/api/v1/device-access/access-list/batch-disable",
+      "title": "device-access - 批量disable",
+      "summary": "device-access - 批量disable",
+      "description": "device-access：处理批量disable相关数据",
+      "intents": [
+        "device-access - 批量disable",
+        "device-access：处理批量disable相关数据",
+        "device-access",
+        "access-list",
+        "batch-disable",
+        "device access",
+        "access list",
+        "batch disable"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_access.access_list.batch_disable.json"
+    },
+    {
+      "operationId": "post.device_access.actions.by_actionID.retry",
+      "method": "POST",
+      "path": "/api/v1/device-access/actions/:actionID/retry",
+      "title": "device-access - 重试",
+      "summary": "device-access - 重试",
+      "description": "device-access：重试失败任务或消息",
+      "intents": [
+        "device-access - 重试",
+        "device-access：重试失败任务或消息",
+        "device-access",
+        "actions",
+        "retry",
+        "device access"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_access.actions.by_actionID.retry.json"
+    },
+    {
+      "operationId": "post.device_access.candidates.by_candidateID.review",
+      "method": "POST",
+      "path": "/api/v1/device-access/candidates/:candidateID/review",
+      "title": "device-access - POST",
+      "summary": "device-access - POST",
+      "description": "device-access：执行 POST 请求对应的业务操作",
+      "intents": [
+        "device-access - POST",
+        "device-access：执行 POST 请求对应的业务操作",
+        "device-access",
+        "candidates",
+        "review",
+        "device access"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_access.candidates.by_candidateID.review.json"
+    },
+    {
+      "operationId": "post.device_access.decisions.by_decisionID.archive",
+      "method": "POST",
+      "path": "/api/v1/device-access/decisions/:decisionID/archive",
+      "title": "device-access - POST",
+      "summary": "device-access - POST",
+      "description": "device-access：执行 POST 请求对应的业务操作",
+      "intents": [
+        "device-access - POST",
+        "device-access：执行 POST 请求对应的业务操作",
+        "device-access",
+        "decisions",
+        "archive",
+        "device access"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_access.decisions.by_decisionID.archive.json"
+    },
+    {
+      "operationId": "post.device_access.decisions.by_decisionID.restore",
+      "method": "POST",
+      "path": "/api/v1/device-access/decisions/:decisionID/restore",
+      "title": "device-access - 恢复",
+      "summary": "device-access - 恢复",
+      "description": "device-access：恢复备份、回收站记录或任务状态",
+      "intents": [
+        "device-access - 恢复",
+        "device-access：恢复备份、回收站记录或任务状态",
+        "device-access",
+        "decisions",
+        "restore",
+        "device access"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_access.decisions.by_decisionID.restore.json"
+    },
+    {
+      "operationId": "post.device_access.devices.by_serialNumber.reevaluate",
+      "method": "POST",
+      "path": "/api/v1/device-access/devices/:serialNumber/reevaluate",
+      "title": "device-access - POST",
+      "summary": "device-access - POST",
+      "description": "device-access：执行 POST 请求对应的业务操作",
+      "intents": [
+        "device-access - POST",
+        "device-access：执行 POST 请求对应的业务操作",
+        "device-access",
+        "devices",
+        "reevaluate",
+        "device access"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_access.devices.by_serialNumber.reevaluate.json"
+    },
+    {
+      "operationId": "post.device_access.imports.by_batchID.commit",
+      "method": "POST",
+      "path": "/api/v1/device-access/imports/:batchID/commit",
+      "title": "device-access - POST",
+      "summary": "device-access - POST",
+      "description": "device-access：执行 POST 请求对应的业务操作",
+      "intents": [
+        "device-access - POST",
+        "device-access：执行 POST 请求对应的业务操作",
+        "device-access",
+        "imports",
+        "commit",
+        "device access"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_access.imports.by_batchID.commit.json"
+    },
+    {
+      "operationId": "post.device_access.imports.by_batchID.rollback",
+      "method": "POST",
+      "path": "/api/v1/device-access/imports/:batchID/rollback",
+      "title": "device-access - 回滚",
+      "summary": "device-access - 回滚",
+      "description": "device-access：将任务或版本回退到上一状态",
+      "intents": [
+        "device-access - 回滚",
+        "device-access：将任务或版本回退到上一状态",
+        "device-access",
+        "imports",
+        "rollback",
+        "device access"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_access.imports.by_batchID.rollback.json"
+    },
+    {
+      "operationId": "post.device_access.imports.preview",
+      "method": "POST",
+      "path": "/api/v1/device-access/imports/preview",
+      "title": "device-access - 预览",
+      "summary": "device-access - 预览",
+      "description": "device-access：预览文件、配置或导出结果",
+      "intents": [
+        "device-access - 预览",
+        "device-access：预览文件、配置或导出结果",
+        "device-access",
+        "imports",
+        "preview",
+        "device access"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_access.imports.preview.json"
+    },
+    {
+      "operationId": "post.device_access.policies.by_versionID.publish",
+      "method": "POST",
+      "path": "/api/v1/device-access/policies/:versionID/publish",
+      "title": "device-access - POST",
+      "summary": "device-access - POST",
+      "description": "device-access：执行 POST 请求对应的业务操作",
+      "intents": [
+        "device-access - POST",
+        "device-access：执行 POST 请求对应的业务操作",
+        "device-access",
+        "policies",
+        "publish",
+        "device access"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_access.policies.by_versionID.publish.json"
+    },
+    {
+      "operationId": "post.device_access.policies.by_versionID.rollback",
+      "method": "POST",
+      "path": "/api/v1/device-access/policies/:versionID/rollback",
+      "title": "device-access - 回滚",
+      "summary": "device-access - 回滚",
+      "description": "device-access：将任务或版本回退到上一状态",
+      "intents": [
+        "device-access - 回滚",
+        "device-access：将任务或版本回退到上一状态",
+        "device-access",
+        "policies",
+        "rollback",
+        "device access"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_access.policies.by_versionID.rollback.json"
+    },
+    {
+      "operationId": "post.device_access.policies.drafts",
+      "method": "POST",
+      "path": "/api/v1/device-access/policies/drafts",
+      "title": "device-access - 创建",
+      "summary": "device-access - 创建",
+      "description": "device-access：创建新的资源记录",
+      "intents": [
+        "device-access - 创建",
+        "device-access：创建新的资源记录",
+        "device-access",
+        "policies",
+        "drafts",
+        "device access"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_access.policies.drafts.json"
+    },
+    {
+      "operationId": "put.device_access.policies.by_versionID",
+      "method": "PUT",
+      "path": "/api/v1/device-access/policies/:versionID",
+      "title": "device-access - 更新",
+      "summary": "device-access - 更新",
+      "description": "device-access：更新指定资源的完整配置",
+      "intents": [
+        "device-access - 更新",
+        "device-access：更新指定资源的完整配置",
+        "device-access",
+        "policies",
+        "device access"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.device_access.policies.by_versionID.json"
+    },
+    {
+      "operationId": "put.device_access.settings",
+      "method": "PUT",
+      "path": "/api/v1/device-access/settings",
+      "title": "device-access - 批量更新",
+      "summary": "device-access - 批量更新",
+      "description": "device-access：批量更新资源数据",
+      "intents": [
+        "device-access - 批量更新",
+        "device-access：批量更新资源数据",
+        "device-access",
+        "settings",
+        "device access"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.device_access.settings.json"
+    }
+  ]
+}

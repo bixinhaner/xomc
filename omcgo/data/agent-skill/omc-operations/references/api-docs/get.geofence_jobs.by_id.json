@@ -1,28 +1,21 @@
 {
   "schemaVersion": "1.0",
-  "operationId": "get.pm.adhoc.tasks.by_id.progress",
+  "operationId": "get.geofence_jobs.by_id",
   "method": "GET",
-  "path": "/api/v1/pm/adhoc/tasks/:id/progress",
-  "handler": "github.com/omcgo/omcgo/internal/pm/adhoc.(*Handler).Progress-fm",
-  "category": "pm",
-  "title": "性能 PM - GET",
-  "summary": "性能 PM - GET",
-  "description": "性能 PM：执行 GET 请求对应的业务操作 Handler: Progress GET /pm/adhoc/tasks/:id/progress（SSE）\n\n订阅 pm.adhoc.progress 与 pm.adhoc.completed 主题，过滤匹配 task_id 的事件流给客户端。\n客户端 EventSource 'progress'/'completed' 事件名分别接收。",
+  "path": "/api/v1/geofence-jobs/:id",
+  "handler": "github.com/omcgo/omcgo/internal/geofence.(*Handler).GetManualBindJob-fm",
+  "category": "geofence-jobs",
+  "title": "geofence-jobs - 详情",
+  "summary": "geofence-jobs - 详情",
+  "description": "geofence-jobs：查询指定资源的详细信息",
   "intents": [
-    "性能 PM - GET",
-    "性能 PM：执行 GET 请求对应的业务操作 Handler: Progress GET /pm/adhoc/tasks/:id/progress（SSE）\n\n订阅 pm.adhoc.progress 与 pm.adhoc.completed 主题，过滤匹配 task_id 的事件流给客户端。\n客户端 EventSource 'progress'/'completed' 事件名分别接收。",
-    "pm",
-    "性能",
-    "adhoc",
-    "tasks",
-    "progress"
+    "geofence-jobs - 详情",
+    "geofence-jobs：查询指定资源的详细信息",
+    "geofence-jobs",
+    "geofence jobs"
   ],
   "tags": [
-    "pm",
-    "性能",
-    "adhoc",
-    "tasks",
-    "progress"
+    "geofence-jobs"
   ],
   "risk": "read",
   "confirmationRequired": false,
@@ -79,7 +72,15 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
-  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "emptyResult": "空数组或 total=0 只说明该操作在当前用户权限和本次过滤条件下没有返回记录，不能单独证明业务对象、源数据或系统能力不存在。先核对参数、标识符、时间范围和权限；若用户目标仍未回答，再沿 relatedOperations 选择汇总、明细、原始或派生数据操作补充证据。",
+  "relatedOperations": [
+    {
+      "operationId": "get.geofence_jobs.by_id.items",
+      "method": "GET",
+      "path": "/api/v1/geofence-jobs/:id/items",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

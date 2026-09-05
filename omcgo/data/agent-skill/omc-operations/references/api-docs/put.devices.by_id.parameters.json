@@ -107,6 +107,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.devices.by_id.parameters.discover",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/parameters/discover",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.devices.by_id.parameters",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/parameters",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.devices.by_id.parameters.children",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/parameters/children",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.devices.by_id.parameters.schema",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/parameters/schema",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.devices.by_id.parameters.search",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/parameters/search",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

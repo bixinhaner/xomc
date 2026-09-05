@@ -40,8 +40,10 @@
         "source_type": {
           "enum": [
             "dashboard",
+            "device_view",
             "kpi_query",
-            "adhoc"
+            "pm_dashboard",
+            "adhoc_result"
           ],
           "type": "string"
         },
@@ -95,6 +97,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.pm.exports.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/pm/exports/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.pm.exports",
+      "method": "GET",
+      "path": "/api/v1/pm/exports",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.pm.exports.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/pm/exports/:id/download",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.pm.exports.files",
+      "method": "GET",
+      "path": "/api/v1/pm/exports/files",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.pm.adhoc.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

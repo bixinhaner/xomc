@@ -97,6 +97,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.param_models",
+      "method": "GET",
+      "path": "/api/v1/param-models",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.param_models.by_name",
+      "method": "DELETE",
+      "path": "/api/v1/param-models/:name",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.param_models.by_name.mappings.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/param-models/:name/mappings/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.param_models.standard.by_path",
+      "method": "DELETE",
+      "path": "/api/v1/param-models/standard/:path",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.param_models.by_name.mappings",
+      "method": "POST",
+      "path": "/api/v1/param-models/:name/mappings",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

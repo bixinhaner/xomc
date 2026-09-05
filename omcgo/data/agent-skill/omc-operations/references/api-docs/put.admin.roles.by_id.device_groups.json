@@ -102,6 +102,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.admin.roles.by_id.device_groups",
+      "method": "GET",
+      "path": "/api/v1/admin/roles/:id/device-groups",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.admin.roles.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/admin/roles/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.admin.roles",
+      "method": "POST",
+      "path": "/api/v1/admin/roles",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.admin.roles.by_id",
+      "method": "PUT",
+      "path": "/api/v1/admin/roles/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.admin.roles",
+      "method": "GET",
+      "path": "/api/v1/admin/roles",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

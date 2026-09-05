@@ -72,6 +72,26 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.indicator_groups",
+      "method": "POST",
+      "path": "/api/v1/indicator-groups",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.indicator_groups.by_id",
+      "method": "PUT",
+      "path": "/api/v1/indicator-groups/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.indicator_groups",
+      "method": "GET",
+      "path": "/api/v1/indicator-groups",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

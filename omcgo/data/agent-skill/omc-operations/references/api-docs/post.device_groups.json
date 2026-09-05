@@ -50,7 +50,7 @@
           "type": "array"
         },
         "matching_mode": {
-          "description": "匹配规则（仅 L2 分组使用）",
+          "description": "deviceName, lac, tac",
           "type": "string"
         },
         "name": {
@@ -97,9 +97,19 @@
           },
           "type": "object"
         },
+        "serial_number_list": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "sort_order": {
           "goType": "int",
           "type": "integer"
+        },
+        "source_group_id": {
+          "description": "匹配规则（仅 L2 分组使用）",
+          "type": "string"
         },
         "sub_groups": {
           "items": {
@@ -180,6 +190,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.device_groups.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/device-groups/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.device_groups.by_id.devices",
+      "method": "DELETE",
+      "path": "/api/v1/device-groups/:id/devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.device_groups.by_id.devices",
+      "method": "POST",
+      "path": "/api/v1/device-groups/:id/devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.device_groups.move_devices",
+      "method": "POST",
+      "path": "/api/v1/device-groups/move-devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.device_groups.by_id",
+      "method": "PUT",
+      "path": "/api/v1/device-groups/:id",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

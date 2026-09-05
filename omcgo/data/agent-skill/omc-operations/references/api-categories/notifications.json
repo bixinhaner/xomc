@@ -69,6 +69,43 @@
       "document": "api-docs/get.notifications.json"
     },
     {
+      "operationId": "get.notifications.email_runs",
+      "method": "GET",
+      "path": "/api/v1/notifications/email-runs",
+      "title": "通知 - email执行历史",
+      "summary": "通知 - email执行历史",
+      "description": "通知：处理email执行历史相关数据",
+      "intents": [
+        "通知 - email执行历史",
+        "通知：处理email执行历史相关数据",
+        "notifications",
+        "通知",
+        "email-runs",
+        "email runs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.notifications.email_runs.json"
+    },
+    {
+      "operationId": "get.notifications.email_runs.by_business.by_id.deliveries",
+      "method": "GET",
+      "path": "/api/v1/notifications/email-runs/:business/:id/deliveries",
+      "title": "通知 - GET",
+      "summary": "通知 - GET",
+      "description": "通知：执行 GET 请求对应的业务操作",
+      "intents": [
+        "通知 - GET",
+        "通知：执行 GET 请求对应的业务操作",
+        "notifications",
+        "通知",
+        "email-runs",
+        "deliveries",
+        "email runs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.notifications.email_runs.by_business.by_id.deliveries.json"
+    },
+    {
       "operationId": "get.notifications.history",
       "method": "GET",
       "path": "/api/v1/notifications/history",

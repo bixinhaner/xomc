@@ -75,6 +75,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.config.baselines",
+      "method": "POST",
+      "path": "/api/v1/config/baselines",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.config.baselines.by_id",
+      "method": "PUT",
+      "path": "/api/v1/config/baselines/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.config.baselines",
+      "method": "GET",
+      "path": "/api/v1/config/baselines",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.config.baselines.by_id",
+      "method": "GET",
+      "path": "/api/v1/config/baselines/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.config.sync.pull.by_deviceId",
+      "method": "POST",
+      "path": "/api/v1/config/sync/pull/:deviceId",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

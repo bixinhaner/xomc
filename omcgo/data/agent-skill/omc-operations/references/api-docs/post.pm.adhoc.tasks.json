@@ -67,7 +67,6 @@
           "items": {
             "type": "string"
           },
-          "minItems": 1,
           "type": "array"
         },
         "is_builtin": {
@@ -83,7 +82,6 @@
         },
         "mode": {
           "enum": [
-            "oneshot",
             "continuous"
           ],
           "type": "string"
@@ -98,12 +96,36 @@
           },
           "type": "array"
         },
+        "planned_end_at": {
+          "description": "planned_end_at：自建 continuous 任务计划结束时间；不传由 repository 默认 created_at+30d，传 null 表示用户主动清空。",
+          "goType": "optionalTime",
+          "properties": {
+            "set": {
+              "type": "boolean"
+            },
+            "value": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
         "technology": {
           "description": "制式：lte/nr/gsm，空=不限；建后不可改（T-0182）",
           "enum": [
             "lte",
             "nr",
             "gsm"
+          ],
+          "type": "string"
+        },
+        "visibility": {
+          "description": "visibility：private（默认，仅创建者/超管可见可操作）/ public（登录用户可见可操作）",
+          "enum": [
+            "private",
+            "public"
           ],
           "type": "string"
         },
@@ -120,7 +142,6 @@
         }
       },
       "required": [
-        "granularities",
         "metric_paths",
         "mode",
         "name"
@@ -168,6 +189,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.pm.adhoc.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.pm.adhoc.tasks.by_id.definition",
+      "method": "DELETE",
+      "path": "/api/v1/pm/adhoc/tasks/:id/definition",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "patch.pm.adhoc.tasks.by_id",
+      "method": "PATCH",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.pm.adhoc.tasks.by_id.resume",
+      "method": "POST",
+      "path": "/api/v1/pm/adhoc/tasks/:id/resume",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.pm.adhoc.tasks.by_id",
+      "method": "PUT",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

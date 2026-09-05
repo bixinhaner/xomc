@@ -94,6 +94,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.templates.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/templates/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.templates",
+      "method": "POST",
+      "path": "/api/v1/templates",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.templates.by_id",
+      "method": "PUT",
+      "path": "/api/v1/templates/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.templates",
+      "method": "GET",
+      "path": "/api/v1/templates",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.templates.by_id",
+      "method": "GET",
+      "path": "/api/v1/templates/:id",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

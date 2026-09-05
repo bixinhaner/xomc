@@ -74,6 +74,20 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.device_registrations",
+      "method": "POST",
+      "path": "/api/v1/device-registrations",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.device_registrations",
+      "method": "GET",
+      "path": "/api/v1/device-registrations",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

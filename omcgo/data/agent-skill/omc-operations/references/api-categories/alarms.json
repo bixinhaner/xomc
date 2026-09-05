@@ -22,6 +22,24 @@
       "document": "api-docs/delete.alarms.alarm_filters.by_id.json"
     },
     {
+      "operationId": "delete.alarms.email_subscriptions.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/alarms/email-subscriptions/:id",
+      "title": "告警 - emailsubscriptions删除",
+      "summary": "告警 - emailsubscriptions删除",
+      "description": "告警：查询或维护指定对象的emailsubscriptions删除数据",
+      "intents": [
+        "告警 - emailsubscriptions删除",
+        "告警：查询或维护指定对象的emailsubscriptions删除数据",
+        "alarms",
+        "告警",
+        "email-subscriptions",
+        "email subscriptions"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.alarms.email_subscriptions.by_id.json"
+    },
+    {
       "operationId": "get.alarms.active",
       "method": "GET",
       "path": "/api/v1/alarms/active",
@@ -91,6 +109,42 @@
       ],
       "risk": "read",
       "document": "api-docs/get.alarms.by_id.json"
+    },
+    {
+      "operationId": "get.alarms.email_settings",
+      "method": "GET",
+      "path": "/api/v1/alarms/email-settings",
+      "title": "告警 - emailsettings",
+      "summary": "告警 - emailsettings",
+      "description": "告警：处理emailsettings相关数据",
+      "intents": [
+        "告警 - emailsettings",
+        "告警：处理emailsettings相关数据",
+        "alarms",
+        "告警",
+        "email-settings",
+        "email settings"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.alarms.email_settings.json"
+    },
+    {
+      "operationId": "get.alarms.email_subscriptions",
+      "method": "GET",
+      "path": "/api/v1/alarms/email-subscriptions",
+      "title": "告警 - emailsubscriptions",
+      "summary": "告警 - emailsubscriptions",
+      "description": "告警：处理emailsubscriptions相关数据",
+      "intents": [
+        "告警 - emailsubscriptions",
+        "告警：处理emailsubscriptions相关数据",
+        "alarms",
+        "告警",
+        "email-subscriptions",
+        "email subscriptions"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.alarms.email_subscriptions.json"
     },
     {
       "operationId": "get.alarms.history",
@@ -295,6 +349,24 @@
       "document": "api-docs/post.alarms.by_id.clear.json"
     },
     {
+      "operationId": "post.alarms.email_subscriptions",
+      "method": "POST",
+      "path": "/api/v1/alarms/email-subscriptions",
+      "title": "告警 - emailsubscriptions",
+      "summary": "告警 - emailsubscriptions",
+      "description": "告警：处理emailsubscriptions相关数据",
+      "intents": [
+        "告警 - emailsubscriptions",
+        "告警：处理emailsubscriptions相关数据",
+        "alarms",
+        "告警",
+        "email-subscriptions",
+        "email subscriptions"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.alarms.email_subscriptions.json"
+    },
+    {
       "operationId": "post.alarms.history.batch.acknowledge",
       "method": "POST",
       "path": "/api/v1/alarms/history/batch/acknowledge",
@@ -385,6 +457,42 @@
       ],
       "risk": "low",
       "document": "api-docs/put.alarms.alarm_filters.by_id.json"
+    },
+    {
+      "operationId": "put.alarms.email_settings",
+      "method": "PUT",
+      "path": "/api/v1/alarms/email-settings",
+      "title": "告警 - emailsettings",
+      "summary": "告警 - emailsettings",
+      "description": "告警：处理emailsettings相关数据",
+      "intents": [
+        "告警 - emailsettings",
+        "告警：处理emailsettings相关数据",
+        "alarms",
+        "告警",
+        "email-settings",
+        "email settings"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.alarms.email_settings.json"
+    },
+    {
+      "operationId": "put.alarms.email_subscriptions.by_id",
+      "method": "PUT",
+      "path": "/api/v1/alarms/email-subscriptions/:id",
+      "title": "告警 - emailsubscriptions更新",
+      "summary": "告警 - emailsubscriptions更新",
+      "description": "告警：查询或维护指定对象的emailsubscriptions更新数据",
+      "intents": [
+        "告警 - emailsubscriptions更新",
+        "告警：查询或维护指定对象的emailsubscriptions更新数据",
+        "alarms",
+        "告警",
+        "email-subscriptions",
+        "email subscriptions"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.alarms.email_subscriptions.by_id.json"
     }
   ]
 }

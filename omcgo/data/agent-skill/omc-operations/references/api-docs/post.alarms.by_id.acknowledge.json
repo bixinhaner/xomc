@@ -146,6 +146,38 @@
     "request": "openapi",
     "response": "openapi"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.alarms.active.batch.acknowledge",
+      "method": "POST",
+      "path": "/api/v1/alarms/active/batch/acknowledge",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.alarms.history.batch.acknowledge",
+      "method": "POST",
+      "path": "/api/v1/alarms/history/batch/acknowledge",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.alarms.by_id",
+      "method": "GET",
+      "path": "/api/v1/alarms/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.alarms.alarm_filters.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/alarms/alarm-filters/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.alarms.email_subscriptions.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/alarms/email-subscriptions/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",

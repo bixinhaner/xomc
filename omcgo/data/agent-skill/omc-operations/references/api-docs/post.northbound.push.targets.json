@@ -169,6 +169,38 @@
     "request": "openapi",
     "response": "openapi"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.northbound.push.targets.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/northbound/push/targets/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.northbound.push.targets.by_id.circuit.reset",
+      "method": "POST",
+      "path": "/api/v1/northbound/push/targets/:id/circuit/reset",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.northbound.push.targets",
+      "method": "GET",
+      "path": "/api/v1/northbound/push/targets",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.northbound.push.targets.by_id.circuit",
+      "method": "GET",
+      "path": "/api/v1/northbound/push/targets/:id/circuit",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.northbound.page_config.alarm.snmp.targets.by_key.test",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/alarm/snmp/targets/:key/test",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",

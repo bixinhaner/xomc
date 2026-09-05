@@ -91,6 +91,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.backup.device_licenses",
+      "method": "GET",
+      "path": "/api/v1/backup/device-licenses",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.backup.device_licenses.by_sn",
+      "method": "DELETE",
+      "path": "/api/v1/backup/device-licenses/:sn",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.backup.config_snapshots.batch_get",
+      "method": "POST",
+      "path": "/api/v1/backup/config-snapshots/batch-get",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.backup.device_licenses.batch_delete",
+      "method": "POST",
+      "path": "/api/v1/backup/device-licenses/batch-delete",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.backup.device_licenses.batch_download",
+      "method": "POST",
+      "path": "/api/v1/backup/device-licenses/batch-download",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

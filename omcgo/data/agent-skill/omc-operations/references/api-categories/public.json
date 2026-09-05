@@ -9,10 +9,10 @@
       "path": "/api/v1/admin/public/configs",
       "title": "public - 列表",
       "summary": "public - 列表",
-      "description": "public：按筛选条件查询资源列表 Handler: ListPublic 返回 (可选 category 过滤后) is_public=true 的全部配置。\n不携带敏感字段，无需登录态。",
+      "description": "public：按筛选条件查询资源列表 Handler: ListPublic 返回 (可选 category 过滤后) 可公开读取的配置。\n不携带敏感字段，无需登录态。",
       "intents": [
         "public - 列表",
-        "public：按筛选条件查询资源列表 Handler: ListPublic 返回 (可选 category 过滤后) is_public=true 的全部配置。\n不携带敏感字段，无需登录态。",
+        "public：按筛选条件查询资源列表 Handler: ListPublic 返回 (可选 category 过滤后) 可公开读取的配置。\n不携带敏感字段，无需登录态。",
         "public",
         "admin",
         "configs"

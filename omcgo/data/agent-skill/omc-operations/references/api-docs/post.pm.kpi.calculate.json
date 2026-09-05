@@ -69,6 +69,38 @@
     "request": "openapi",
     "response": "openapi"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.pm.kpi",
+      "method": "GET",
+      "path": "/api/v1/pm/kpi",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.pm.kpi.definitions",
+      "method": "GET",
+      "path": "/api/v1/pm/kpi/definitions",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.pm.adhoc.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.pm.adhoc.tasks.by_id.definition",
+      "method": "DELETE",
+      "path": "/api/v1/pm/adhoc/tasks/:id/definition",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.pm.exports.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/pm/exports/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",
