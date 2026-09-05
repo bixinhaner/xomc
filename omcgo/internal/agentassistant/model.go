@@ -194,6 +194,10 @@ func ValidateDefinition(d *Definition, capabilities []Capability) error {
 	if d == nil || strings.TrimSpace(d.Name) == "" || len([]rune(d.Name)) > 100 || strings.TrimSpace(d.Goal) == "" || len(d.Goal) > 32000 {
 		return fmt.Errorf("ASSISTANT_INVALID_DEFINITION")
 	}
+	// Keep the JSON array shape consistent with Studio and the browser.
+	if d.Trigger.Conditions == nil {
+		d.Trigger.Conditions = []Condition{}
+	}
 	if d.Notify != "always" && d.Notify != "findings" {
 		return fmt.Errorf("ASSISTANT_INVALID_DELIVERY")
 	}

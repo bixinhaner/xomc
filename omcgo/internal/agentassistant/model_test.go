@@ -143,3 +143,18 @@ func TestDigestStableAndBoundToDefinition(t *testing.T) {
 		t.Fatal("goal not bound")
 	}
 }
+
+func TestDefinitionNormalizesEmptyConditions(t *testing.T) {
+	d := testDefinition()
+	d.Trigger.Conditions = nil
+	if err := ValidateDefinition(&d, testCapabilities()); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"conditions":[]`) {
+		t.Fatalf("expected JSON array, got %s", raw)
+	}
+}
