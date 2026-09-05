@@ -2,23 +2,48 @@ name: Assistant lifecycle verification
 on:
   push:
     branches: [codex/assistant-lifecycle]
+    paths-ignore: ['temp/**', '.github/workflows/assistant-apply.yml']
   pull_request:
     branches: [codex/active-intelligence]
 permissions:
   contents: read
+concurrency:
+  group: assistant-check-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  snapshot:
-    if: github.ref == 'refs/heads/codex/assistant-lifecycle'
+  backend:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: assistant_test }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ASSISTANT_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/assistant_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Archive the reviewed source snapshot
-        run: tar --exclude=.git -czf /tmp/assistant-source.tgz .
+        with: {persist-credentials: false}
+      - uses: actions/setup-go@v5
+        with: {go-version-file: omcgo/go.mod, cache-dependency-path: omcgo/go.sum}
+      - run: bash scripts/ci/assistant-lifecycle.sh backend
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@v4
+        with: {node-version: '24', cache: npm, cache-dependency-path: omcmb/package-lock.json}
+      - run: bash scripts/ci/assistant-lifecycle.sh frontend
+      - run: bash scripts/ci/assistant-lifecycle.sh browser
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: assistant-source
-          path: /tmp/assistant-source.tgz
-          retention-days: 1
+          name: assistant-browser-verification
+          path: |
+            omcmb/webcode/test-results
+            omcmb/webcode/assistant-browser-report
+          retention-days: 7
