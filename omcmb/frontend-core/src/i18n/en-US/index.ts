@@ -1,4 +1,6 @@
+import { assistantEnUS } from '../assistantMessages';
 const messages: Record<string, string> = {
+  ...assistantEnUS,
   // -------------------------------------------------------------------------
   // Common actions
   // -------------------------------------------------------------------------

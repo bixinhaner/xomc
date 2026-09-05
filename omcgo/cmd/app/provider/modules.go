@@ -19,6 +19,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/agentassistant"
 	"github.com/omcgo/omcgo/internal/agentbridge"
 	"github.com/omcgo/omcgo/internal/attention"
 	"github.com/omcgo/omcgo/internal/authz"
@@ -1580,6 +1581,7 @@ func initDashboardModule(c *Container) error {
 		attention.NewAlarmAbnormalitySource(c.AlarmPgStore, model.AlarmCritical),
 		attention.NewAlarmAbnormalitySource(c.AlarmPgStore, model.AlarmMajor),
 		agentbridge.NewAttentionSource(agentbridge.NewFindingRepository(c.PgPool)),
+		agentassistant.NewAttentionSource(agentassistant.NewRepository(c.PgPool)),
 	}
 	todoSources := []attention.RankedSource{
 		attention.NewCandidateSource(candidateReader),

@@ -28,12 +28,14 @@ import AgentFindingDrawer from '@/components/AgentFindingDrawer/AgentFindingDraw
 import styles from './AttentionBar.module.css';
 
 const ACTION_PRIORITY: AttentionAction[] = [
+ 'view_assistant_result',
   'view_agent_finding',
   'review_device_candidate',
   'view_alarm',
 ];
 
 const ACTION_I18N: Record<AttentionAction, string> = {
+ view_assistant_result: 'assistant.results',
   view_agent_finding: 'dashboard.attention.action.viewFinding',
   review_device_candidate: 'dashboard.attention.action.reviewCandidate',
   view_alarm: 'dashboard.attention.action.viewAlarm',
@@ -59,6 +61,7 @@ function itemTag(item: AttentionItem): { color: string; key: string } | undefine
   if (item.kind === 'device_access_review') {
     return { color: 'blue', key: 'dashboard.attention.type.deviceReview' };
   }
+  if (item.kind === 'assistant_result') return { color: 'blue', key: 'assistant.eyebrow' };
   if (item.kind === 'agent_finding') {
     return { color: item.severity === 'critical' ? 'red' : 'purple', key: 'dashboard.attention.type.agentFinding' };
   }
@@ -235,7 +238,8 @@ export default function AttentionBar() {
   const initialFindingId = new URLSearchParams(location.search).get('agentFinding') ?? undefined;
   const [findingId, setFindingId] = useState<string | undefined>(initialFindingId);
   const openItem = (item: AttentionItem) => {
-    if (item.kind === 'agent_finding') {
+    if (item.kind === 'assistant_result') return { color: 'blue', key: 'assistant.eyebrow' };
+  if (item.kind === 'agent_finding') {
       setFindingId(item.sourceId);
       const params = new URLSearchParams(location.search);
       params.set('agentFinding', item.sourceId);

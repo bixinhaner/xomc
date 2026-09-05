@@ -25,16 +25,21 @@ type LocalToolExecutor interface {
 	HandbookDigest() (string, error)
 }
 
+type AssistantAuthorizer interface {
+	AuthorizeTool(context.Context, string, string, string, string, string, string, map[string]any) (*admin.Claims, string, map[string]any, error)
+}
+
 type ToolWorker struct {
-	client   *Client
-	pool     *pgxpool.Pool
-	executor LocalToolExecutor
-	workerID string
-	policy   agentconfig.RuntimePolicy
-	logger   *zap.Logger
-	cancel   context.CancelFunc
-	done     chan struct{}
-	once     sync.Once
+	assistants AssistantAuthorizer
+	client     *Client
+	pool       *pgxpool.Pool
+	executor   LocalToolExecutor
+	workerID   string
+	policy     agentconfig.RuntimePolicy
+	logger     *zap.Logger
+	cancel     context.CancelFunc
+	done       chan struct{}
+	once       sync.Once
 }
 
 func NewToolWorker(client *Client, pool *pgxpool.Pool, executor LocalToolExecutor, workerID string, logger *zap.Logger) *ToolWorker {
@@ -50,6 +55,10 @@ func NewToolWorker(client *Client, pool *pgxpool.Pool, executor LocalToolExecuto
 		},
 		logger: logger.Named("agent-tool-worker"), done: make(chan struct{}),
 	}
+}
+
+func (w *ToolWorker) SetAssistantAuthorizer(authorizer AssistantAuthorizer) {
+	w.assistants = authorizer
 }
 
 func (w *ToolWorker) Start() {
@@ -71,7 +80,7 @@ func (w *ToolWorker) Close() error {
 func (w *ToolWorker) run(ctx context.Context) {
 	defer close(w.done)
 	for ctx.Err() == nil {
-		items, err := w.client.LeaseTools(ctx, w.workerID, 8)
+		items, err := w.client.LeaseTools(ctx, w.workerID, 1)
 		if err != nil {
 			if ctx.Err() == nil {
 				if errors.Is(err, ErrBridgeNotConnected) {
@@ -112,7 +121,19 @@ func (w *ToolWorker) execute(parent context.Context, invocation ToolInvocation) 
 	}
 	ctx, cancel := context.WithDeadline(parent, deadline)
 	defer cancel()
-	claims, path, err := w.authorize(ctx, invocation)
+	var claims *admin.Claims
+	var path string
+	var err error
+	query := invocation.Arguments.Query
+	if strings.HasPrefix(invocation.ScenarioKey, "assistant:") {
+		if w.assistants == nil || !strings.EqualFold(invocation.Method, http.MethodGet) {
+			err = fmt.Errorf("assistant authorization is unavailable")
+		} else {
+			claims, path, query, err = w.assistants.AuthorizeTool(ctx, invocation.RunID, invocation.ScenarioKey, invocation.PackageDigest, invocation.HandbookDigest, invocation.OperationID, invocation.Path, query)
+		}
+	} else {
+		claims, path, err = w.authorize(ctx, invocation)
+	}
 	if err != nil {
 		result.Error = &ToolError{Code: "OPERATION_NOT_ALLOWED", Message: err.Error(), Retryable: false}
 	} else {
@@ -120,7 +141,7 @@ func (w *ToolWorker) execute(parent context.Context, invocation ToolInvocation) 
 			RunID: invocation.RunID, ToolCallID: invocation.InvocationID, Tool: "rest.request",
 			Input: agentruntime.ToolRequestBody{
 				OperationID: invocation.OperationID, Method: http.MethodGet, Path: path,
-				Query: invocation.Arguments.Query, Body: nil, Reason: "background agent read-only investigation",
+				Query: query, Body: nil, Reason: "background agent read-only investigation",
 			},
 		}, w.policy)
 		if local.Status == "ok" {

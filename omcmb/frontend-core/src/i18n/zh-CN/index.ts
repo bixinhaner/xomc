@@ -1,4 +1,6 @@
+import { assistantZhCN } from '../assistantMessages';
 const messages: Record<string, string> = {
+  ...assistantZhCN,
   // -------------------------------------------------------------------------
   // Common actions
   // -------------------------------------------------------------------------

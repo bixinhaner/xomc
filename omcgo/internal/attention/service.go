@@ -247,6 +247,9 @@ func (s *Service) loadSection(ctx context.Context, scope Scope, sources []Ranked
 }
 
 func (s *Service) allowed(ctx context.Context, scope Scope, permission Permission) (bool, error) {
+	if permission.OwnerOnly {
+		return scope.UserID != uuid.Nil, nil
+	}
 	if scope.IsSuperAdmin {
 		return true, nil
 	}
