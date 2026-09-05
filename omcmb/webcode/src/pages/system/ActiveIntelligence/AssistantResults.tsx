@@ -12,7 +12,7 @@ export default function AssistantResults({ runs, capabilities, busy, onCancel, s
   const t = useT(); const { locale } = useIntl(); const { message } = App.useApp();
   const [selected, setSelected] = useState<string>();
   const run = runs.find((item) => item.id === (selected ?? selectedRunId)) ?? runs[0];
-  if (!run) return <div className={styles.emptyResults}><Empty image={<HistoryOutlined className={styles.emptyIcon} />} description={<><h3>{t('assistant.noResults')}</h3><p>{t('assistant.noResultsBody')}</p></>} /></div>;
+  if (!run) return <div className={styles.emptyResults}><Empty image={<HistoryOutlined aria-hidden="true" className={styles.emptyIcon} />} description={<><h3>{t('assistant.noResults')}</h3><p>{t('assistant.noResultsBody')}</p></>} /></div>;
   const title = (id: string) => capabilities.find((item) => item.operationId === id)?.title || id;
   const copy = async () => {
     if (!run.output) return;
@@ -28,9 +28,9 @@ export default function AssistantResults({ runs, capabilities, busy, onCancel, s
       </button>)}
     </div>
     <section className={styles.resultPanel} aria-label={t('assistant.results')}>
-      <header className={styles.resultHeader}><div><Tag>{t('assistant.runRevision', { revision: run.revision })}</Tag><span className={styles.muted}>{t('assistant.createdAt', { time: dateText(run.createdAt, locale) })}</span></div>{run.output && <Button icon={<CopyOutlined />} onClick={() => void copy()}>{t('assistant.copy')}</Button>}</header>
+      <header className={styles.resultHeader}><div><Tag>{t('assistant.runRevision', { revision: run.revision })}</Tag><span className={styles.muted}>{t('assistant.createdAt', { time: dateText(run.createdAt, locale) })}</span></div>{run.output && <Button icon={<CopyOutlined aria-hidden="true" />} onClick={() => void copy()}>{t('assistant.copy')}</Button>}</header>
       {isRunning(run) && <div className={styles.runningPanel} role="status" aria-live="polite">
-        <Spin indicator={<LoadingOutlined spin />} size="large" />
+        <Spin indicator={<LoadingOutlined aria-hidden="true" spin />} size="large" />
         <h3>{run.status === 'CANCELLING' ? t('assistant.run.CANCELLING') : t('assistant.running')}</h3>
         <p>{run.status === 'QUEUED' ? t('assistant.queued') : run.status === 'CANCELLING' ? t('assistant.cancelPending') : t('assistant.runningHint')}</p>
         <Button disabled={busy || run.status === 'CANCELLING'} onClick={() => void onCancel(run.id)}>{t('assistant.cancelRun')}</Button>
@@ -40,10 +40,10 @@ export default function AssistantResults({ runs, capabilities, busy, onCancel, s
       {run.status === 'CANCELLED' && <Alert type="info" showIcon title={t('assistant.run.CANCELLED')} />}
       {run.output && <>
         <div className={styles.resultHero}>
-          <Tag icon={run.output.outcome === 'no_change' ? <CheckCircleOutlined /> : <ExperimentOutlined />} color={run.output.outcome === 'no_change' ? 'success' : run.output.outcome === 'insufficient_data' ? 'warning' : 'processing'}>{t(`assistant.outcome.${run.output.outcome}`)}</Tag>
+          <Tag icon={run.output.outcome === 'no_change' ? <CheckCircleOutlined aria-hidden="true" /> : <ExperimentOutlined aria-hidden="true" />} color={run.output.outcome === 'no_change' ? 'success' : run.output.outcome === 'insufficient_data' ? 'warning' : 'processing'}>{t(`assistant.outcome.${run.output.outcome}`)}</Tag>
           <h2>{run.output.title}</h2><p>{run.output.summary}</p>
         </div>
-        {run.output.facts.length > 0 && <section className={styles.resultSection}><h3>{t('assistant.facts')}</h3>{run.output.facts.map((fact, i) => <div key={i} className={styles.fact}><CheckCircleOutlined /><div><p>{fact.text}</p><small>{t('assistant.evidence', { sources: fact.evidenceRefs.map((ref) => title(ref.replace(/^tool:/, ''))).join(' / ') })}</small></div></div>)}</section>}
+        {run.output.facts.length > 0 && <section className={styles.resultSection}><h3>{t('assistant.facts')}</h3>{run.output.facts.map((fact, i) => <div key={i} className={styles.fact}><CheckCircleOutlined aria-hidden="true" /><div><p>{fact.text}</p><small>{t('assistant.evidence', { sources: fact.evidenceRefs.map((ref) => title(ref.replace(/^tool:/, ''))).join(' / ') })}</small></div></div>)}</section>}
         {run.output.hypotheses.length > 0 && <section className={`${styles.resultSection} ${styles.hypotheses}`}><h3>{t('assistant.hypotheses')}</h3>{run.output.hypotheses.map((text, i) => <p key={i}>{text}</p>)}</section>}
         {run.output.nextSteps.length > 0 && <section className={styles.resultSection}><h3>{t('assistant.nextSteps')}</h3>{run.output.nextSteps.map((text, i) => <p key={i}>{i + 1}. {text}</p>)}</section>}
       </>}

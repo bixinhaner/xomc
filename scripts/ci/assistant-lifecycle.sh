@@ -15,6 +15,8 @@ case "${1:-}" in
     ;;
   browser)
     cd omcmb/webcode
+    # Headless Linux needs a sans-serif CJK font for representative screenshots.
+    if [ "${CI:-}" = "true" ]; then sudo apt-get update -qq && sudo apt-get install -y fonts-noto-cjk; fi
     npx playwright install --with-deps chromium
     npx playwright test --config playwright.assistants.config.ts
     ;;
