@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/agentassistant"
 	"github.com/omcgo/omcgo/internal/agentbridge"
 	"github.com/omcgo/omcgo/internal/agentruntime"
 	"github.com/omcgo/omcgo/internal/alarm"
@@ -426,6 +427,8 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	findingRepo := agentbridge.NewFindingRepository(c.PgPool)
 	bridgeClient := agentbridge.NewClient(ad.agentConfigHandler.Service(), http.DefaultClient)
 	executor := agentRuntimeHandler.ToolExecutor()
+	assistantService := agentassistant.NewService(agentassistant.NewRepository(c.PgPool), bridgeClient, executor, ad.roleRepo, c.PermService, device.NewPgDeviceGroupReader(c.PgPool), c.Logger)
+	agentassistant.NewHandler(assistantService).RegisterRoutes(v1)
 	subscriber := agentbridge.NewEventSubscriber(c.EventBus, c.PgPool, outboxRepo, ad.agentConfigHandler.Service(), executor, c.Logger)
 	if err := subscriber.Subscribe(); err != nil {
 		return fmt.Errorf("initialize proactive agent event subscriber: %w", err)
@@ -443,6 +446,10 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	findingWorker := agentbridge.NewFindingWorker(bridgeClient, findingRepo, workerID, c.Logger)
 	heartbeatWorker := agentbridge.NewHeartbeatWorker(bridgeClient, executor.HandbookDigest, workerID, c.Logger)
 	dailySummaryScheduler := agentbridge.NewDailySummaryScheduler(outboxRepo, ad.agentConfigHandler.Service(), executor, c.Logger)
+	forwarder.SetAssistantEventSink(assistantService)
+	toolWorker.SetAssistantAuthorizer(assistantService)
+	assistantService.Start()
+	c.GS.Register("assistant-lifecycle", 1, func(context.Context) error { return assistantService.Close() })
 	forwarder.Start()
 	toolWorker.Start()
 	findingWorker.Start()

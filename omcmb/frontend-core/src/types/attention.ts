@@ -3,11 +3,11 @@ export type AttentionSectionStatus = 'ok' | 'partial' | 'error';
 export type AttentionKind =
   | 'active_alarm'
   | 'device_access_review'
-  | 'agent_finding';
+  | 'agent_finding' | 'assistant_result';
 export type AttentionAction =
   | 'view_alarm'
   | 'review_device_candidate'
-  | 'view_agent_finding';
+  | 'view_agent_finding' | 'view_assistant_result';
 
 export interface AttentionTarget {
   type: string;

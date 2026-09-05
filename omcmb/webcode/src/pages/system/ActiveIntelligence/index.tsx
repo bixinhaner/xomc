@@ -1,154 +1,184 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { App, Button, Drawer, Empty, Input, Modal, Spin, Tag, Typography } from 'antd';
-import {
-  BellOutlined, CalendarOutlined, CheckCircleOutlined, DeploymentUnitOutlined,
-  EyeOutlined, QuestionCircleOutlined, RobotOutlined, SafetyCertificateOutlined,
-  SearchOutlined, SendOutlined, SettingOutlined, UserOutlined, WifiOutlined,
-} from '@ant-design/icons';
-import { proactiveAgentApi } from '@core/services/api/proactiveAgentApi';
-import type { ProactiveOverview, ProactiveScenario } from '@core/types/proactiveAgent';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, App, Badge, Button, Collapse, Input, Skeleton, Tabs, Tag, Tooltip } from 'antd';
+import type { TextAreaRef } from 'antd/es/input/TextArea';
+import { ArrowLeftOutlined, ArrowRightOutlined, BellOutlined, CalendarOutlined, CheckCircleOutlined, EditOutlined, ExperimentOutlined, LockOutlined, PauseCircleOutlined, PlayCircleOutlined, PlusOutlined, RobotOutlined, SafetyCertificateOutlined, SendOutlined, SettingOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useIntl } from 'react-intl';
+import { useSearchParams } from 'react-router-dom';
+import { assistantApi } from '@core/services/api/assistantApi';
+import { useUserStore } from '@core/store/userStore';
+import type { Assistant, AssistantDefinition, AssistantRun } from '@core/types/assistant';
 import { useT } from '@/hooks/useT';
+import AssistantEditor from './AssistantEditor';
+import AssistantResults from './AssistantResults';
+import LegacyScenarios from './LegacyScenarios';
+import { canPublish, dateText, errorText, isRunning, trialFor, triggerText } from './helpers';
 import styles from './index.module.css';
 
-type BuilderStep = 'severity' | 'delivery' | 'ready';
-
-const fallbackScenario = (key: string, eventType: string, tools: string[], surfaces: string[], status: 'ACTIVE' | 'DISABLED' = 'ACTIVE'): ProactiveScenario => ({
-  key, name: key, description: key, status, rolloutMode: 'SHADOW', rolloutPercentage: status === 'ACTIVE' ? 100 : 0,
-  version: 1, eventTypes: [eventType], allowedOperations: tools, deliverySurfaces: surfaces,
-  dedupeWindowSeconds: key === 'daily-operations-summary' ? 82800 : 1800,
-  rateLimitPerHour: key === 'daily-operations-summary' ? 24 : 200, timeoutSeconds: 120,
-  stats: { matched: 0, successRate: 0, avgDurationSeconds: 0 },
-});
-
-const disconnectedOverview: ProactiveOverview = {
-  scenarios: [
-    fallbackScenario('task-failure-analysis', 'omc.task.failed.v1', ['get.devices.by_id'], ['attention']),
-    fallbackScenario('access-review-assistant', 'omc.device.access-review-required.v1', ['get.device_access.candidates'], ['attention']),
-    fallbackScenario('severe-alarm-explanation', 'omc.alarm.severe-raised.v1', ['get.alarms.active'], ['attention']),
-    fallbackScenario('daily-operations-summary', 'omc.daily-operations-summary-requested.v1', ['get.devices'], ['dashboard'], 'DISABLED'),
-  ],
-  packages: [], runs: [], connectorHealth: { status: 'UNKNOWN', queueDepth: 0 }, stats: {},
-};
+const examples = [{ key: 'daily', icon: <CalendarOutlined /> }, { key: 'alarm', icon: <BellOutlined /> }, { key: 'manual', icon: <ExperimentOutlined /> }];
+const stateColor = { draft: 'default', active: 'success', paused: 'default', blocked: 'warning' } as const;
 
 export default function ActiveIntelligence() {
-  const t = useT();
-  const { message } = App.useApp();
-  const [data, setData] = useState<ProactiveOverview>();
-  const [loading, setLoading] = useState(true);
-  const [connectionError, setConnectionError] = useState('');
-  const [builderOpen, setBuilderOpen] = useState(true);
-  const [professionalOpen, setProfessionalOpen] = useState(false);
-  const [testOpen, setTestOpen] = useState(false);
-  const [step, setStep] = useState<BuilderStep>('severity');
-  const [request, setRequest] = useState(() => t('activeIntelligence.beginner.defaultRequest'));
-  const [severity, setSeverity] = useState<'both' | 'critical' | 'unsure'>();
-  const [privateOnly, setPrivateOnly] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true); setConnectionError('');
-    try { setData(await proactiveAgentApi.overview()); }
-    catch (error) {
-      setConnectionError(error instanceof Error ? error.message : t('activeIntelligence.loadFailed'));
-      setData((current) => current ?? disconnectedOverview);
-    } finally { setLoading(false); }
-  }, [t]);
-  useEffect(() => { void load(); }, [load]);
-
-  const selectedScenario = useMemo(() => data?.scenarios.find((item) => item.key === 'severe-alarm-explanation'), [data]);
-  const severityLabel = severity === 'critical' ? t('activeIntelligence.beginner.criticalOnly') : t('activeIntelligence.beginner.severeAndImportant');
-
-  const resetBuilder = () => {
-    setRequest(t('activeIntelligence.beginner.defaultRequest')); setSeverity(undefined); setPrivateOnly(true); setStep('severity'); setBuilderOpen(true);
+  const t = useT(); const { locale } = useIntl(); const { message, modal } = App.useApp(); const cache = useQueryClient();
+  const owner = useUserStore((state) => state.currentUser?.id ?? 'current');
+  const [params, setParams] = useSearchParams(); const selectedId = params.get('assistant') ?? '';
+  const [tab, setTab] = useState('configure'); const [legacy, setLegacy] = useState(false);
+  const [text, setText] = useState(''); const [pendingText, setPendingText] = useState(''); const [busy, setBusy] = useState('');
+  const [error, setError] = useState<unknown>(); const [editOpen, setEditOpen] = useState(false);
+  const inputRef = useRef<TextAreaRef>(null); const messagesEnd = useRef<HTMLDivElement>(null);
+  const listKey = ['assistants', owner]; const detailKey = ['assistant', owner, selectedId]; const runsKey = ['assistant-runs', owner, selectedId];
+  const list = useQuery({ queryKey: listKey, queryFn: ({ signal }) => assistantApi.list(signal), refetchInterval: 15000 });
+  const catalog = useQuery({ queryKey: ['assistant-catalog', owner], queryFn: ({ signal }) => assistantApi.catalog(signal), retry: false, staleTime: 15000 });
+  const detail = useQuery({ queryKey: detailKey, queryFn: ({ signal }) => assistantApi.get(selectedId, signal), enabled: !!selectedId, refetchInterval: busy ? false : 15000 });
+  const history = useQuery({ queryKey: runsKey, queryFn: ({ signal }) => assistantApi.runs(selectedId, signal), enabled: !!selectedId, refetchInterval: (query) => query.state.data?.some(isRunning) ? 1500 : 15000 });
+  const assistant = detail.data; const runs = history.data ?? []; const capabilities = catalog.data?.capabilities ?? [];
+  const connected = catalog.data?.connected === true; const running = runs.some(isRunning);
+  const trial = assistant ? trialFor(assistant, runs) : undefined;
+  const publishReady = !!assistant && canPublish(assistant, runs) && connected;
+  const plan = assistant?.definition;
+  useEffect(() => { if (params.get('run')) setTab('results'); }, [params]);
+  useEffect(() => { if (pendingText || assistant?.messages.length) messagesEnd.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); }, [pendingText, assistant?.messages.length]);
+  useEffect(() => {
+    if (!selectedId) return;
+    const id = params.get('run');
+    if (id && runs.some((run) => run.id === id && !run.readAt)) void assistantApi.read(id).then(() => cache.invalidateQueries({ queryKey: runsKey })).catch(() => undefined);
+  // Mark only the explicitly opened notification, not every result in the list.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, params.get('run'), runs.find((run) => run.id === params.get('run'))?.readAt]);
+  const updateAssistant = async (value: Assistant) => { cache.setQueryData(['assistant', owner, value.id], value); await cache.invalidateQueries({ queryKey: listKey }); };
+  const open = (id: string, nextTab = 'configure') => {
+    const next = new URLSearchParams(params); if (id) next.set('assistant', id); else next.delete('assistant'); next.delete('run');
+    setParams(next); setTab(nextTab); setError(undefined); setText(''); setLegacy(false);
   };
-  const chooseSeverity = (value: 'both' | 'critical' | 'unsure') => { setSeverity(value); setStep('delivery'); };
-  const finishDelivery = (value: boolean) => { setPrivateOnly(value); setStep('ready'); };
-  const startTrial = async () => {
-    if (!selectedScenario || connectionError) return;
-    setSaving(true);
-    try {
-      await proactiveAgentApi.updateScenario(selectedScenario.key, { status: 'ACTIVE', rolloutMode: 'SHADOW', rolloutPercentage: 100 });
-      message.success(t('activeIntelligence.beginner.started')); setTestOpen(false); setBuilderOpen(false); await load();
-    } catch (error) { message.error(error instanceof Error ? error.message : t('activeIntelligence.saveFailed')); }
-    finally { setSaving(false); }
+  const act = async (name: string, fn: () => Promise<void>) => {
+    if (busy) return; setBusy(name); setError(undefined);
+    try { await fn(); }
+    catch (cause) { setError(cause); if (String(cause).includes('REVISION_CONFLICT')) await cache.invalidateQueries({ queryKey: detailKey }); }
+    finally { setBusy(''); }
   };
-
-  if (loading && !data) return <div className={styles.center}><Spin /></div>;
-
+  const create = (example?: string) => void act('create', async () => {
+    const value = await assistantApi.create(crypto.randomUUID(), locale, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+    await updateAssistant(value); open(value.id); if (example) setText(example);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  });
+  const send = () => {
+    if (!assistant || !text.trim() || busy || !connected) return;
+    const input = text.trim(); setPendingText(input);
+    void act('plan', async () => {
+      const value = await assistantApi.plan(assistant.id, assistant.revision, input);
+      await updateAssistant(value); setText('');
+    }).finally(() => { setPendingText(''); inputRef.current?.focus(); });
+  };
+  const start = (kind: 'trial' | 'manual') => void act('run', async () => {
+    if (!assistant) return;
+    const run = await assistantApi.start(assistant.id, assistant.revision, kind, crypto.randomUUID());
+    cache.setQueryData<AssistantRun[]>(runsKey, (old) => [run, ...(old ?? []).filter((item) => item.id !== run.id)]);
+    setTab('results'); await cache.invalidateQueries({ queryKey: listKey });
+  });
+  const publish = () => {
+    if (!assistant || !publishReady) return;
+    modal.confirm({ title: t('assistant.publishTitle'), content: t(plan?.trigger.kind === 'manual' ? 'assistant.publishManualBody' : 'assistant.publishBody'), okText: t('assistant.publish'), cancelText: t('common.cancel'), onOk: async () => {
+      await act('publish', async () => { await updateAssistant(await assistantApi.publish(assistant.id, assistant.revision)); message.success(t('assistant.published')); });
+    } });
+  };
+  const state = (next: 'active' | 'paused') => {
+    if (!assistant) return;
+    const change = () => act('state', async () => { await updateAssistant(await assistantApi.state(assistant.id, next)); });
+    if (next === 'paused') modal.confirm({ title: t('assistant.pauseTitle'), content: t('assistant.pauseBody'), okText: t('assistant.pause'), cancelText: t('common.cancel'), onOk: change });
+    else void change();
+  };
+  const save = async (definition: AssistantDefinition) => {
+    if (!assistant) return;
+    await act('save', async () => { await updateAssistant(await assistantApi.save(assistant.id, assistant.revision, definition)); setEditOpen(false); message.success(t('assistant.saved')); });
+  };
+  const cancel = (id: string) => act('cancel', async () => { await assistantApi.cancel(id); await cache.invalidateQueries({ queryKey: runsKey }); });
+  const loading = selectedId ? detail.isPending : list.isPending;
+  const loadError = selectedId ? detail.error : list.error;
   return <div className={styles.page}>
-    <div className={styles.breadcrumb}>
-      <span>{t('nav.system')}</span><b>/</b><span>{t('activeIntelligence.title')}</span>
-      {builderOpen && <><b>/</b><strong>{t('activeIntelligence.beginner.create')}</strong></>}
-    </div>
-
-    {builderOpen ? <section className={styles.builder}>
-      <header className={styles.builderHeader}>
-        <div><Typography.Title level={2}>{t('activeIntelligence.beginner.create')}</Typography.Title><Typography.Text>{t('activeIntelligence.beginner.createSubtitle')}</Typography.Text></div>
-        <Button type="text" onClick={() => setBuilderOpen(false)}>{t('activeIntelligence.beginner.later')}</Button>
-      </header>
-      <div className={styles.builderGrid}>
-        <main className={styles.conversation}>
-          <div className={styles.messages}>
-            <div className={`${styles.messageRow} ${styles.userRow}`}><div className={`${styles.bubble} ${styles.userBubble}`}>{request}</div><span className={styles.userAvatar}><UserOutlined /></span></div>
-            <div className={styles.messageRow}>
-              <span className={styles.botAvatar}><RobotOutlined /></span>
-              <div className={`${styles.bubble} ${styles.botBubble}`}>
-                <p>{t('activeIntelligence.beginner.understood')}</p>
-                {step === 'severity' && <><p>{t('activeIntelligence.beginner.askSeverity')}</p><strong>{t('activeIntelligence.beginner.importantQuestion')}</strong></>}
-                {step === 'delivery' && <><p>{t('activeIntelligence.beginner.severityAnswered', { severity: severityLabel })}</p><strong>{t('activeIntelligence.beginner.askDelivery')}</strong></>}
-                {step === 'ready' && <><p>{t('activeIntelligence.beginner.readyIntro')}</p><strong>{t('activeIntelligence.beginner.readyQuestion')}</strong></>}
-              </div>
-            </div>
-            {step === 'severity' && <div className={styles.quickChoices}>
-              <button type="button" onClick={() => chooseSeverity('both')}><CheckCircleOutlined />{t('activeIntelligence.beginner.together')}</button>
-              <button type="button" onClick={() => chooseSeverity('critical')}><EyeOutlined />{t('activeIntelligence.beginner.criticalOnly')}</button>
-              <button type="button" onClick={() => chooseSeverity('unsure')}><QuestionCircleOutlined />{t('activeIntelligence.beginner.unsure')}</button>
-            </div>}
-            {step === 'delivery' && <div className={styles.quickChoices}>
-              <button type="button" onClick={() => finishDelivery(true)}><UserOutlined />{t('activeIntelligence.beginner.onlyMe')}</button>
-              <button type="button" onClick={() => finishDelivery(false)}><BellOutlined />{t('activeIntelligence.beginner.operationsTeam')}</button>
-            </div>}
-            {step === 'ready' && <div className={styles.readyActions}>
-              <Button type="primary" size="large" onClick={() => setTestOpen(true)}>{t('activeIntelligence.beginner.tryFirst')}</Button>
-              <Button size="large" onClick={() => setStep('severity')}>{t('activeIntelligence.beginner.changeAnswer')}</Button>
-            </div>}
-          </div>
-          <div className={styles.composerArea}>
-            <div className={styles.examples}>
-              <button type="button" onClick={() => { setRequest(t('activeIntelligence.beginner.exampleOffline')); setStep('severity'); }}><WifiOutlined />{t('activeIntelligence.beginner.exampleOffline')}</button>
-              <button type="button" onClick={() => { setRequest(t('activeIntelligence.beginner.exampleDaily')); setStep('severity'); }}><CalendarOutlined />{t('activeIntelligence.beginner.exampleDaily')}</button>
-              <button type="button" onClick={() => { setRequest(t('activeIntelligence.beginner.exampleReview')); setStep('severity'); }}><BellOutlined />{t('activeIntelligence.beginner.exampleReview')}</button>
-            </div>
-            <div className={styles.composer}><Input.TextArea autoSize={{ minRows: 1, maxRows: 3 }} value={request} placeholder={t('activeIntelligence.beginner.inputPlaceholder')} onChange={(event) => setRequest(event.target.value)} /><Button type="primary" icon={<SendOutlined />} aria-label={t('activeIntelligence.beginner.send')} onClick={() => setStep('severity')} /></div>
-          </div>
-        </main>
-
-        <aside className={styles.summary}>
-          <div className={styles.summaryHeader}><Typography.Title level={3}>{t('activeIntelligence.beginner.yourHelper')}</Typography.Title><Typography.Text type="secondary">{t('activeIntelligence.beginner.summaryHint')}</Typography.Text></div>
-          <div className={styles.summaryItem}><span className={styles.summaryIcon}><CalendarOutlined /></span><div><small>{t('activeIntelligence.beginner.when')}</small><strong>{severity ? severityLabel : t('activeIntelligence.beginner.severeAndImportant')}</strong><p>{t('activeIntelligence.beginner.whenHint')}</p></div></div>
-          <div className={styles.summaryItem}><span className={styles.summaryIcon}><SearchOutlined /></span><div><small>{t('activeIntelligence.beginner.what')}</small><strong>{t('activeIntelligence.beginner.whatValue')}</strong><p>{t('activeIntelligence.beginner.whatHint')}</p></div></div>
-          <div className={styles.summaryItem}><span className={`${styles.summaryIcon} ${styles.summaryIconGreen}`}><UserOutlined /></span><div><small>{t('activeIntelligence.beginner.who')}</small><strong>{privateOnly ? t('activeIntelligence.beginner.whoMe') : t('activeIntelligence.beginner.whoTeam')}</strong><p>{t('activeIntelligence.beginner.whoHint')}</p></div></div>
-          <div className={styles.safety}><SafetyCertificateOutlined /><div><strong>{t('activeIntelligence.beginner.readOnly')}</strong><span>{t('activeIntelligence.beginner.readOnlyHint')}</span></div></div>
-          {connectionError && <div className={styles.connectionNotice}>{t('activeIntelligence.beginner.connectionWaiting')}</div>}
-          <div className={styles.summaryFooter}><Button type="link" onClick={() => setBuilderOpen(false)}>{t('activeIntelligence.beginner.later')}</Button><Button type="primary" disabled={step !== 'ready' || Boolean(connectionError)} onClick={() => setTestOpen(true)}>{step === 'ready' ? t('activeIntelligence.beginner.tryFirst') : t('activeIntelligence.beginner.answerToContinue')}</Button></div>
-          <button className={styles.professionalLink} type="button" onClick={() => setProfessionalOpen(true)}><SettingOutlined />{t('activeIntelligence.beginner.professional')}</button>
-        </aside>
+    <header className={styles.pageHeader}>
+      <div>
+        {selectedId || legacy ? <Button type="text" icon={<ArrowLeftOutlined />} className={styles.back} disabled={!!busy} onClick={() => open('')}>{t('assistant.back')}</Button> : <div className={styles.eyebrow}><RobotOutlined /> {t('assistant.eyebrow')}</div>}
+        <h1>{legacy ? t('assistant.systemScenarios') : selectedId ? plan?.name || t('assistant.untitled') : t('assistant.title')}</h1>
+        <p className={styles.subtitle}>{selectedId ? t('assistant.safety') : t('assistant.subtitle')}</p>
       </div>
-    </section> : <section className={styles.helperList}>
-      <header className={styles.listHeader}><div><Typography.Title level={2}>{t('activeIntelligence.beginner.myHelpers')}</Typography.Title><Typography.Text type="secondary">{t('activeIntelligence.beginner.myHelpersHint')}</Typography.Text></div><Button type="primary" size="large" icon={<RobotOutlined />} onClick={resetBuilder}>{t('activeIntelligence.beginner.newNeed')}</Button></header>
-      <div className={styles.listSurface}>{data?.scenarios.map((item) => <button key={item.key} type="button" className={styles.helperRow} onClick={resetBuilder}>
-        <span className={styles.helperIcon}><DeploymentUnitOutlined /></span><span><strong>{t(`activeIntelligence.scenario.${item.key}.beginnerName`)}</strong><small>{t(`activeIntelligence.scenario.${item.key}.beginnerDescription`)}</small></span>
-        <Tag color={item.status === 'DISABLED' ? 'default' : item.rolloutMode === 'SHADOW' ? 'gold' : 'green'}>{item.status === 'DISABLED' ? t('activeIntelligence.beginner.paused') : item.rolloutMode === 'SHADOW' ? t('activeIntelligence.beginner.observing') : t('activeIntelligence.beginner.helping')}</Tag>
-      </button>)}</div>
-    </section>}
-
-    <Modal open={testOpen} title={t('activeIntelligence.beginner.previewTitle')} okText={t('activeIntelligence.beginner.startTrial')} cancelText={t('activeIntelligence.beginner.keepTalking')} confirmLoading={saving} okButtonProps={{ disabled: Boolean(connectionError) }} onOk={() => void startTrial()} onCancel={() => setTestOpen(false)}>
-      <div className={styles.previewNotice}>{t('activeIntelligence.beginner.previewNotice')}</div>
-      <div className={styles.previewFinding}><Tag color="orange">{t('activeIntelligence.beginner.important')}</Tag><strong>{t('activeIntelligence.beginner.previewFindingTitle')}</strong><p>{t('activeIntelligence.beginner.previewFindingBody')}</p><span>{t('activeIntelligence.beginner.previewSuggestion')}</span></div>
-      <div className={styles.previewSafety}><SafetyCertificateOutlined />{t('activeIntelligence.beginner.previewSafety')}</div>
-    </Modal>
-    <Drawer open={professionalOpen} size={560} title={t('activeIntelligence.beginner.professional')} onClose={() => setProfessionalOpen(false)}>
-      {selectedScenario ? <div className={styles.professionalContent}><Typography.Paragraph type="secondary">{t('activeIntelligence.beginner.professionalHint')}</Typography.Paragraph><dl><dt>{t('activeIntelligence.events')}</dt><dd>{selectedScenario.eventTypes.join(', ')}</dd><dt>{t('activeIntelligence.allowedTools')}</dt><dd>{selectedScenario.allowedOperations.join(', ')}</dd><dt>{t('activeIntelligence.dedupe')}</dt><dd>{selectedScenario.dedupeWindowSeconds}s</dd><dt>{t('activeIntelligence.rateLimit')}</dt><dd>{selectedScenario.rateLimitPerHour}/h</dd></dl></div> : <Empty />}
-    </Drawer>
+      <div className={styles.headerActions}>
+        {!selectedId && !legacy && <><Button type="text" icon={<SettingOutlined />} onClick={() => setLegacy(true)}>{t('assistant.systemScenarios')}</Button><Button type="primary" size="large" icon={<PlusOutlined />} loading={busy === 'create'} disabled={!!busy} onClick={() => create()}>{t('assistant.new')}</Button></>}
+        {assistant && <>
+          <Tag color={stateColor[assistant.state]}>{t(`assistant.state.${assistant.state}`)}</Tag>
+          {assistant.publishedRevision && assistant.state === 'active' && <Button icon={<PauseCircleOutlined />} disabled={!!busy} onClick={() => state('paused')}>{t('assistant.pause')}</Button>}
+          {assistant.publishedRevision && assistant.state !== 'active' && <Button icon={<PlayCircleOutlined />} disabled={!!busy || !connected} onClick={() => state('active')}>{t('assistant.resume')}</Button>}
+          {assistant.state === 'active' && <Button icon={<PlayCircleOutlined />} disabled={!!busy || running || !connected} onClick={() => start('manual')}>{t('assistant.runNow')}</Button>}
+          {publishReady && <Button type="primary" icon={<CheckCircleOutlined />} disabled={!!busy} onClick={publish}>{t(assistant.publishedRevision ? 'assistant.publishChanges' : 'assistant.publish')}</Button>}
+        </>}
+      </div>
+    </header>
+    {error !== undefined && <Alert type="error" showIcon closable onClose={() => setError(undefined)} title={errorText(error, t)} className={styles.notice} />}
+    {!legacy && !catalog.isPending && !catalog.isError && !connected && <Alert type="warning" showIcon title={t('assistant.notConnected')} description={t('assistant.connectionHint')} action={<Button size="small" onClick={() => void catalog.refetch()}>{t('assistant.retry')}</Button>} className={styles.notice} />}
+    {!legacy && catalog.isError && <Alert type="error" showIcon title={errorText(catalog.error, t)} action={<Button size="small" onClick={() => void catalog.refetch()}>{t('assistant.retry')}</Button>} className={styles.notice} />}
+    {!legacy && connected && !capabilities.length && <Alert type="warning" showIcon title={t('assistant.noCapabilities')} className={styles.notice} />}
+    {legacy ? <LegacyScenarios /> : loading ? <div className={styles.loading}><Skeleton active paragraph={{ rows: 8 }} /></div> : loadError ? <Alert type="error" showIcon title={t('assistant.loadError')} action={<Button onClick={() => void (selectedId ? detail.refetch() : list.refetch())}>{t('assistant.retry')}</Button>} /> : !selectedId ? <>
+      <div className={styles.stats}>
+        {(['all', 'active', 'draft'] as const).map((key) => <div className={styles.stat} key={key}><span>{t(`assistant.stat.${key}`)}</span><strong>{key === 'all' ? list.data?.length ?? 0 : (list.data ?? []).filter((item) => key === 'active' ? item.state === 'active' : !item.publishedRevision).length}</strong></div>)}
+        <div className={styles.privateNote}><SafetyCertificateOutlined /><div><strong>{t('assistant.readOnly')}</strong><span>{t('assistant.private')}</span></div></div>
+      </div>
+      {!list.data?.length ? <section className={styles.welcome}>
+        <div className={styles.welcomeIcon}><RobotOutlined /></div><h2>{t('assistant.emptyTitle')}</h2><p>{t('assistant.emptyBody')}</p>
+        <div className={styles.examples}>{examples.map((example) => <button type="button" key={example.key} disabled={!!busy} onClick={() => create(t(`assistant.example.${example.key}`))}>{example.icon}<strong>{t(`assistant.exampleLabel.${example.key}`)}</strong><span>{t(`assistant.example.${example.key}`)}</span><ArrowRightOutlined /></button>)}</div>
+      </section> : <div className={styles.assistantGrid}>
+        {list.data.map((item) => <button type="button" key={item.id} className={styles.assistantCard} disabled={!!busy} onClick={() => open(item.id, item.publishedRevision ? 'results' : 'configure')}>
+          <div className={styles.cardTop}><span className={styles.cardIcon}><RobotOutlined /></span><Tag color={stateColor[item.state]}>{t(`assistant.state.${item.state}`)}</Tag></div>
+          <h2>{item.definition?.name || t('assistant.untitled')}</h2><p className={styles.cardGoal}>{item.definition?.goal || t('assistant.startConversationHint')}</p>
+          <div className={styles.cardMeta}><CalendarOutlined /><span>{triggerText(item.publishedDefinition ?? item.definition, t)}</span></div>
+          <div className={styles.cardFooter}><span><LockOutlined /> {t('assistant.private')}</span><ArrowRightOutlined /></div>
+          <small>{t('assistant.lastRun')} · {item.lastRunAt ? dateText(item.lastRunAt, locale) : t('assistant.notRun')}</small>
+        </button>)}
+        <button type="button" className={styles.newCard} disabled={!!busy} onClick={() => create()}><PlusOutlined /><strong>{t('assistant.new')}</strong><span>{t('assistant.startConversationHint')}</span></button>
+      </div>}
+    </> : assistant && <>
+      {assistant.publishedRevision && assistant.publishedRevision !== assistant.revision && <Alert type="info" showIcon title={t('assistant.unpublished', { revision: assistant.publishedRevision })} className={styles.notice} />}
+      {assistant.state === 'blocked' && <Alert type="warning" showIcon title={errorText(assistant.lastError, t)} className={styles.notice} />}
+      <Tabs activeKey={tab} onChange={setTab} items={[
+        { key: 'configure', label: <span><EditOutlined /> {t('assistant.configure')}</span>, children: <div className={styles.workspace}>
+          <section className={styles.conversation} aria-label={t('assistant.conversation')}>
+            <div className={styles.conversationHeader}><RobotOutlined /><strong>{t('assistant.conversation')}</strong><span className={styles.muted}>{t('assistant.version', { revision: assistant.revision })}</span></div>
+            <div className={styles.messages} role="log" aria-label={t('assistant.conversation')} aria-live="polite">
+              {!assistant.messages.length && <div className={styles.conversationWelcome}><span className={styles.welcomeIcon}><ThunderboltOutlined /></span><h2>{t('assistant.startConversation')}</h2><p>{t('assistant.startConversationHint')}</p></div>}
+              {assistant.messages.map((item, i) => <div className={`${styles.message} ${item.role === 'user' ? styles.userMessage : styles.botMessage}`} key={`${assistant.id}-${i}`}><span className={styles.messageLabel}>{item.role === 'assistant' ? <RobotOutlined /> : <LockOutlined />}</span><p>{item.text}</p></div>)}
+              {pendingText && <><div className={`${styles.message} ${styles.userMessage}`}><p>{pendingText}</p></div><div className={styles.planning} role="status"><Badge status="processing" /><span>{t('assistant.planning')}</span></div></>}
+              <div ref={messagesEnd} />
+            </div>
+            {assistant.questions.length > 0 && !pendingText && <div className={styles.questions}>{assistant.questions.map((question, i) => <p key={i}><span>{i + 1}</span>{question}</p>)}</div>}
+            <div className={styles.composer}>
+              {!assistant.messages.length && <div className={styles.exampleChips}>{examples.map((example) => <Button key={example.key} size="small" icon={example.icon} onClick={() => { setText(t(`assistant.example.${example.key}`)); inputRef.current?.focus(); }}>{t(`assistant.exampleLabel.${example.key}`)}</Button>)}</div>}
+              <div className={styles.inputRow}><Input.TextArea ref={inputRef} value={text} onChange={(event) => setText(event.target.value)} aria-label={t('assistant.send')} placeholder={t(assistant.messages.length ? 'assistant.adjustPlaceholder' : 'assistant.placeholder')} autoSize={{ minRows: 2, maxRows: 6 }} maxLength={8000} disabled={busy === 'plan'} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); send(); } }} /><Tooltip title={t('assistant.send')}><Button type="primary" size="large" shape="circle" icon={<SendOutlined />} aria-label={t('assistant.send')} loading={busy === 'plan'} disabled={!text.trim() || !!busy || !connected || !capabilities.length} onClick={send} /></Tooltip></div>
+              <div className={styles.composerFooter}><span>{t('assistant.composerHint')}</span><span><LockOutlined /> {t('assistant.private')}</span></div>
+            </div>
+          </section>
+          <aside className={styles.planCard} aria-label={t('assistant.planCard')}>
+            <div className={styles.planHeader}><span className={styles.eyebrow}>{t(assistant.readiness === 'ready' ? 'assistant.planReady' : assistant.readiness === 'unsupported' ? 'assistant.unsupported' : 'assistant.needsInput')}</span><h2>{t('assistant.planCard')}</h2><p>{t('assistant.planHint')}</p></div>
+            {plan ? <>
+              <dl className={styles.planDetails}>
+                <div><dt><ExperimentOutlined /> {t('assistant.goal')}</dt><dd>{plan.goal}</dd></div>
+                <div><dt><SafetyCertificateOutlined /> {t('assistant.scope')}</dt><dd>{plan.scope.kind === 'visible' ? t('assistant.scope.visible') : plan.scope.label || plan.scope.deviceId}</dd></div>
+                <div><dt><CalendarOutlined /> {t('assistant.trigger')}</dt><dd>{triggerText(plan, t)}</dd>{plan.trigger.kind === 'event' && plan.trigger.conditions.length > 0 && <small>{plan.trigger.conditions.map((item) => `${item.field} ${item.op} ${JSON.stringify(item.value)}`).join(' · ')}</small>}</div>
+                <div><dt><BellOutlined /> {t('assistant.notify')}</dt><dd>{t(`assistant.notify.${plan.notify}`)}</dd><small>{t('assistant.cooldown', { minutes: plan.cooldownMinutes })}</small></div>
+              </dl>
+              <Button type="text" icon={<EditOutlined />} disabled={!!busy} onClick={() => setEditOpen(true)}>{t('assistant.edit')}</Button>
+              <Collapse ghost items={[{ key: 'capabilities', label: t('assistant.technical'), children: <div className={styles.capabilities}>{plan.operations.map((operation) => <p key={operation}>{capabilities.find((item) => item.operationId === operation)?.title || operation}</p>)}</div> }]} />
+            </> : <div className={styles.planEmpty}><ExperimentOutlined /><p>{t('assistant.noPlan')}</p></div>}
+            {assistant.missingCapabilities.length > 0 && <Alert type="warning" showIcon title={t('assistant.missing')} description={assistant.missingCapabilities.join('；')} className={styles.planNotice} />}
+            <div className={styles.planActions}>
+              <p><SafetyCertificateOutlined /> {t('assistant.readOnly')}</p>
+              <Button block type="primary" size="large" icon={<ExperimentOutlined />} loading={busy === 'run'} disabled={!plan || assistant.readiness !== 'ready' || !!busy || !connected || running} onClick={() => start('trial')}>{t('assistant.trial')}</Button>
+              <Button block size="large" disabled={!publishReady || !!busy} onClick={publish}>{t(assistant.publishedRevision ? 'assistant.publishChanges' : 'assistant.publish')}</Button>
+              <small>{t(trial?.output?.outcome === 'insufficient_data' || trial?.status === 'FAILED' ? 'assistant.trialFailedGate' : 'assistant.trialRequired')}</small>
+            </div>
+          </aside>
+        </div> },
+        { key: 'results', label: <span><ExperimentOutlined /> {t('assistant.results')} {running && <Badge status="processing" />}</span>, children: history.isPending ? <Skeleton active /> : history.isError ? <Alert type="error" title={t('assistant.loadError')} action={<Button onClick={() => void history.refetch()}>{t('assistant.retry')}</Button>} /> : <AssistantResults runs={runs} capabilities={capabilities} busy={!!busy} onCancel={cancel} selectedRunId={params.get('run') ?? undefined} /> },
+      ]} />
+      <div className={styles.detailFooter}><span><LockOutlined /> {t('assistant.private')}</span><span>{assistant.nextRunAt ? `${t('assistant.nextRun')} · ${dateText(assistant.nextRunAt, locale)}` : assistant.state === 'active' ? t(assistant.publishedDefinition?.trigger.kind === 'event' ? 'assistant.listening' : 'assistant.manualReady') : t('assistant.notScheduled')}</span></div>
+      {plan && <AssistantEditor definition={plan} open={editOpen} busy={busy === 'save'} onClose={() => setEditOpen(false)} onSave={save} />}
+    </>}
   </div>;
 }

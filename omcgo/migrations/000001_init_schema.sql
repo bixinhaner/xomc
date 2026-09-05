@@ -23665,6 +23665,40 @@ DROP TRIGGER IF EXISTS trigger_agent_findings_updated_at ON public.agent_finding
 CREATE TRIGGER trigger_agent_findings_updated_at
     BEFORE UPDATE ON public.agent_findings
     FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+-- Assistant lifecycle v1: xOMC owns definitions, versions and authorization.
+CREATE TABLE IF NOT EXISTS agent_assistants (
+ id UUID PRIMARY KEY, owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ role_id UUID NOT NULL, revision INTEGER NOT NULL DEFAULT 0,
+ state TEXT NOT NULL DEFAULT 'draft' CHECK (state IN ('draft','active','paused','blocked')),
+ published_revision INTEGER, document JSONB NOT NULL,
+ next_run_at TIMESTAMPTZ, last_run_at TIMESTAMPTZ, last_error TEXT NOT NULL DEFAULT '', last_notice_at TIMESTAMPTZ,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS agent_assistants_owner_idx ON agent_assistants(owner_id,updated_at DESC);
+CREATE INDEX IF NOT EXISTS agent_assistants_schedule_idx ON agent_assistants(next_run_at) WHERE state='active';
+CREATE TABLE IF NOT EXISTS agent_assistant_versions (
+ assistant_id UUID NOT NULL REFERENCES agent_assistants(id) ON DELETE CASCADE,
+ revision INTEGER NOT NULL, definition JSONB NOT NULL, role_id UUID NOT NULL,
+ locale TEXT NOT NULL, timezone TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ PRIMARY KEY(assistant_id,revision)
+);
+CREATE TABLE IF NOT EXISTS agent_assistant_runs (
+ id UUID PRIMARY KEY, assistant_id UUID NOT NULL REFERENCES agent_assistants(id) ON DELETE CASCADE,
+ owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, revision INTEGER NOT NULL,
+ kind TEXT NOT NULL CHECK (kind IN ('trial','manual','schedule','event')),
+ status TEXT NOT NULL DEFAULT 'QUEUED' CHECK (status IN ('QUEUED','RUNNING','CANCELLING','CANCELLED','COMPLETED','FAILED')),
+ connector_id TEXT NOT NULL, request JSONB NOT NULL, principal JSONB NOT NULL,
+ dedupe_key TEXT NOT NULL, output JSONB, notify_visible BOOLEAN NOT NULL DEFAULT false, tools JSONB NOT NULL DEFAULT '[]',
+ error_code TEXT NOT NULL DEFAULT '', error_message TEXT NOT NULL DEFAULT '',
+ attempts INTEGER NOT NULL DEFAULT 0, lease_token TEXT NOT NULL DEFAULT '', lease_until TIMESTAMPTZ,
+ next_poll_at TIMESTAMPTZ NOT NULL DEFAULT now(), created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ started_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, read_at TIMESTAMPTZ,
+ UNIQUE(assistant_id,dedupe_key)
+);
+CREATE INDEX IF NOT EXISTS agent_assistant_runs_owner_idx ON agent_assistant_runs(owner_id,assistant_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS agent_assistant_runs_poll_idx ON agent_assistant_runs(next_poll_at,lease_until) WHERE status IN ('QUEUED','RUNNING','CANCELLING');
+-- End assistant lifecycle v1.
+
 -- +omcgo MainReconcileEnd
 
 
