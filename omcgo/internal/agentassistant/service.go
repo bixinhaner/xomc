@@ -179,7 +179,11 @@ func (s *Service) Publish(ctx context.Context, c *admin.Claims, id string, revis
 	if err = s.validate(ctx, Principal{UserID: a.OwnerID, RoleID: a.RoleID}, a.Definition); err != nil {
 		return a, err
 	}
-	return s.repo.Publish(ctx, a.OwnerID, id, revision)
+	p, err := s.bindPrincipal(ctx, Principal{UserID: a.OwnerID, RoleID: a.RoleID})
+	if err != nil {
+		return a, err
+	}
+	return s.repo.Publish(ctx, a.OwnerID, id, revision, p)
 }
 func (s *Service) State(ctx context.Context, c *admin.Claims, id, state string) (Assistant, error) {
 	if state != "active" && state != "paused" {
@@ -424,9 +428,10 @@ func (s *Service) poll(parent context.Context) {
 		if err == nil {
 			err = s.remote.CancelAssistantRun(ctx, run.ConnectorID, run.ID)
 		}
-		if err == nil || strings.Contains(err.Error(), "NOT_FOUND") {
-			remote = RemoteRun{ID: run.ID, Status: "CANCELLED"}
-			err = nil
+		if err == nil {
+			// Cancellation can race completion. The remote ledger is authoritative;
+			// a successful cancel request does not imply a CANCELLED terminal state.
+			remote, err = s.remote.GetAssistantRun(ctx, run.ConnectorID, run.ID)
 		}
 	} else {
 		if err = s.validate(ctx, run.Principal, &run.Request.Definition); err == nil {

@@ -5,6 +5,7 @@ case "${1:-}" in
   backend)
     cd omcgo
     go test -p 2 ./internal/agentassistant ./internal/agentbridge ./internal/agentruntime ./internal/attention ./cmd/app/provider
+    go test ./cmd/migrate -run 'TestAssistantUpgrade|TestMainReconcile' -count=1
     ;;
   frontend)
     cd omcmb

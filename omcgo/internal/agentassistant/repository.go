@@ -128,7 +128,7 @@ func (r *Repository) SaveDraft(ctx context.Context, a Assistant, expected int) (
 	}
 	return r.Get(ctx, a.OwnerID, a.ID)
 }
-func (r *Repository) Publish(ctx context.Context, owner, id string, revision int) (Assistant, error) {
+func (r *Repository) Publish(ctx context.Context, owner, id string, revision int, principal Principal) (Assistant, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return Assistant{}, fmt.Errorf("begin assistant publish: %w", err)
@@ -144,12 +144,16 @@ func (r *Repository) Publish(ctx context.Context, owner, id string, revision int
 	if a.Definition == nil || a.Readiness != "ready" {
 		return a, ErrTrialRequired
 	}
-	q, args, err := sql.Select("status", "COALESCE(output->>'outcome','')").From("agent_assistant_runs").Where(sq.Eq{"assistant_id": id, "revision": revision, "kind": "trial"}).OrderBy("created_at DESC").Limit(1).ToSql()
+	if principal.UserID != owner || principal.RoleID != a.RoleID || principal.ScopeDigest == "" {
+		return a, fmt.Errorf("ASSISTANT_SCOPE_CHANGED")
+	}
+	q, args, err := sql.Select("status", "COALESCE(output->>'outcome','')", "principal->>'scopeDigest'").From("agent_assistant_runs").Where(sq.Eq{"assistant_id": id, "revision": revision, "kind": "trial"}).OrderBy("created_at DESC").Limit(1).ToSql()
 	if err != nil {
 		return a, fmt.Errorf("build trial gate: %w", err)
 	}
 	var trialStatus, trialOutcome string
-	if err = tx.QueryRow(ctx, q, args...).Scan(&trialStatus, &trialOutcome); errors.Is(err, pgx.ErrNoRows) {
+	var trialScope *string
+	if err = tx.QueryRow(ctx, q, args...).Scan(&trialStatus, &trialOutcome, &trialScope); errors.Is(err, pgx.ErrNoRows) {
 		return a, ErrTrialRequired
 	} else if err != nil {
 		return a, fmt.Errorf("check assistant trial: %w", err)
@@ -157,11 +161,14 @@ func (r *Repository) Publish(ctx context.Context, owner, id string, revision int
 	if trialStatus != "COMPLETED" || (trialOutcome != "finding" && trialOutcome != "no_change") {
 		return a, ErrTrialRequired
 	}
+	if trialScope == nil || *trialScope != principal.ScopeDigest {
+		return a, fmt.Errorf("ASSISTANT_SCOPE_CHANGED")
+	}
 	if a.PublishedRevision != nil && *a.PublishedRevision == revision {
 		return a, nil
 	}
 	raw, _ := json.Marshal(a.Definition)
-	q, args, err = sql.Insert("agent_assistant_versions").Columns("assistant_id", "revision", "definition", "role_id", "locale", "timezone").Values(id, revision, raw, a.RoleID, a.Locale, a.Timezone).Suffix("ON CONFLICT (assistant_id,revision) DO NOTHING").ToSql()
+	q, args, err = sql.Insert("agent_assistant_versions").Columns("assistant_id", "revision", "definition", "role_id", "locale", "timezone", "scope_digest").Values(id, revision, raw, a.RoleID, a.Locale, a.Timezone, principal.ScopeDigest).Suffix("ON CONFLICT (assistant_id,revision) DO NOTHING").ToSql()
 	if err != nil {
 		return a, fmt.Errorf("build assistant version: %w", err)
 	}
@@ -232,13 +239,16 @@ func (r *Repository) Published(ctx context.Context, eventType string, due bool) 
 func (r *Repository) VersionPrincipal(ctx context.Context, id string, revision int) (Principal, string, string, error) {
 	var p Principal
 	var locale, tz string
-	q, args, err := sql.Select("a.owner_id", "v.role_id", "v.locale", "v.timezone").From("agent_assistants a").Join("agent_assistant_versions v ON v.assistant_id=a.id").Where(sq.Eq{"a.id": id, "v.revision": revision}).ToSql()
+	q, args, err := sql.Select("a.owner_id", "v.role_id", "v.locale", "v.timezone", "v.scope_digest").From("agent_assistants a").Join("agent_assistant_versions v ON v.assistant_id=a.id").Where(sq.Eq{"a.id": id, "v.revision": revision}).ToSql()
 	if err != nil {
 		return p, locale, tz, fmt.Errorf("build published principal: %w", err)
 	}
-	err = r.pool.QueryRow(ctx, q, args...).Scan(&p.UserID, &p.RoleID, &locale, &tz)
+	err = r.pool.QueryRow(ctx, q, args...).Scan(&p.UserID, &p.RoleID, &locale, &tz, &p.ScopeDigest)
 	if err != nil {
 		return p, locale, tz, fmt.Errorf("load published principal: %w", err)
+	}
+	if p.ScopeDigest == "" {
+		return p, locale, tz, fmt.Errorf("ASSISTANT_SCOPE_CHANGED")
 	}
 	return p, locale, tz, nil
 }
@@ -405,7 +415,7 @@ func (r *Repository) Progress(ctx context.Context, run Run, remote RemoteRun, po
 	if state != "COMPLETED" && state != "FAILED" && state != "CANCELLED" {
 		state = "RUNNING"
 	}
-	if run.Status == "CANCELLING" && state != "CANCELLED" {
+	if run.Status == "CANCELLING" && state == "RUNNING" {
 		state = "CANCELLING"
 	}
 	now := time.Now().UTC()

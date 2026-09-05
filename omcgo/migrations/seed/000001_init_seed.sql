@@ -28838,6 +28838,7 @@ WHERE c.operation_type IN ('ADD', 'RMV')
   AND COALESCE(c.target_object, '') <> '';
 
 -- Active Intelligence is a first-class System Management page. Keep the menu
+-- +omcgo MainReconcileBegin
 -- in the baseline seed so direct-entry tabs and refresh restoration resolve
 -- the correct title from the same dynamic menu source as the sidebar.
 INSERT INTO public.menus (
@@ -28893,6 +28894,8 @@ FROM public.roles r CROSS JOIN public.menus m
 WHERE r.id IN ('10000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000003')
   AND m.id IN ('11111111-1111-1111-1111-111111111108','aaaa0008-1000-0000-0000-000000000011')
 ON CONFLICT (role_id,menu_id) DO NOTHING;
+
+-- +omcgo MainReconcileEnd
 
 COMMIT;
 

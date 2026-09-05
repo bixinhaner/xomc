@@ -112,6 +112,9 @@ func completeNext(t *testing.T, r *Repository) Run {
 	}
 	return got
 }
+func publishedPrincipal(owner, role string) Principal {
+	return Principal{UserID: owner, RoleID: role, ScopeDigest: scopeDigest(&admin.Claims{UserID: uuid.MustParse(owner), IsSuperAdmin: true}, nil)}
+}
 func TestPostgresOwnershipVersionTrialAndIdempotency(t *testing.T) {
 	r, owner := integrationRepository(t)
 	ctx := context.Background()
@@ -119,7 +122,7 @@ func TestPostgresOwnershipVersionTrialAndIdempotency(t *testing.T) {
 	if _, err := r.Get(ctx, uuid.NewString(), a.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-owner assistant: %v", err)
 	}
-	if _, err := r.Publish(ctx, owner, a.ID, a.Revision); !errors.Is(err, ErrTrialRequired) {
+	if _, err := r.Publish(ctx, owner, a.ID, a.Revision, publishedPrincipal(owner, a.RoleID)); !errors.Is(err, ErrTrialRequired) {
 		t.Fatalf("fake trial accepted: %v", err)
 	}
 	run := mustEnqueue(t, r, a, "trial", "trial-key")
@@ -131,7 +134,7 @@ func TestPostgresOwnershipVersionTrialAndIdempotency(t *testing.T) {
 		t.Fatalf("cross-owner run: %v", err)
 	}
 	completeNext(t, r)
-	published, err := r.Publish(ctx, owner, a.ID, a.Revision)
+	published, err := r.Publish(ctx, owner, a.ID, a.Revision, publishedPrincipal(owner, a.RoleID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +154,7 @@ func TestPostgresOwnershipVersionTrialAndIdempotency(t *testing.T) {
 	if _, err = r.SaveDraft(ctx, a, a.Revision-1); !errors.Is(err, ErrConflict) {
 		t.Fatalf("lost update accepted: %v", err)
 	}
-	if _, err = r.Publish(ctx, owner, a.ID, a.Revision); !errors.Is(err, ErrTrialRequired) {
+	if _, err = r.Publish(ctx, owner, a.ID, a.Revision, publishedPrincipal(owner, a.RoleID)); !errors.Is(err, ErrTrialRequired) {
 		t.Fatalf("stale trial published: %v", err)
 	}
 	if _, err = r.SetState(ctx, owner, a.ID, "paused"); err != nil {
@@ -220,7 +223,7 @@ func TestPostgresPrivateInboxAndNotificationCooldown(t *testing.T) {
 	mustEnqueue(t, r, a, "trial", "first")
 	completeNext(t, r)
 	var err error
-	a, err = r.Publish(ctx, owner, a.ID, a.Revision)
+	a, err = r.Publish(ctx, owner, a.ID, a.Revision, publishedPrincipal(owner, a.RoleID))
 	if err != nil {
 		t.Fatal(err)
 	}

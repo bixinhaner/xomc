@@ -23698,6 +23698,9 @@ CREATE TABLE IF NOT EXISTS agent_assistant_runs (
 CREATE INDEX IF NOT EXISTS agent_assistant_runs_owner_idx ON agent_assistant_runs(owner_id,assistant_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS agent_assistant_runs_poll_idx ON agent_assistant_runs(next_poll_at,lease_until) WHERE status IN ('QUEUED','RUNNING','CANCELLING');
 -- End assistant lifecycle v1.
+-- Existing pre-release versions without a grant remain blocked until a new
+-- draft is tried and published; never infer approval from today's permissions.
+ALTER TABLE agent_assistant_versions ADD COLUMN IF NOT EXISTS scope_digest TEXT NOT NULL DEFAULT '';
 
 -- +omcgo MainReconcileEnd
 

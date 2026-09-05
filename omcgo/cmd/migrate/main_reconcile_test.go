@@ -219,6 +219,12 @@ WHERE api_group = 'device-access';
 	require.NoError(t, err)
 
 	legacyFilterID := uuid.New()
+	// Model an existing installation that has already applied baseline seed,
+	// but predates the personal-assistant menu and published authorization grant.
+	_, err = db.Exec(`DELETE FROM public.role_menus WHERE menu_id='aaaa0008-1000-0000-0000-000000000011';
+DELETE FROM public.menus WHERE id='aaaa0008-1000-0000-0000-000000000011';
+ALTER TABLE public.agent_assistant_versions DROP COLUMN scope_digest;`)
+	require.NoError(t, err)
 	_, err = db.Exec(`
 INSERT INTO public.alarm_filters (
     id, name, filter_type, alarm_sources, alarm_identifiers,
@@ -238,6 +244,16 @@ INSERT INTO public.alarm_filters (
 	}
 
 	// Older pre-release databases could retain the reject-only policy check
+	var assistantGrants int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM public.role_menus
+WHERE menu_id='aaaa0008-1000-0000-0000-000000000011'
+AND role_id IN ('10000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000003')`).Scan(&assistantGrants))
+	require.Equal(t, 3, assistantGrants, "existing seed must repair the menu exactly once for every built-in operational role")
+	var grantColumn bool
+	require.NoError(t, db.QueryRow(`SELECT EXISTS(SELECT 1 FROM information_schema.columns
+WHERE table_schema='public' AND table_name='agent_assistant_versions' AND column_name='scope_digest')`).Scan(&grantColumn))
+	require.True(t, grantColumn)
+
 	// under an unexpected name. Reconciliation must remove every stale check,
 	// not only the canonical constraint name.
 	_, err = db.Exec(`
