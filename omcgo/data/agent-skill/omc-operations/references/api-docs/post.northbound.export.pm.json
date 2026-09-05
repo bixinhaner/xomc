@@ -82,6 +82,38 @@
     "request": "openapi",
     "response": "openapi"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.northbound.export.alarms",
+      "method": "POST",
+      "path": "/api/v1/northbound/export/alarms",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.northbound.export.config.by_deviceId",
+      "method": "GET",
+      "path": "/api/v1/northbound/export/config/:deviceId",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.northbound.v1.export.config.by_deviceId",
+      "method": "GET",
+      "path": "/api/v1/northbound/v1/export/config/:deviceId",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.northbound.push.targets.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/northbound/push/targets/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.northbound.v1.device.group",
+      "method": "DELETE",
+      "path": "/api/v1/northbound/v1/device/group",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",

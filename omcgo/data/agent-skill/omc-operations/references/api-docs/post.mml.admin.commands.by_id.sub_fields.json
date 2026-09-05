@@ -119,6 +119,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.mml.admin.commands.by_id.sub_fields.by_sid",
+      "method": "DELETE",
+      "path": "/api/v1/mml/admin/commands/:id/sub-fields/:sid",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "patch.mml.admin.commands.by_id.sub_fields.by_sid",
+      "method": "PATCH",
+      "path": "/api/v1/mml/admin/commands/:id/sub-fields/:sid",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.mml.admin.commands.by_id.sub_fields.batch",
+      "method": "POST",
+      "path": "/api/v1/mml/admin/commands/:id/sub-fields/batch",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.mml.admin.commands.by_id.sub_fields",
+      "method": "GET",
+      "path": "/api/v1/mml/admin/commands/:id/sub-fields",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.mml.admin.commands.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mml/admin/commands/:id",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

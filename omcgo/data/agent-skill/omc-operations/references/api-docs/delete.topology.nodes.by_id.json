@@ -75,6 +75,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.topology.nodes",
+      "method": "POST",
+      "path": "/api/v1/topology/nodes",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.topology.nodes.by_id",
+      "method": "PUT",
+      "path": "/api/v1/topology/nodes/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.topology.nodes",
+      "method": "GET",
+      "path": "/api/v1/topology/nodes",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.topology.nodes.by_id",
+      "method": "GET",
+      "path": "/api/v1/topology/nodes/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.topology.nodes.batch",
+      "method": "POST",
+      "path": "/api/v1/topology/nodes/batch",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

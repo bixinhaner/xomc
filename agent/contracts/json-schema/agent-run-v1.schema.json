@@ -1,0 +1,102 @@
+{
+  "$id": "https://agentstudio.example/schemas/agent-run-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgentRun",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "status",
+    "connectorId",
+    "scenarioKey",
+    "packageDigest",
+    "handbookDigest",
+    "traceId",
+    "createdAt"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "kind": {
+      "enum": [
+        "interactive",
+        "background"
+      ]
+    },
+    "status": {
+      "enum": [
+        "queued",
+        "running",
+        "waiting_tool",
+        "validating",
+        "completed",
+        "failed",
+        "cancelled",
+        "suppressed"
+      ]
+    },
+    "connectorId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "scenarioKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "packageDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "handbookDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "sourceEventId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "conversationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 160
+    },
+    "traceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "startedAt": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "completedAt": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "error": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  }
+}

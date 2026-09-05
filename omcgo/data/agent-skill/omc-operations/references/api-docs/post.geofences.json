@@ -1,0 +1,143 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.geofences",
+  "method": "POST",
+  "path": "/api/v1/geofences",
+  "handler": "github.com/omcgo/omcgo/internal/geofence.(*Handler).CreateDefinition-fm",
+  "category": "geofences",
+  "title": "geofences - 创建",
+  "summary": "geofences - 创建",
+  "description": "geofences：创建新的资源记录",
+  "intents": [
+    "geofences - 创建",
+    "geofences：创建新的资源记录",
+    "geofences"
+  ],
+  "tags": [
+    "geofences"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：geofences - 创建",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "createDefinitionBody",
+      "properties": {
+        "carrier": {
+          "type": "string"
+        },
+        "geometry": {
+          "goType": "json.RawMessage",
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "owner_device_id": {
+          "format": "uuid",
+          "goType": "uuid.UUID",
+          "nullable": true,
+          "type": "string"
+        },
+        "policy": {
+          "goType": "json.RawMessage",
+          "type": "object"
+        },
+        "rule_type": {
+          "goType": "RuleType",
+          "type": "string"
+        }
+      },
+      "required": [
+        "carrier",
+        "geometry",
+        "name",
+        "policy",
+        "rule_type"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "relatedOperations": [
+    {
+      "operationId": "patch.geofences.by_id",
+      "method": "PATCH",
+      "path": "/api/v1/geofences/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.geofences.by_id.archive",
+      "method": "POST",
+      "path": "/api/v1/geofences/:id/archive",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.geofences.by_id.archive_preview",
+      "method": "POST",
+      "path": "/api/v1/geofences/:id/archive-preview",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.geofences.by_id.binding_preview",
+      "method": "POST",
+      "path": "/api/v1/geofences/:id/binding-preview",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.geofences.by_id.bindings",
+      "method": "POST",
+      "path": "/api/v1/geofences/:id/bindings",
+      "relation": "same-resource"
+    }
+  ],
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

@@ -12,11 +12,13 @@
     "ufte - tasktypes",
     "ufte：处理tasktypes相关数据",
     "ufte",
+    "统一文件传输",
     "task-types",
     "task types"
   ],
   "tags": [
     "ufte",
+    "统一文件传输",
     "task-types"
   ],
   "risk": "read",
@@ -66,7 +68,39 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
-  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "emptyResult": "空数组或 total=0 只说明该操作在当前用户权限和本次过滤条件下没有返回记录，不能单独证明业务对象、源数据或系统能力不存在。先核对参数、标识符、时间范围和权限；若用户目标仍未回答，再沿 relatedOperations 选择汇总、明细、原始或派生数据操作补充证据。",
+  "relatedOperations": [
+    {
+      "operationId": "delete.ufte.task_types.by_typeCode",
+      "method": "DELETE",
+      "path": "/api/v1/ufte/task-types/:typeCode",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ufte.task_types",
+      "method": "POST",
+      "path": "/api/v1/ufte/task-types",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.ufte.task_types.by_typeCode",
+      "method": "PUT",
+      "path": "/api/v1/ufte/task-types/:typeCode",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.ufte.device_candidates",
+      "method": "GET",
+      "path": "/api/v1/ufte/device-candidates",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.ufte.devices",
+      "method": "GET",
+      "path": "/api/v1/ufte/devices",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

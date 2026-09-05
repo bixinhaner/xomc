@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "1.0",
+  "scenarioKey": "access-review-assistant",
+  "scenarioVersion": 1,
+  "title": "接入候选需要补充位置信息",
+  "summary": "当前产品和运营商策略匹配，但缺少可信位置证据。",
+  "severity": "medium",
+  "confidence": 0.71,
+  "facts": [
+    {
+      "id": "fact-1",
+      "text": "任务在设备离线期间失败。",
+      "evidenceRefs": [
+        "tool:get.devices.by_id"
+      ]
+    },
+    {
+      "id": "fact-2",
+      "text": "近 24 小时存在 3 次同类失败。",
+      "evidenceRefs": [
+        "tool:get.devices.tasks"
+      ]
+    }
+  ],
+  "hypotheses": [
+    {
+      "id": "hyp-1",
+      "text": "设备连接中断是本次失败的主要原因。",
+      "confidence": 0.86,
+      "evidenceRefs": [
+        "fact-1",
+        "fact-2"
+      ]
+    }
+  ],
+  "resourceRefs": [
+    {
+      "type": "task",
+      "id": "task-123",
+      "role": "task",
+      "label": "配置任务"
+    },
+    {
+      "type": "device",
+      "id": "device-456",
+      "role": "device",
+      "label": "SN001"
+    }
+  ],
+  "details": {
+    "recommendation": "need_more_evidence",
+    "candidateId": "candidate-22",
+    "policyChecks": [
+      {
+        "key": "product_supported",
+        "result": "pass",
+        "evidence": "产品已在策略中允许"
+      },
+      {
+        "key": "location_verified",
+        "result": "unknown",
+        "evidence": "未获取到有效位置"
+      }
+    ],
+    "missingEvidence": [
+      "可信 GPS 或站点位置"
+    ]
+  },
+  "suggestedActions": [
+    {
+      "type": "open-resource",
+      "label": "查看任务",
+      "resourceRole": "task"
+    },
+    {
+      "type": "continue-agent",
+      "label": "继续询问 Agent",
+      "promptKey": "task-failure-followup"
+    },
+    {
+      "type": "dismiss",
+      "label": "忽略"
+    }
+  ],
+  "presentation": {
+    "surfaces": [
+      "attention",
+      "task-detail"
+    ],
+    "sections": [
+      "summary",
+      "facts",
+      "hypotheses",
+      "details",
+      "resources",
+      "suggestedActions"
+    ],
+    "icon": "task-error"
+  }
+}

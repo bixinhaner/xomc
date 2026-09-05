@@ -79,6 +79,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.northbound.push.deadletter",
+      "method": "GET",
+      "path": "/api/v1/northbound/push/deadletter",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.northbound.push.targets.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/northbound/push/targets/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.northbound.push.targets",
+      "method": "POST",
+      "path": "/api/v1/northbound/push/targets",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.northbound.push.targets.by_id.circuit.reset",
+      "method": "POST",
+      "path": "/api/v1/northbound/push/targets/:id/circuit/reset",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.northbound.push.targets",
+      "method": "GET",
+      "path": "/api/v1/northbound/push/targets",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

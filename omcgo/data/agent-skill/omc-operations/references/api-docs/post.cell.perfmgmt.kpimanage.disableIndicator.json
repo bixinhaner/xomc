@@ -107,6 +107,20 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.cell.perfmgmt.kpimanage.enableIndicator",
+      "method": "POST",
+      "path": "/api/v1/cell/perfmgmt/kpimanage/enableIndicator",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.cell.perfmgmt.kpimanage.isIndicatorInTemplate",
+      "method": "GET",
+      "path": "/api/v1/cell/perfmgmt/kpimanage/isIndicatorInTemplate",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

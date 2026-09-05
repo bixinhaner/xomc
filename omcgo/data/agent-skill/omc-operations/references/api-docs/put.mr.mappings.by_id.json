@@ -106,6 +106,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "put.mr.mappings.by_id.toggle",
+      "method": "PUT",
+      "path": "/api/v1/mr/mappings/:id/toggle",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.mr.mappings",
+      "method": "GET",
+      "path": "/api/v1/mr/mappings",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.mr.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mr/tasks/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.mr.export",
+      "method": "POST",
+      "path": "/api/v1/mr/export",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.mr.files.batch_delete",
+      "method": "POST",
+      "path": "/api/v1/mr/files/batch-delete",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

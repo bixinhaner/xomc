@@ -7,10 +7,10 @@
   "category": "pm",
   "title": "性能 PM - 聚合",
   "summary": "性能 PM - 聚合",
-  "description": "性能 PM：查询聚合后的统计数据 Handler: ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - start_time / end_time：RFC3339\n  - limit / offset\n\n没注入 aggregator（兼容老部署）时返 503。",
+  "description": "性能 PM：查询聚合后的统计数据 Handler: ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - technology / technologies：制式过滤（lte/nr/gsm）\n  - start_time / end_time：RFC3339\n  - limit / offset\n  - page_by=pivot_row：limit / offset 按透视表行 key 分页，total 返回透视表行总数\n  - count_mode=n_plus_one：取 limit+1 判断 truncated，不执行精确 COUNT\n\n没注入 aggregator（兼容老部署）时返 503。",
   "intents": [
     "性能 PM - 聚合",
-    "性能 PM：查询聚合后的统计数据 Handler: ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - start_time / end_time：RFC3339\n  - limit / offset\n\n没注入 aggregator（兼容老部署）时返 503。",
+    "性能 PM：查询聚合后的统计数据 Handler: ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - technology / technologies：制式过滤（lte/nr/gsm）\n  - start_time / end_time：RFC3339\n  - limit / offset\n  - page_by=pivot_row：limit / offset 按透视表行 key 分页，total 返回透视表行总数\n  - count_mode=n_plus_one：取 limit+1 判断 truncated，不执行精确 COUNT\n\n没注入 aggregator（兼容老部署）时返 503。",
     "pm",
     "性能",
     "metrics",
@@ -29,6 +29,12 @@
   "pathParams": [],
   "queryParams": [
     {
+      "name": "count_mode",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
       "name": "device_group_id",
       "in": "query",
       "required": false,
@@ -42,6 +48,12 @@
     },
     {
       "name": "device_sn",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "device_sns",
       "in": "query",
       "required": false,
       "type": "string"
@@ -113,7 +125,25 @@
       "type": "string"
     },
     {
+      "name": "page_by",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
       "name": "start_time",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "technologies",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "technology",
       "in": "query",
       "required": false,
       "type": "string"
@@ -166,7 +196,39 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
-  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "emptyResult": "空数组或 total=0 只说明该操作在当前用户权限和本次过滤条件下没有返回记录，不能单独证明业务对象、源数据或系统能力不存在。先核对参数、标识符、时间范围和权限；若用户目标仍未回答，再沿 relatedOperations 选择汇总、明细、原始或派生数据操作补充证据。",
+  "relatedOperations": [
+    {
+      "operationId": "get.pm.counters.aggregated",
+      "method": "GET",
+      "path": "/api/v1/pm/counters/aggregated",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.pm.metrics.objects",
+      "method": "GET",
+      "path": "/api/v1/pm/metrics/objects",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.pm.adhoc.tasks",
+      "method": "GET",
+      "path": "/api/v1/pm/adhoc/tasks",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.pm.adhoc.tasks.by_id",
+      "method": "GET",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.pm.adhoc.tasks.by_id.filter_options",
+      "method": "GET",
+      "path": "/api/v1/pm/adhoc/tasks/:id/filter-options",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

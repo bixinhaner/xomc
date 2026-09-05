@@ -1,0 +1,209 @@
+.drawer :global(.ant-drawer-header) {
+  min-height: 68px;
+  border-bottom-color: var(--color-border, var(--ant-color-border-secondary));
+  padding: 16px 20px;
+}
+
+.drawer :global(.ant-drawer-body) {
+  background: var(--color-neutral-100, var(--ant-color-bg-layout));
+  padding: 18px;
+}
+
+.drawer :global(.ant-drawer-footer) {
+  border-top-color: var(--color-border, var(--ant-color-border-secondary));
+  background: var(--color-bg-container, var(--ant-color-bg-elevated));
+  padding: 14px 18px;
+}
+
+.content {
+  display: grid;
+  gap: 12px;
+  color: var(--color-neutral-900, var(--ant-color-text));
+}
+
+.hero,
+.section {
+  border: 1px solid var(--color-border, var(--ant-color-border-secondary));
+  border-radius: 8px;
+  background: var(--color-bg-container, var(--ant-color-bg-container));
+  padding: 16px;
+}
+
+.hero {
+  border-top: 2px solid var(--color-primary-600, var(--ant-color-primary));
+}
+
+.eyebrow {
+  margin-bottom: 8px;
+  color: var(--color-neutral-500, var(--ant-color-text-tertiary));
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hero h2 {
+  margin: 0 0 10px;
+  color: var(--color-neutral-900, var(--ant-color-text));
+  font-size: 20px;
+  line-height: 1.35;
+}
+
+.hero p {
+  margin: 0;
+  color: var(--color-neutral-600, var(--ant-color-text-secondary));
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.confidence {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.confidence > span {
+  color: var(--color-neutral-600, var(--ant-color-text-secondary));
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.section h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 14px;
+  color: var(--color-neutral-900, var(--ant-color-text));
+  font-size: 15px;
+}
+
+.resourceList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.statementList {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: finding-item;
+}
+
+.statementList li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 26px 1fr auto;
+  gap: 8px;
+  align-items: start;
+  border-top: 1px solid var(--color-border, var(--ant-color-border-secondary));
+  padding: 11px 0;
+  line-height: 1.55;
+  counter-increment: finding-item;
+}
+
+.statementList li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.statementList li:last-child {
+  padding-bottom: 0;
+}
+
+.statementList li::before {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--color-neutral-100, var(--ant-color-fill-secondary));
+  color: var(--color-neutral-600, var(--ant-color-text-secondary));
+  content: counter(finding-item);
+  font-size: 11px;
+}
+
+.statementList small {
+  color: var(--color-neutral-500, var(--ant-color-text-tertiary));
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.hypotheses {
+  border-color: var(--color-severity-major-border, var(--ant-color-warning-border));
+  background: var(--color-severity-major-bg, var(--ant-color-warning-bg));
+}
+
+.details {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.details > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 35%) 1fr;
+  gap: 14px;
+  border-top: 1px solid var(--color-border, var(--ant-color-border-secondary));
+  padding: 9px 0;
+}
+
+.details > div:first-child {
+  border-top: 0;
+}
+
+.details dt {
+  color: var(--color-neutral-500, var(--ant-color-text-tertiary));
+  overflow-wrap: anywhere;
+}
+
+.details dd {
+  margin: 0;
+  color: var(--color-neutral-800, var(--ant-color-text));
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.footer > button:last-child {
+  min-width: 180px;
+}
+
+@media (max-width: 575px) {
+  .drawer :global(.ant-drawer-body) {
+    padding: 12px;
+  }
+
+  .hero,
+  .section {
+    padding: 14px;
+  }
+
+  .statementList li {
+    grid-template-columns: 24px 1fr;
+  }
+
+  .statementList small {
+    grid-column: 2;
+  }
+
+  .details > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .footer > button {
+    flex: 1;
+  }
+
+  .footer > button:last-child {
+    min-width: 0;
+  }
+}

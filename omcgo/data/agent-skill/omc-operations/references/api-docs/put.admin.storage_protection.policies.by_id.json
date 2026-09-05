@@ -1,0 +1,198 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "put.admin.storage_protection.policies.by_id",
+  "method": "PUT",
+  "path": "/api/v1/admin/storage-protection/policies/:id",
+  "handler": "github.com/omcgo/omcgo/internal/storageprotection.(*Handler).savePolicy-fm",
+  "category": "storage-protection",
+  "title": "storage-protection - 更新",
+  "summary": "storage-protection - 更新",
+  "description": "storage-protection：更新指定资源的完整配置",
+  "intents": [
+    "storage-protection - 更新",
+    "storage-protection：更新指定资源的完整配置",
+    "storage-protection",
+    "admin",
+    "policies",
+    "storage protection"
+  ],
+  "tags": [
+    "storage-protection",
+    "admin",
+    "policies"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：storage-protection - 更新",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :id"
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "Policy",
+      "properties": {
+        "block_used_percent": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "check_interval_seconds": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "goType": "time.Time",
+          "type": "string"
+        },
+        "current_state": {
+          "goType": "State",
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "last_observed_at": {
+          "format": "date-time",
+          "goType": "time.Time",
+          "nullable": true,
+          "type": "string"
+        },
+        "last_observed_ratio": {
+          "goType": "float64",
+          "nullable": true,
+          "type": "number"
+        },
+        "last_state_changed_at": {
+          "format": "date-time",
+          "goType": "time.Time",
+          "nullable": true,
+          "type": "string"
+        },
+        "recover_used_percent": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "state_observations": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "target_id": {
+          "type": "string"
+        },
+        "target_type": {
+          "goType": "TargetType",
+          "type": "string"
+        },
+        "unknown_behavior": {
+          "goType": "UnknownBehavior",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "goType": "time.Time",
+          "type": "string"
+        },
+        "updated_by": {
+          "type": "string"
+        },
+        "version": {
+          "goType": "int64",
+          "type": "integer"
+        },
+        "warn_used_percent": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "write_scope": {
+          "goType": "WriteScope",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "relatedOperations": [
+    {
+      "operationId": "post.admin.storage_protection.policies",
+      "method": "POST",
+      "path": "/api/v1/admin/storage-protection/policies",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.admin.storage_protection.policies",
+      "method": "GET",
+      "path": "/api/v1/admin/storage-protection/policies",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.admin.storage_protection.events",
+      "method": "GET",
+      "path": "/api/v1/admin/storage-protection/events",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.admin.storage_protection.targets",
+      "method": "GET",
+      "path": "/api/v1/admin/storage-protection/targets",
+      "relation": "same-domain"
+    }
+  ],
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

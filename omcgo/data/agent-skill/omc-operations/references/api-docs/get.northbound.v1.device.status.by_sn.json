@@ -1,0 +1,117 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "get.northbound.v1.device.status.by_sn",
+  "method": "GET",
+  "path": "/api/v1/northbound/v1/device/status/:sn",
+  "handler": "github.com/omcgo/omcgo/internal/northbound.(*Router).legacyDeviceStatus-fm",
+  "category": "northbound",
+  "title": "北向接口 - 详情",
+  "summary": "北向接口 - 详情",
+  "description": "北向接口：查询指定资源的详细信息",
+  "intents": [
+    "北向接口 - 详情",
+    "北向接口：查询指定资源的详细信息",
+    "northbound",
+    "北向接口",
+    "device",
+    "status"
+  ],
+  "tags": [
+    "northbound",
+    "北向接口",
+    "device",
+    "status"
+  ],
+  "risk": "read",
+  "confirmationRequired": false,
+  "idempotent": true,
+  "sideEffects": "无；该操作只读取当前用户可见数据。",
+  "pathParams": [
+    {
+      "name": "sn",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :sn"
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "path-only",
+    "response": "standard-envelope"
+  },
+  "emptyResult": "空数组或 total=0 只说明该操作在当前用户权限和本次过滤条件下没有返回记录，不能单独证明业务对象、源数据或系统能力不存在。先核对参数、标识符、时间范围和权限；若用户目标仍未回答，再沿 relatedOperations 选择汇总、明细、原始或派生数据操作补充证据。",
+  "relatedOperations": [
+    {
+      "operationId": "get.northbound.v1.device.group",
+      "method": "GET",
+      "path": "/api/v1/northbound/v1/device/group",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.northbound.v1.device.infos.by_sn",
+      "method": "GET",
+      "path": "/api/v1/northbound/v1/device/infos/:sn",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.northbound.v1.device.parameters.by_sn",
+      "method": "GET",
+      "path": "/api/v1/northbound/v1/device/parameters/:sn",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.northbound.v1.device.register.page",
+      "method": "GET",
+      "path": "/api/v1/northbound/v1/device/register/page",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.northbound.v1.enodeb.infos.status.by_sn",
+      "method": "GET",
+      "path": "/api/v1/northbound/v1/enodeb/infos/status/:sn",
+      "relation": "same-domain"
+    }
+  ],
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

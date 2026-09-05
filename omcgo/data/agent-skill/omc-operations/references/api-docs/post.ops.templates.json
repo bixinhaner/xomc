@@ -108,6 +108,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.ops.templates.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/ops/templates/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.ops.templates.by_id",
+      "method": "PUT",
+      "path": "/api/v1/ops/templates/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.ops.templates",
+      "method": "GET",
+      "path": "/api/v1/ops/templates",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.ops.templates.by_id",
+      "method": "GET",
+      "path": "/api/v1/ops/templates/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ops.break_glass.activate",
+      "method": "POST",
+      "path": "/api/v1/ops/break-glass/activate",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

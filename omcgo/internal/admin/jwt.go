@@ -33,6 +33,7 @@ const agentDelegationSubject = "agent_delegation"
 const agentRuntimeScope = "agent-runtime"
 
 var agentDelegationTTL = 5 * time.Minute
+var backgroundAgentTTL = 60 * time.Second
 
 // NewJWTService creates a new JWTService with the given secret and default TTLs.
 // Returns an error if the secret is empty or shorter than 32 characters.
@@ -151,6 +152,36 @@ func (s *JWTService) GenerateAgentDelegationToken(claims *Claims) (string, time.
 	tokenString, err := token.SignedString(s.secret)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("sign agent delegation token: %w", err)
+	}
+	return tokenString, expiresAt, nil
+}
+
+// GenerateBackgroundAgentToken signs a one-minute access token for a single
+// proactive run. The caller must still enforce the scenario operation allowlist
+// and resource scope before minting it; scopes make that boundary auditable in
+// downstream auth and operation logs.
+func (s *JWTService) GenerateBackgroundAgentToken(claims *Claims) (string, time.Time, error) {
+	now := time.Now()
+	expiresAt := now.Add(backgroundAgentTTL)
+	accessClaims := &jwtClaims{
+		UserID:         claims.UserID,
+		Username:       claims.Username,
+		IsSuperAdmin:   claims.IsSuperAdmin,
+		Roles:          claims.Roles,
+		CurrentRoleID:  claims.CurrentRoleID,
+		IssuedAtMicros: now.UnixMicro(),
+		Scopes:         append([]string(nil), claims.Scopes...),
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   "access",
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			ID:        uuid.New().String(),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
+	tokenString, err := token.SignedString(s.secret)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("sign background agent token: %w", err)
 	}
 	return tokenString, expiresAt, nil
 }

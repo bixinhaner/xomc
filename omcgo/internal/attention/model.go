@@ -27,6 +27,8 @@ type Kind string
 const (
 	KindActiveAlarm        Kind = "active_alarm"
 	KindDeviceAccessReview Kind = "device_access_review"
+	KindAgentFinding       Kind = "agent_finding"
+	KindAssistantResult    Kind = "assistant_result"
 )
 
 type Action string
@@ -34,6 +36,8 @@ type Action string
 const (
 	ActionViewAlarm       Action = "view_alarm"
 	ActionReviewCandidate Action = "review_device_candidate"
+	ActionViewFinding     Action = "view_agent_finding"
+	ActionViewAssistant   Action = "view_assistant_result"
 )
 
 type Response struct {
@@ -89,8 +93,10 @@ type Scope struct {
 }
 
 type Permission struct {
-	Resource string
-	Action   string
+	// OwnerOnly sources must enforce scope.UserID in their own repository query.
+	OwnerOnly bool
+	Resource  string
+	Action    string
 }
 
 type SourceResult struct {

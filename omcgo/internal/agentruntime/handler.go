@@ -68,6 +68,13 @@ func NewHandler(config ConfigProvider, jwtService *admin.JWTService, httpClient 
 	}
 }
 
+func (h *Handler) ToolExecutor() *ToolExecutor {
+	if h == nil {
+		return nil
+	}
+	return h.tools
+}
+
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/agent/conversation", h.GetConversation)
 	rg.POST("/agent/conversation", h.NewConversation)

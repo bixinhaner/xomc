@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.mml.scripts.import",
+  "method": "POST",
+  "path": "/api/v1/mml/scripts/import",
+  "handler": "github.com/omcgo/omcgo/internal/mml.(*Handler).CreateScriptFromImport-fm",
+  "category": "mml",
+  "title": "MML - 导入",
+  "summary": "MML - 导入",
+  "description": "MML：导入外部文件或业务数据",
+  "intents": [
+    "MML - 导入",
+    "MML：导入外部文件或业务数据",
+    "mml",
+    "scripts",
+    "import"
+  ],
+  "tags": [
+    "mml",
+    "scripts",
+    "import"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：MML - 导入",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "path-only",
+    "response": "standard-envelope"
+  },
+  "relatedOperations": [
+    {
+      "operationId": "post.mml.scripts.import.validate",
+      "method": "POST",
+      "path": "/api/v1/mml/scripts/import/validate",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.mml.scripts.import.template",
+      "method": "GET",
+      "path": "/api/v1/mml/scripts/import/template",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.mml.scripts.by_id.import.validate",
+      "method": "POST",
+      "path": "/api/v1/mml/scripts/:id/import/validate",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "put.mml.scripts.by_id.import",
+      "method": "PUT",
+      "path": "/api/v1/mml/scripts/:id/import",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.mml.scripts",
+      "method": "GET",
+      "path": "/api/v1/mml/scripts",
+      "relation": "same-resource"
+    }
+  ],
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

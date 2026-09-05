@@ -1,0 +1,17 @@
+{
+  "contractVersion": "1.0",
+  "leaseToken": "lease-token-example-abcdefghijklmnopqrstuvwxyz123456",
+  "workerId": "xomc-connector-worker-1",
+  "status": "succeeded",
+  "httpStatus": 200,
+  "output": {
+    "id": "device-456",
+    "status": "offline",
+    "serial_number": "SN001"
+  },
+  "truncated": false,
+  "resultBytes": 76,
+  "error": null,
+  "completedAt": "2026-08-27T02:16:42Z",
+  "traceId": "01JQ8G7N6K1A2B3C4D5E6F7G8H"
+}

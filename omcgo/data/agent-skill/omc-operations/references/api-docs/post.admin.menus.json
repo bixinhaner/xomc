@@ -120,6 +120,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.admin.menus",
+      "method": "DELETE",
+      "path": "/api/v1/admin/menus",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.admin.menus.by_id",
+      "method": "PUT",
+      "path": "/api/v1/admin/menus/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.admin.menus",
+      "method": "GET",
+      "path": "/api/v1/admin/menus",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.admin.menus.by_id",
+      "method": "GET",
+      "path": "/api/v1/admin/menus/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.admin.menus.tree",
+      "method": "GET",
+      "path": "/api/v1/admin/menus/tree",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

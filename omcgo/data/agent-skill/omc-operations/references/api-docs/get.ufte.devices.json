@@ -9,13 +9,16 @@
   "summary": "查询传输任务设备执行明细与失败原因",
   "description": "可按 taskId、category、typeCode 和 status 筛选；失败记录返回 failureReason 和设备上报的原始 failureDetail，适用于日志收集、升级、备份和恢复任务排障。",
   "intents": [
+    "ufte - 列表",
     "查询传输任务设备执行明细与失败原因",
     "可按 taskId、category、typeCode 和 status 筛选；失败记录返回 failureReason 和设备上报的原始 failureDetail，适用于日志收集、升级、备份和恢复任务排障。",
     "ufte",
+    "统一文件传输",
     "devices"
   ],
   "tags": [
     "ufte",
+    "统一文件传输",
     "devices"
   ],
   "risk": "read",
@@ -161,7 +164,39 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
-  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "emptyResult": "空数组或 total=0 只说明该操作在当前用户权限和本次过滤条件下没有返回记录，不能单独证明业务对象、源数据或系统能力不存在。先核对参数、标识符、时间范围和权限；若用户目标仍未回答，再沿 relatedOperations 选择汇总、明细、原始或派生数据操作补充证据。",
+  "relatedOperations": [
+    {
+      "operationId": "get.ufte.devices.export",
+      "method": "GET",
+      "path": "/api/v1/ufte/devices/export",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.ufte.device_candidates",
+      "method": "GET",
+      "path": "/api/v1/ufte/device-candidates",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.ufte.overview",
+      "method": "GET",
+      "path": "/api/v1/ufte/overview",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.ufte.task_types",
+      "method": "GET",
+      "path": "/api/v1/ufte/task-types",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.ufte.tasks",
+      "method": "GET",
+      "path": "/api/v1/ufte/tasks",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

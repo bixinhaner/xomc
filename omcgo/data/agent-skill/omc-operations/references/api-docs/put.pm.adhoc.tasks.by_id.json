@@ -1,0 +1,212 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "put.pm.adhoc.tasks.by_id",
+  "method": "PUT",
+  "path": "/api/v1/pm/adhoc/tasks/:id",
+  "handler": "github.com/omcgo/omcgo/internal/pm/adhoc.(*Handler).Update-fm",
+  "category": "pm",
+  "title": "Update PM adhoc task definition",
+  "summary": "Update PM adhoc task definition",
+  "description": "保存自定义聚合任务定义。自建任务可更新名称、设备、指标、粒度、可见性、对象白名单和时间窗；内置任务只更新 metric_paths，其余结构性字段由后端忽略。 Handler: Update PUT/PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
+  "intents": [
+    "性能 PM - 更新",
+    "Update PM adhoc task definition",
+    "保存自定义聚合任务定义。自建任务可更新名称、设备、指标、粒度、可见性、对象白名单和时间窗；内置任务只更新 metric_paths，其余结构性字段由后端忽略。 Handler: Update PUT/PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
+    "pm",
+    "性能",
+    "adhoc",
+    "tasks"
+  ],
+  "tags": [
+    "pm",
+    "性能",
+    "adhoc",
+    "tasks",
+    "PMCounters"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：Update PM adhoc task definition",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "Resource UUID",
+      "schema": {
+        "format": "uuid",
+        "type": "string"
+      }
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "$ref": "#/components/schemas/UpdatePmAdhocTaskRequest"
+    }
+  },
+  "responses": {
+    "200": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "$ref": "#/components/schemas/OmcIdEnvelope"
+          }
+        }
+      },
+      "description": "Updated PM adhoc task id"
+    },
+    "400": {
+      "$ref": "#/components/responses/BadRequest"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    },
+    "403": {
+      "$ref": "#/components/responses/Forbidden"
+    },
+    "404": {
+      "$ref": "#/components/responses/NotFound"
+    }
+  },
+  "referencedSchemas": {
+    "OmcIdEnvelope": {
+      "properties": {
+        "data": {
+          "properties": {
+            "id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "msg": {
+          "example": "ok",
+          "type": "string"
+        },
+        "ret": {
+          "example": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ret",
+        "msg",
+        "data"
+      ],
+      "type": "object"
+    },
+    "UpdatePmAdhocTaskRequest": {
+      "properties": {
+        "device_sns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "granularities": {
+          "items": {
+            "enum": [
+              "hourly",
+              "daily",
+              "weekly",
+              "monthly"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "metric_paths": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "object_ldns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "planned_end_at": {
+          "format": "date-time",
+          "nullable": true,
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "private",
+            "public"
+          ],
+          "type": "string"
+        },
+        "window_end": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "window_start": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric_paths"
+      ],
+      "type": "object"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "relatedOperations": [
+    {
+      "operationId": "delete.pm.adhoc.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.pm.adhoc.tasks.by_id.definition",
+      "method": "DELETE",
+      "path": "/api/v1/pm/adhoc/tasks/:id/definition",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "patch.pm.adhoc.tasks.by_id",
+      "method": "PATCH",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.pm.adhoc.tasks",
+      "method": "POST",
+      "path": "/api/v1/pm/adhoc/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.pm.adhoc.tasks.by_id.resume",
+      "method": "POST",
+      "path": "/api/v1/pm/adhoc/tasks/:id/resume",
+      "relation": "same-resource"
+    }
+  ],
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

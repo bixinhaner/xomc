@@ -90,6 +90,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.devices.recycle",
+      "method": "GET",
+      "path": "/api/v1/devices/recycle",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "patch.devices.recycle.restore",
+      "method": "PATCH",
+      "path": "/api/v1/devices/recycle/restore",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.devices",
+      "method": "POST",
+      "path": "/api/v1/devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.devices",
+      "method": "GET",
+      "path": "/api/v1/devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.devices.batch",
+      "method": "DELETE",
+      "path": "/api/v1/devices/batch",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

@@ -104,6 +104,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.backup.schedules.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/backup/schedules/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.backup.schedules.by_id",
+      "method": "PUT",
+      "path": "/api/v1/backup/schedules/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.backup.schedules",
+      "method": "GET",
+      "path": "/api/v1/backup/schedules",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.backup.config_snapshots.by_sn",
+      "method": "DELETE",
+      "path": "/api/v1/backup/config-snapshots/:sn",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.backup.device_licenses.by_sn",
+      "method": "DELETE",
+      "path": "/api/v1/backup/device-licenses/:sn",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

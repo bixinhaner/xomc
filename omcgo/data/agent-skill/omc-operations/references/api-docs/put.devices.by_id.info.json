@@ -66,6 +66,11 @@
           "description": "Remark 备注信息",
           "nullable": true,
           "type": "string"
+        },
+        "site_id": {
+          "description": "SiteID 站点 ID。UPS 设备写入 device_ups_info，基站仍走 devices.site_id 更新接口。",
+          "nullable": true,
+          "type": "string"
         }
       },
       "type": "object"
@@ -111,6 +116,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.devices.by_id.info",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/info",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.devices.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/devices/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.devices",
+      "method": "POST",
+      "path": "/api/v1/devices",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.devices.by_id",
+      "method": "PUT",
+      "path": "/api/v1/devices/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.devices",
+      "method": "GET",
+      "path": "/api/v1/devices",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

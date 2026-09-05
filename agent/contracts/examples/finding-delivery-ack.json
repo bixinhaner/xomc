@@ -1,0 +1,10 @@
+{
+  "contractVersion": "1.0",
+  "leaseToken": "delivery-lease-token-abcdefghijklmnopqrstuvwxyz1234",
+  "workerId": "xomc-connector-worker-1",
+  "status": "delivered",
+  "localFindingId": "local-finding-9001",
+  "error": null,
+  "committedAt": "2026-08-27T02:18:10Z",
+  "traceId": "01JQ8G7N6K1A2B3C4D5E6F7G8H"
+}

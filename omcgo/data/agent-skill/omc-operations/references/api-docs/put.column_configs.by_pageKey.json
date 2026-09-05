@@ -110,6 +110,14 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.column_configs.by_pageKey",
+      "method": "GET",
+      "path": "/api/v1/column-configs/:pageKey",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

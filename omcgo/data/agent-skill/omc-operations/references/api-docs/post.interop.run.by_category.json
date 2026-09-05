@@ -96,6 +96,32 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.interop.run",
+      "method": "POST",
+      "path": "/api/v1/interop/run",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.interop.run.report",
+      "method": "POST",
+      "path": "/api/v1/interop/run/report",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.interop.validate.by_deviceId",
+      "method": "POST",
+      "path": "/api/v1/interop/validate/:deviceId",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.interop.test_cases",
+      "method": "GET",
+      "path": "/api/v1/interop/test-cases",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

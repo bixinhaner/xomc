@@ -95,6 +95,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.backup.restore.by_snapshot",
+      "method": "POST",
+      "path": "/api/v1/backup/restore/by-snapshot",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.backup.restore.by_task_id",
+      "method": "POST",
+      "path": "/api/v1/backup/restore/by-task-id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.backup.config_snapshots.by_sn",
+      "method": "DELETE",
+      "path": "/api/v1/backup/config-snapshots/:sn",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.backup.device_licenses.by_sn",
+      "method": "DELETE",
+      "path": "/api/v1/backup/device-licenses/:sn",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.backup.ftp_configs.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/backup/ftp-configs/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

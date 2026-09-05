@@ -1,0 +1,15 @@
+icon: device-review
+titleTemplate: 设备接入审核建议
+defaultSurface: access-review
+sections:
+- summary
+- facts
+- hypotheses
+- details
+- resources
+- suggestedActions
+actions:
+- open-finding
+- open-resource
+- continue-agent
+- dismiss

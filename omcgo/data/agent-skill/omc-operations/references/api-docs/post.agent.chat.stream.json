@@ -67,6 +67,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.agent.attachments.by_attachmentID",
+      "method": "DELETE",
+      "path": "/api/v1/agent/attachments/:attachmentID",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "patch.agent.admin.scenarios.by_scenarioKey",
+      "method": "PATCH",
+      "path": "/api/v1/agent/admin/scenarios/:scenarioKey",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "patch.agent.assistants.by_id.state",
+      "method": "PATCH",
+      "path": "/api/v1/agent/assistants/:id/state",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.agent.admin.runs.by_runID.cancel",
+      "method": "POST",
+      "path": "/api/v1/agent/admin/runs/:runID/cancel",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.agent.assistants",
+      "method": "POST",
+      "path": "/api/v1/agent/assistants",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

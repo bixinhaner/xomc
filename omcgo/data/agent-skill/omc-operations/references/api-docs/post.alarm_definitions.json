@@ -113,6 +113,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.alarm_definitions.by_identifier",
+      "method": "DELETE",
+      "path": "/api/v1/alarm-definitions/:identifier",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.alarm_definitions.files.*loadedFrom",
+      "method": "DELETE",
+      "path": "/api/v1/alarm-definitions/files/*loadedFrom",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.alarm_definitions.upload_xml",
+      "method": "POST",
+      "path": "/api/v1/alarm-definitions/upload-xml",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.alarm_definitions.by_identifier",
+      "method": "PUT",
+      "path": "/api/v1/alarm-definitions/:identifier",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.alarm_definitions",
+      "method": "GET",
+      "path": "/api/v1/alarm-definitions",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

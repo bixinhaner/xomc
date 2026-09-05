@@ -75,10 +75,10 @@
       "path": "/api/v1/alarm-definitions/file-content",
       "title": "alarm-definitions - filecontent",
       "summary": "alarm-definitions - filecontent",
-      "description": "alarm-definitions：处理filecontent相关数据 Handler: DownloadFile GET /api/v1/alarm-definitions/file-content?loaded_from=alarm-definitions/\u003cfile\u003e.xml\n\n下载 XML 原文件(2026-06-05 操作列下载功能)。builtin 与 custom 均可下载(只读无守门);\n路径校验与 DeleteFile 同口径:validAlarmFilePath + pathContainedIn 双重防遍历。",
+      "description": "alarm-definitions：处理filecontent相关数据 Handler: DownloadFile GET /api/v1/alarm-definitions/file-content\n\n两种模式(#268):\n  - ?loaded_from=alarm-definitions/\u003cfile\u003e.xml — 下载磁盘原文件(builtin 与 custom\n    均可,只读无守门);路径校验与 DeleteFile 同口径:validAlarmFilePath +\n    pathContainedIn 双重防遍历。\n  - ?ne_type=ENB(不带 loaded_from) — 手工新增行没有落盘文件,从 DB 取该\n    ne_type 下 loaded_from 为空的全量定义,动态生成 alarmModel XML 返回。\n    字段与导入格式对齐(severity 用名称 / isShow Y|N / eventType 数字),\n    导出文件可直接回传 upload-xml。",
       "intents": [
         "alarm-definitions - filecontent",
-        "alarm-definitions：处理filecontent相关数据 Handler: DownloadFile GET /api/v1/alarm-definitions/file-content?loaded_from=alarm-definitions/\u003cfile\u003e.xml\n\n下载 XML 原文件(2026-06-05 操作列下载功能)。builtin 与 custom 均可下载(只读无守门);\n路径校验与 DeleteFile 同口径:validAlarmFilePath + pathContainedIn 双重防遍历。",
+        "alarm-definitions：处理filecontent相关数据 Handler: DownloadFile GET /api/v1/alarm-definitions/file-content\n\n两种模式(#268):\n  - ?loaded_from=alarm-definitions/\u003cfile\u003e.xml — 下载磁盘原文件(builtin 与 custom\n    均可,只读无守门);路径校验与 DeleteFile 同口径:validAlarmFilePath +\n    pathContainedIn 双重防遍历。\n  - ?ne_type=ENB(不带 loaded_from) — 手工新增行没有落盘文件,从 DB 取该\n    ne_type 下 loaded_from 为空的全量定义,动态生成 alarmModel XML 返回。\n    字段与导入格式对齐(severity 用名称 / isShow Y|N / eventType 数字),\n    导出文件可直接回传 upload-xml。",
         "alarm-definitions",
         "file-content",
         "alarm definitions",

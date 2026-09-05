@@ -106,6 +106,20 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.device_registrations.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/device-registrations/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.device_registrations",
+      "method": "GET",
+      "path": "/api/v1/device-registrations",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

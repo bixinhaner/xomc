@@ -12,10 +12,12 @@
     "ufte - 创建",
     "ufte：创建新的资源记录",
     "ufte",
+    "统一文件传输",
     "tasks"
   ],
   "tags": [
     "ufte",
+    "统一文件传输",
     "tasks"
   ],
   "risk": "low",
@@ -52,6 +54,13 @@
         "executionMode": {
           "type": "string"
         },
+        "fileId": {
+          "description": "FileID IMS_PARAM_DISTRIBUTE 必填：参数文件库（ims_param_files）目标文件 ID。",
+          "format": "uuid",
+          "goType": "uuid.UUID",
+          "nullable": true,
+          "type": "string"
+        },
         "firmwareId": {
           "format": "uuid",
           "goType": "uuid.UUID",
@@ -62,6 +71,10 @@
           "type": "boolean"
         },
         "note": {
+          "type": "string"
+        },
+        "paramType": {
+          "description": "ParamType 核心网（ims_core）任务必填：参数类型标签 FT_ImsCore_*，\n区分 ImsCore Parameters File 下的具体参数配置（FT1~FT12）。",
           "type": "string"
         },
         "productType": {
@@ -127,6 +140,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.ufte.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/ufte/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ufte.tasks.batch_delete",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks/batch-delete",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ufte.tasks.by_id.retry",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks/:id/retry",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.ufte.tasks.by_id.start",
+      "method": "PUT",
+      "path": "/api/v1/ufte/tasks/:id/start",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.ufte.tasks.by_id.suspend",
+      "method": "PUT",
+      "path": "/api/v1/ufte/tasks/:id/suspend",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

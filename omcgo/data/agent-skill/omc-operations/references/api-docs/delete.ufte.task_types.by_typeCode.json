@@ -12,11 +12,13 @@
     "ufte - tasktypes删除",
     "ufte：查询或维护指定对象的tasktypes删除数据",
     "ufte",
+    "统一文件传输",
     "task-types",
     "task types"
   ],
   "tags": [
     "ufte",
+    "统一文件传输",
     "task-types"
   ],
   "risk": "high",
@@ -74,6 +76,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.ufte.task_types",
+      "method": "POST",
+      "path": "/api/v1/ufte/task-types",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.ufte.task_types.by_typeCode",
+      "method": "PUT",
+      "path": "/api/v1/ufte/task-types/:typeCode",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.ufte.task_types",
+      "method": "GET",
+      "path": "/api/v1/ufte/task-types",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.ufte.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/ufte/tasks/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.ufte.tasks",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.device_access.access_list",
+  "method": "POST",
+  "path": "/api/v1/device-access/access-list",
+  "handler": "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).UpsertList-fm",
+  "category": "device-access",
+  "title": "device-access - accesslist",
+  "summary": "device-access - accesslist",
+  "description": "device-access：处理accesslist相关数据",
+  "intents": [
+    "device-access - accesslist",
+    "device-access：处理accesslist相关数据",
+    "device-access",
+    "access-list",
+    "device access",
+    "access list"
+  ],
+  "tags": [
+    "device-access",
+    "access-list"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：device-access - accesslist",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "path-only",
+    "response": "standard-envelope"
+  },
+  "relatedOperations": [
+    {
+      "operationId": "post.device_access.access_list.batch_disable",
+      "method": "POST",
+      "path": "/api/v1/device-access/access-list/batch-disable",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.device_access.access_list",
+      "method": "GET",
+      "path": "/api/v1/device-access/access-list",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.device_access.access_list.template",
+      "method": "GET",
+      "path": "/api/v1/device-access/access-list/template",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.device_access.policies.by_versionID",
+      "method": "DELETE",
+      "path": "/api/v1/device-access/policies/:versionID",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.device_access.policies.by_versionID.rules.by_ruleID.dimensions.by_dimension",
+      "method": "DELETE",
+      "path": "/api/v1/device-access/policies/:versionID/rules/:ruleID/dimensions/:dimension",
+      "relation": "same-domain"
+    }
+  ],
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

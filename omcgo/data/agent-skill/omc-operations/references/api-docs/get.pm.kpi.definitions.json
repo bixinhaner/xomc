@@ -7,11 +7,11 @@
   "category": "pm",
   "title": "List KPI definitions",
   "summary": "List KPI definitions",
-  "description": "性能 PM：查询或维护定义数据 Handler: ListKPIDefinitions 返回 KPI 元数据目录，供前端\"性能管理→指标列表\"等界面消费。\n\nT-0164-P1 改造前：数据源是 carrier 适配器代码里硬编码的 KPIDefinitions 列表。\n现在改为枚举 perf_indicators_{enb,gsm,gnb}（is_counter='0' 的行），\nplatform_name 维度的具体公式在 KPIEngine 计算路径上由 router 路由解析，\n这里只暴露\"系统支持哪些 KPI 指标\"。\n\n查询参数（向后兼容老前端的 carrier 模糊搜索）：\n  - keyword：name/cn_name/id 模糊匹配\n  - device_type：ENB / GSM / GNB（不传 → 三表合并枚举）\n  - include_counters：可选开关（缺省 false）。false 时维持 is_counter='0'（仅 KPI），\n    行为与历史完全一致；true 时不按 is_counter 过滤，返回 KPI + 计数器，供向导穿梭框消费。\n\n响应每条在历史字段（name/display_name/formula/unit）之外，补 id（= perf_indicators 行 ID，\nK/C 编号）与 is_counter（\"0\" KPI / \"1\" 计数器）。默认调用方只读历史字段，零回归。",
+  "description": "性能 PM：查询或维护定义数据 Handler: ListKPIDefinitions 返回 KPI 元数据目录，供前端\"性能管理→指标列表\"等界面消费。\n\nT-0164-P1 改造前：数据源是 carrier 适配器代码里硬编码的 KPIDefinitions 列表。\n现在改为枚举 perf_indicators_{enb,gsm,gnb}（is_counter='0' 的行），\nplatform_name 维度的具体公式在 KPIEngine 计算路径上由 router 路由解析，\n这里只暴露\"系统支持哪些 KPI 指标\"。\n\n查询参数（向后兼容老前端的 carrier 模糊搜索）：\n  - keyword：name/cn_name/id 模糊匹配\n  - device_type：ENB / GSM / GNB（不传 → 三表合并枚举）\n  - include_counters：可选开关（缺省 false）。false 时维持 is_counter='0'（仅 KPI），\n    行为与历史完全一致；true 时不按 is_counter 过滤，返回 KPI + 计数器，供向导穿梭框消费。\n  - only_enabled：可选开关（缺省 false）。true 时只返回 operator_code='default' 下已启用指标，\n    供性能查询、设备性能查看、首页 KPI 配置和自定义聚合候选使用。\n\n响应每条在历史字段（name/display_name/formula/unit）之外，补 id（= perf_indicators 行 ID，\nK/C 编号）与 is_counter（\"0\" KPI / \"1\" 计数器）。默认调用方只读历史字段，零回归。",
   "intents": [
     "性能 PM - 定义",
     "List KPI definitions",
-    "性能 PM：查询或维护定义数据 Handler: ListKPIDefinitions 返回 KPI 元数据目录，供前端\"性能管理→指标列表\"等界面消费。\n\nT-0164-P1 改造前：数据源是 carrier 适配器代码里硬编码的 KPIDefinitions 列表。\n现在改为枚举 perf_indicators_{enb,gsm,gnb}（is_counter='0' 的行），\nplatform_name 维度的具体公式在 KPIEngine 计算路径上由 router 路由解析，\n这里只暴露\"系统支持哪些 KPI 指标\"。\n\n查询参数（向后兼容老前端的 carrier 模糊搜索）：\n  - keyword：name/cn_name/id 模糊匹配\n  - device_type：ENB / GSM / GNB（不传 → 三表合并枚举）\n  - include_counters：可选开关（缺省 false）。false 时维持 is_counter='0'（仅 KPI），\n    行为与历史完全一致；true 时不按 is_counter 过滤，返回 KPI + 计数器，供向导穿梭框消费。\n\n响应每条在历史字段（name/display_name/formula/unit）之外，补 id（= perf_indicators 行 ID，\nK/C 编号）与 is_counter（\"0\" KPI / \"1\" 计数器）。默认调用方只读历史字段，零回归。",
+    "性能 PM：查询或维护定义数据 Handler: ListKPIDefinitions 返回 KPI 元数据目录，供前端\"性能管理→指标列表\"等界面消费。\n\nT-0164-P1 改造前：数据源是 carrier 适配器代码里硬编码的 KPIDefinitions 列表。\n现在改为枚举 perf_indicators_{enb,gsm,gnb}（is_counter='0' 的行），\nplatform_name 维度的具体公式在 KPIEngine 计算路径上由 router 路由解析，\n这里只暴露\"系统支持哪些 KPI 指标\"。\n\n查询参数（向后兼容老前端的 carrier 模糊搜索）：\n  - keyword：name/cn_name/id 模糊匹配\n  - device_type：ENB / GSM / GNB（不传 → 三表合并枚举）\n  - include_counters：可选开关（缺省 false）。false 时维持 is_counter='0'（仅 KPI），\n    行为与历史完全一致；true 时不按 is_counter 过滤，返回 KPI + 计数器，供向导穿梭框消费。\n  - only_enabled：可选开关（缺省 false）。true 时只返回 operator_code='default' 下已启用指标，\n    供性能查询、设备性能查看、首页 KPI 配置和自定义聚合候选使用。\n\n响应每条在历史字段（name/display_name/formula/unit）之外，补 id（= perf_indicators 行 ID，\nK/C 编号）与 is_counter（\"0\" KPI / \"1\" 计数器）。默认调用方只读历史字段，零回归。",
     "pm",
     "性能",
     "kpi",
@@ -52,20 +52,28 @@
       "type": "string"
     },
     {
+      "name": "isEnabled",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "is_enabled",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
       "name": "keyword",
       "in": "query",
       "required": false,
       "type": "string"
     },
     {
-      "name": "technology",
+      "name": "only_enabled",
       "in": "query",
       "required": false,
-      "type": "string",
-      "description": "Radio access technology (e.g. 4G, 5G)",
-      "schema": {
-        "type": "string"
-      }
+      "type": "string"
     }
   ],
   "formParams": [],
@@ -129,7 +137,39 @@
     "request": "openapi",
     "response": "openapi"
   },
-  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "emptyResult": "空数组或 total=0 只说明该操作在当前用户权限和本次过滤条件下没有返回记录，不能单独证明业务对象、源数据或系统能力不存在。先核对参数、标识符、时间范围和权限；若用户目标仍未回答，再沿 relatedOperations 选择汇总、明细、原始或派生数据操作补充证据。",
+  "relatedOperations": [
+    {
+      "operationId": "get.pm.kpi",
+      "method": "GET",
+      "path": "/api/v1/pm/kpi",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.pm.kpi.calculate",
+      "method": "POST",
+      "path": "/api/v1/pm/kpi/calculate",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.dashboard.kpi.definitions",
+      "method": "GET",
+      "path": "/api/v1/dashboard/kpi/definitions",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.pm.adhoc.tasks",
+      "method": "GET",
+      "path": "/api/v1/pm/adhoc/tasks",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.pm.adhoc.tasks.by_id",
+      "method": "GET",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",

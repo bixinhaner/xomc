@@ -19,6 +19,8 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/agentassistant"
+	"github.com/omcgo/omcgo/internal/agentbridge"
 	"github.com/omcgo/omcgo/internal/attention"
 	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/backup"
@@ -1578,6 +1580,8 @@ func initDashboardModule(c *Container) error {
 	abnormalitySources := []attention.RankedSource{
 		attention.NewAlarmAbnormalitySource(c.AlarmPgStore, model.AlarmCritical),
 		attention.NewAlarmAbnormalitySource(c.AlarmPgStore, model.AlarmMajor),
+		agentbridge.NewAttentionSource(agentbridge.NewFindingRepository(c.PgPool)),
+		agentassistant.NewAttentionSource(agentassistant.NewRepository(c.PgPool)),
 	}
 	todoSources := []attention.RankedSource{
 		attention.NewCandidateSource(candidateReader),
@@ -2941,9 +2945,11 @@ type miscDeps struct {
 	licenseParamHandler *device.LicenseParamHandler
 
 	// Ops
-	opsHandler       *ops.Handler
-	opsExtHandler    *ops.ExtHandler
-	attentionHandler *attention.Handler
+	opsHandler          *ops.Handler
+	opsExtHandler       *ops.ExtHandler
+	attentionHandler    *attention.Handler
+	agentFindingHandler *agentbridge.FindingHandler
+	agentAdminHandler   *agentbridge.AdminHandler
 
 	// Report
 	reportHandler *report.Handler

@@ -28,15 +28,6 @@
   "queryParams": [],
   "formParams": [
     {
-      "name": "carrier",
-      "in": "form",
-      "required": true,
-      "type": "string",
-      "schema": {
-        "type": "string"
-      }
-    },
-    {
       "name": "description",
       "in": "form",
       "required": false,
@@ -49,7 +40,7 @@
       "name": "file",
       "in": "form",
       "required": true,
-      "type": "string",
+      "type": "file",
       "schema": {
         "format": "binary",
         "type": "string"
@@ -205,6 +196,38 @@
     "request": "openapi",
     "response": "openapi"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.firmware.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/firmware/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.firmware.batch_download",
+      "method": "POST",
+      "path": "/api/v1/firmware/batch-download",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.firmware.by_id",
+      "method": "PUT",
+      "path": "/api/v1/firmware/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.firmware.by_id.recommend",
+      "method": "PUT",
+      "path": "/api/v1/firmware/:id/recommend",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.firmware",
+      "method": "GET",
+      "path": "/api/v1/firmware",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",

@@ -1,0 +1,153 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.northbound.page_config.inventory.profiles.by_id.run",
+  "method": "POST",
+  "path": "/api/v1/northbound/page-config/inventory/profiles/:id/run",
+  "handler": "github.com/omcgo/omcgo/internal/northbound/pageconfig.(*Handler).RunInventoryProfile-fm",
+  "category": "northbound",
+  "title": "北向接口 - 执行",
+  "summary": "北向接口 - 执行",
+  "description": "北向接口：执行指定任务",
+  "intents": [
+    "北向接口 - 执行",
+    "北向接口：执行指定任务",
+    "northbound",
+    "北向接口",
+    "page-config",
+    "inventory",
+    "profiles",
+    "run",
+    "page config"
+  ],
+  "tags": [
+    "northbound",
+    "北向接口",
+    "page-config",
+    "inventory",
+    "profiles",
+    "run"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：北向接口 - 执行",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :id"
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "RunProfileRequest",
+      "properties": {
+        "group_id": {
+          "type": "string"
+        },
+        "limit": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "trigger_reason": {
+          "type": "string"
+        },
+        "window_end": {
+          "format": "date-time",
+          "goType": "time.Time",
+          "nullable": true,
+          "type": "string"
+        },
+        "window_start": {
+          "format": "date-time",
+          "goType": "time.Time",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "relatedOperations": [
+    {
+      "operationId": "put.northbound.page_config.inventory.profiles.by_id",
+      "method": "PUT",
+      "path": "/api/v1/northbound/page-config/inventory/profiles/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.northbound.page_config.inventory.profiles",
+      "method": "GET",
+      "path": "/api/v1/northbound/page-config/inventory/profiles",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.northbound.page_config.file.profiles.by_id.run",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/file/profiles/:id/run",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.northbound.page_config.file.profiles",
+      "method": "POST",
+      "path": "/api/v1/northbound/page-config/file/profiles",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "put.northbound.page_config.file.profiles.by_id",
+      "method": "PUT",
+      "path": "/api/v1/northbound/page-config/file/profiles/:id",
+      "relation": "same-domain"
+    }
+  ],
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

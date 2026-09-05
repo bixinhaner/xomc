@@ -77,6 +77,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.pm.adhoc.tasks.by_id.definition",
+      "method": "DELETE",
+      "path": "/api/v1/pm/adhoc/tasks/:id/definition",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "patch.pm.adhoc.tasks.by_id",
+      "method": "PATCH",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.pm.adhoc.tasks",
+      "method": "POST",
+      "path": "/api/v1/pm/adhoc/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.pm.adhoc.tasks.by_id.resume",
+      "method": "POST",
+      "path": "/api/v1/pm/adhoc/tasks/:id/resume",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.pm.adhoc.tasks.by_id",
+      "method": "PUT",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

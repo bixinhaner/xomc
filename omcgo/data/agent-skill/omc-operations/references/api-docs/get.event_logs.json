@@ -5,12 +5,13 @@
   "path": "/api/v1/event-logs",
   "handler": "github.com/omcgo/omcgo/internal/eventlog.(*Handler).List-fm",
   "category": "event-logs",
-  "title": "event-logs - 列表",
-  "summary": "event-logs - 列表",
-  "description": "event-logs：按筛选条件查询资源列表 Handler: List godoc\n@Summary 查询事件日志列表\n@Param device_sn   query string false \"设备 SN（模糊匹配 ILIKE）\"\n@Param event_type  query string false \"事件类型：boot / ...\"\n@Param start_time  query string false \"起始时间 RFC3339\"\n@Param end_time    query string false \"结束时间 RFC3339\"\n@Param page        query int    false \"页码 默认 1\"\n@Param page_size   query int    false \"每页 默认 20\"",
+  "title": "查询事件日志列表",
+  "summary": "查询事件日志列表",
+  "description": "event-logs：按筛选条件查询资源列表",
   "intents": [
     "event-logs - 列表",
-    "event-logs：按筛选条件查询资源列表 Handler: List godoc\n@Summary 查询事件日志列表\n@Param device_sn   query string false \"设备 SN（模糊匹配 ILIKE）\"\n@Param event_type  query string false \"事件类型：boot / ...\"\n@Param start_time  query string false \"起始时间 RFC3339\"\n@Param end_time    query string false \"结束时间 RFC3339\"\n@Param page        query int    false \"页码 默认 1\"\n@Param page_size   query int    false \"每页 默认 20\"",
+    "查询事件日志列表",
+    "event-logs：按筛选条件查询资源列表",
     "event-logs",
     "event logs"
   ],
@@ -101,7 +102,21 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
-  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "emptyResult": "空数组或 total=0 只说明该操作在当前用户权限和本次过滤条件下没有返回记录，不能单独证明业务对象、源数据或系统能力不存在。先核对参数、标识符、时间范围和权限；若用户目标仍未回答，再沿 relatedOperations 选择汇总、明细、原始或派生数据操作补充证据。",
+  "relatedOperations": [
+    {
+      "operationId": "get.event_logs.by_id",
+      "method": "GET",
+      "path": "/api/v1/event-logs/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.event_logs.statistics",
+      "method": "GET",
+      "path": "/api/v1/event-logs/statistics",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

@@ -123,6 +123,32 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.admin.sysDictionaryDetail.deleteSysDictionaryDetail",
+      "method": "DELETE",
+      "path": "/api/v1/admin/sysDictionaryDetail/deleteSysDictionaryDetail",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.admin.sysDictionaryDetail.createSysDictionaryDetail",
+      "method": "POST",
+      "path": "/api/v1/admin/sysDictionaryDetail/createSysDictionaryDetail",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.admin.sysDictionaryDetail.findSysDictionaryDetail",
+      "method": "GET",
+      "path": "/api/v1/admin/sysDictionaryDetail/findSysDictionaryDetail",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.admin.sysDictionaryDetail.getSysDictionaryDetailList",
+      "method": "GET",
+      "path": "/api/v1/admin/sysDictionaryDetail/getSysDictionaryDetailList",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

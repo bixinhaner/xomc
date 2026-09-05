@@ -14,7 +14,7 @@ import {
   Tooltip,
 } from 'antd';
 import { AlertOutlined, CheckSquareOutlined, RightOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAttentionPage, useAttentionSummary } from '@core/hooks/api/useAttention';
 import type {
   AttentionAction,
@@ -24,14 +24,19 @@ import type {
 } from '@core/types/attention';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { useT } from '@/hooks/useT';
+import AgentFindingDrawer from '@/components/AgentFindingDrawer/AgentFindingDrawer';
 import styles from './AttentionBar.module.css';
 
 const ACTION_PRIORITY: AttentionAction[] = [
+ 'view_assistant_result',
+  'view_agent_finding',
   'review_device_candidate',
   'view_alarm',
 ];
 
 const ACTION_I18N: Record<AttentionAction, string> = {
+ view_assistant_result: 'assistant.results',
+  view_agent_finding: 'dashboard.attention.action.viewFinding',
   review_device_candidate: 'dashboard.attention.action.reviewCandidate',
   view_alarm: 'dashboard.attention.action.viewAlarm',
 };
@@ -56,12 +61,16 @@ function itemTag(item: AttentionItem): { color: string; key: string } | undefine
   if (item.kind === 'device_access_review') {
     return { color: 'blue', key: 'dashboard.attention.type.deviceReview' };
   }
+  if (item.kind === 'assistant_result') return { color: 'blue', key: 'assistant.eyebrow' };
+  if (item.kind === 'agent_finding') {
+    return { color: item.severity === 'critical' ? 'red' : 'purple', key: 'dashboard.attention.type.agentFinding' };
+  }
   return undefined;
 }
 
 function AttentionItemButton({ item, onOpen, drawer = false }: {
   item: AttentionItem;
-  onOpen: (route: string) => void;
+  onOpen: (item: AttentionItem) => void;
   drawer?: boolean;
 }) {
   const t = useT();
@@ -72,7 +81,7 @@ function AttentionItemButton({ item, onOpen, drawer = false }: {
     <button
       type="button"
       className={`${styles.itemButton} ${drawer ? styles.drawerItem : ''}`}
-      onClick={() => onOpen(item.detailRoute)}
+      onClick={() => onOpen(item)}
       aria-label={`${item.title} · ${action ? t(ACTION_I18N[action]) : t('common.view')}`}
     >
       <span className={styles.itemHeader}>
@@ -103,7 +112,7 @@ function SectionState({ sectionKey, section, loading, failed, onRetry, onOpen }:
   loading: boolean;
   failed: boolean;
   onRetry: () => void;
-  onOpen: (route: string) => void;
+  onOpen: (item: AttentionItem) => void;
 }) {
   const t = useT();
   if (loading) return <Skeleton active paragraph={{ rows: 2 }} title={false} />;
@@ -123,7 +132,7 @@ function CompactSection({ sectionKey, section, loading, failed, onRetry, onViewA
   failed: boolean;
   onRetry: () => void;
   onViewAll: () => void;
-  onOpen: (route: string) => void;
+  onOpen: (item: AttentionItem) => void;
 }) {
   const t = useT();
   const isAbnormal = sectionKey === 'abnormalities';
@@ -154,7 +163,7 @@ function AttentionDrawer({ open, section, onClose, onOpen }: {
   open: boolean;
   section: AttentionSectionKey;
   onClose: () => void;
-  onOpen: (route: string) => void;
+  onOpen: (item: AttentionItem) => void;
 }) {
   const t = useT();
   const screens = Grid.useBreakpoint();
@@ -222,10 +231,30 @@ function AttentionDrawer({ open, section, onClose, onOpen }: {
 export default function AttentionBar() {
   const t = useT();
   const navigate = useNavigate();
+  const location = useLocation();
   const summary = useAttentionSummary();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerSection, setDrawerSection] = useState<AttentionSectionKey>('abnormalities');
-  const openRoute = (route: string) => void navigate(route);
+  const initialFindingId = new URLSearchParams(location.search).get('agentFinding') ?? undefined;
+  const [findingId, setFindingId] = useState<string | undefined>(initialFindingId);
+  const openItem = (item: AttentionItem) => {
+    if (item.kind === 'assistant_result') return { color: 'blue', key: 'assistant.eyebrow' };
+  if (item.kind === 'agent_finding') {
+      setFindingId(item.sourceId);
+      const params = new URLSearchParams(location.search);
+      params.set('agentFinding', item.sourceId);
+      void navigate(`${location.pathname}?${params.toString()}`, { replace: true });
+      return;
+    }
+    void navigate(item.detailRoute);
+  };
+  const closeFinding = () => {
+    setFindingId(undefined);
+    const params = new URLSearchParams(location.search);
+    params.delete('agentFinding');
+    const query = params.toString();
+    void navigate(`${location.pathname}${query ? `?${query}` : ''}`, { replace: true });
+  };
   const showAll = (section: AttentionSectionKey) => {
     setDrawerSection(section);
     setDrawerOpen(true);
@@ -240,11 +269,12 @@ export default function AttentionBar() {
         data-testid="dashboard-attention-bar"
       >
         <div className={styles.sectionsGrid}>
-          <CompactSection sectionKey="abnormalities" section={summary.data?.abnormalities} loading={summary.isPending} failed={summary.isError} onRetry={() => void summary.refetch()} onViewAll={() => showAll('abnormalities')} onOpen={openRoute} />
-          <CompactSection sectionKey="todos" section={summary.data?.todos} loading={summary.isPending} failed={summary.isError} onRetry={() => void summary.refetch()} onViewAll={() => showAll('todos')} onOpen={openRoute} />
+          <CompactSection sectionKey="abnormalities" section={summary.data?.abnormalities} loading={summary.isPending} failed={summary.isError} onRetry={() => void summary.refetch()} onViewAll={() => showAll('abnormalities')} onOpen={openItem} />
+          <CompactSection sectionKey="todos" section={summary.data?.todos} loading={summary.isPending} failed={summary.isError} onRetry={() => void summary.refetch()} onViewAll={() => showAll('todos')} onOpen={openItem} />
         </div>
       </Card>
-      <AttentionDrawer open={drawerOpen} section={drawerSection} onClose={() => setDrawerOpen(false)} onOpen={openRoute} />
+      <AttentionDrawer open={drawerOpen} section={drawerSection} onClose={() => setDrawerOpen(false)} onOpen={openItem} />
+      <AgentFindingDrawer findingId={findingId} open={Boolean(findingId)} onOpenChange={(open) => { if (!open) closeFinding(); }} />
     </>
   );
 }

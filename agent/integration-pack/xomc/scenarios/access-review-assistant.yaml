@@ -1,0 +1,40 @@
+apiVersion: agentstudio.scenario/v1
+kind: AgentScenario
+metadata:
+  key: access-review-assistant
+  name: 设备接入审核助手
+  version: 1
+  description: 为接入候选提供证据化批准、拒绝或补证建议。
+spec:
+  trigger:
+    eventType: omc.device.access-review-required.v1
+  dedupe:
+    keyTemplate: ${resource.candidate.id}
+    cooldownSeconds: 3600
+  rollout:
+    mode: shadow
+    percentage: 100
+  agent:
+    agentMode: external-operations
+    runtimeClass: background-analysis
+    skills:
+    - omc-operations@1.2.0
+    timeoutSeconds: 120
+    maxToolCalls: 18
+    maxOutputBytes: 65536
+    promptFile: prompts/access-review-assistant.md
+    outputSchemaFile: schemas/access-review-details-v1.schema.json
+    presentationFile: presentation/access-review.yaml
+    allowedOperations:
+    - get.device_access.candidates
+    - get.devices.by_id
+    - get.devices
+    - get.topology.nodes
+  delivery:
+    surfaces:
+    - attention
+    - access-review
+    expiresAfterSeconds: 259200
+  limits:
+    maxConcurrentRuns: 5
+    maxRunsPerHour: 100

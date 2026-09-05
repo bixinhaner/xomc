@@ -1,0 +1,97 @@
+{
+  "schemaVersion": "1.0",
+  "category": "storage-protection",
+  "title": "storage-protection",
+  "operations": [
+    {
+      "operationId": "get.admin.storage_protection.events",
+      "method": "GET",
+      "path": "/api/v1/admin/storage-protection/events",
+      "title": "storage-protection - 列表",
+      "summary": "storage-protection - 列表",
+      "description": "storage-protection：按筛选条件查询资源列表",
+      "intents": [
+        "storage-protection - 列表",
+        "storage-protection：按筛选条件查询资源列表",
+        "storage-protection",
+        "admin",
+        "events",
+        "storage protection"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.storage_protection.events.json"
+    },
+    {
+      "operationId": "get.admin.storage_protection.policies",
+      "method": "GET",
+      "path": "/api/v1/admin/storage-protection/policies",
+      "title": "storage-protection - 列表",
+      "summary": "storage-protection - 列表",
+      "description": "storage-protection：按筛选条件查询资源列表",
+      "intents": [
+        "storage-protection - 列表",
+        "storage-protection：按筛选条件查询资源列表",
+        "storage-protection",
+        "admin",
+        "policies",
+        "storage protection"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.storage_protection.policies.json"
+    },
+    {
+      "operationId": "get.admin.storage_protection.targets",
+      "method": "GET",
+      "path": "/api/v1/admin/storage-protection/targets",
+      "title": "storage-protection - 推送目标",
+      "summary": "storage-protection - 推送目标",
+      "description": "storage-protection：查询通知或任务推送目标",
+      "intents": [
+        "storage-protection - 推送目标",
+        "storage-protection：查询通知或任务推送目标",
+        "storage-protection",
+        "admin",
+        "targets",
+        "storage protection"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.storage_protection.targets.json"
+    },
+    {
+      "operationId": "post.admin.storage_protection.policies",
+      "method": "POST",
+      "path": "/api/v1/admin/storage-protection/policies",
+      "title": "storage-protection - 创建",
+      "summary": "storage-protection - 创建",
+      "description": "storage-protection：创建新的资源记录",
+      "intents": [
+        "storage-protection - 创建",
+        "storage-protection：创建新的资源记录",
+        "storage-protection",
+        "admin",
+        "policies",
+        "storage protection"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.storage_protection.policies.json"
+    },
+    {
+      "operationId": "put.admin.storage_protection.policies.by_id",
+      "method": "PUT",
+      "path": "/api/v1/admin/storage-protection/policies/:id",
+      "title": "storage-protection - 更新",
+      "summary": "storage-protection - 更新",
+      "description": "storage-protection：更新指定资源的完整配置",
+      "intents": [
+        "storage-protection - 更新",
+        "storage-protection：更新指定资源的完整配置",
+        "storage-protection",
+        "admin",
+        "policies",
+        "storage protection"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.admin.storage_protection.policies.by_id.json"
+    }
+  ]
+}

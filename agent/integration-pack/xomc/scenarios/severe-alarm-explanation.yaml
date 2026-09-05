@@ -1,0 +1,48 @@
+apiVersion: agentstudio.scenario/v1
+kind: AgentScenario
+metadata:
+  key: severe-alarm-explanation
+  name: 严重告警解释
+  version: 1
+  description: 解释单条或 xOMC 已聚合的严重告警，并给出影响与调查方向。
+spec:
+  trigger:
+    eventType: omc.alarm.severe-raised.v1
+  match:
+    all:
+    - field: data.severity
+      op: in
+      value:
+      - critical
+      - major
+  dedupe:
+    keyTemplate: ${resource.alarm.id}
+    cooldownSeconds: 1800
+  rollout:
+    mode: shadow
+    percentage: 100
+  agent:
+    agentMode: external-operations
+    runtimeClass: background-analysis
+    skills:
+    - omc-operations@1.2.0
+    timeoutSeconds: 120
+    maxToolCalls: 18
+    maxOutputBytes: 65536
+    promptFile: prompts/severe-alarm-explanation.md
+    outputSchemaFile: schemas/severe-alarm-details-v1.schema.json
+    presentationFile: presentation/severe-alarm.yaml
+    allowedOperations:
+    - get.alarms.active
+    - get.devices.by_id
+    - get.devices
+    - get.pm.counters.aggregated
+  delivery:
+    surfaces:
+    - attention
+    - alarm-detail
+    - device-detail
+    expiresAfterSeconds: 259200
+  limits:
+    maxConcurrentRuns: 5
+    maxRunsPerHour: 200

@@ -75,6 +75,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.pm.exports",
+      "method": "POST",
+      "path": "/api/v1/pm/exports",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.pm.exports",
+      "method": "GET",
+      "path": "/api/v1/pm/exports",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.pm.exports.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/pm/exports/:id/download",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.pm.exports.files",
+      "method": "GET",
+      "path": "/api/v1/pm/exports/files",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.pm.adhoc.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

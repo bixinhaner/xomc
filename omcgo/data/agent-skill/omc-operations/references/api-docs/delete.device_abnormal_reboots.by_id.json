@@ -5,12 +5,13 @@
   "path": "/api/v1/device-abnormal-reboots/:id",
   "handler": "github.com/omcgo/omcgo/internal/stationlog.(*Handler).DeleteAbnormalReboot-fm",
   "category": "device-abnormal-reboots",
-  "title": "device-abnormal-reboots - 删除",
-  "summary": "device-abnormal-reboots - 删除",
-  "description": "device-abnormal-reboots：删除指定资源记录 Handler: DeleteAbnormalReboot godoc\n@Summary  删除异常重启记录（软删 + 清理 MinIO 文件）\n@Tags     device-abnormal-reboots\n@Param    id  path  string  true  \"记录 ID（UUID）\"\n@Success  200 {object} map[string]interface{}\n@Router   /device-abnormal-reboots/{id} [delete]",
+  "title": "删除异常重启记录（兼容历史 file_received 行的 MinIO 清理）",
+  "summary": "删除异常重启记录（兼容历史 file_received 行的 MinIO 清理）",
+  "description": "device-abnormal-reboots：删除指定资源记录",
   "intents": [
     "device-abnormal-reboots - 删除",
-    "device-abnormal-reboots：删除指定资源记录 Handler: DeleteAbnormalReboot godoc\n@Summary  删除异常重启记录（软删 + 清理 MinIO 文件）\n@Tags     device-abnormal-reboots\n@Param    id  path  string  true  \"记录 ID（UUID）\"\n@Success  200 {object} map[string]interface{}\n@Router   /device-abnormal-reboots/{id} [delete]",
+    "删除异常重启记录（兼容历史 file_received 行的 MinIO 清理）",
+    "device-abnormal-reboots：删除指定资源记录",
     "device-abnormal-reboots",
     "device abnormal reboots"
   ],
@@ -20,7 +21,7 @@
   "risk": "high",
   "confirmationRequired": true,
   "idempotent": true,
-  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：device-abnormal-reboots - 删除",
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：删除异常重启记录（兼容历史 file_received 行的 MinIO 清理）",
   "pathParams": [
     {
       "name": "id",
@@ -72,6 +73,26 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.device_abnormal_reboots",
+      "method": "GET",
+      "path": "/api/v1/device-abnormal-reboots",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.device_abnormal_reboots.by_id",
+      "method": "GET",
+      "path": "/api/v1/device-abnormal-reboots/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.device_abnormal_reboots.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/device-abnormal-reboots/:id/download",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

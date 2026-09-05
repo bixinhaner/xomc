@@ -115,6 +115,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.notifications.templates.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/notifications/templates/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.notifications.templates.by_id",
+      "method": "PUT",
+      "path": "/api/v1/notifications/templates/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.notifications.templates",
+      "method": "GET",
+      "path": "/api/v1/notifications/templates",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.notifications.templates.by_id",
+      "method": "GET",
+      "path": "/api/v1/notifications/templates/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.notifications",
+      "method": "DELETE",
+      "path": "/api/v1/notifications",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

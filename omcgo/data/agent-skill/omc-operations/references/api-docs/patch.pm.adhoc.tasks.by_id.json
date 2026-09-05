@@ -7,10 +7,10 @@
   "category": "pm",
   "title": "性能 PM - 部分更新",
   "summary": "性能 PM - 部分更新",
-  "description": "性能 PM：更新指定资源的部分字段 Handler: Update PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
+  "description": "性能 PM：更新指定资源的部分字段 Handler: Update PUT/PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
   "intents": [
     "性能 PM - 部分更新",
-    "性能 PM：更新指定资源的部分字段 Handler: Update PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
+    "性能 PM：更新指定资源的部分字段 Handler: Update PUT/PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
     "pm",
     "性能",
     "adhoc",
@@ -71,6 +71,28 @@
           },
           "type": "array"
         },
+        "planned_end_at": {
+          "goType": "optionalTime",
+          "properties": {
+            "set": {
+              "type": "boolean"
+            },
+            "value": {
+              "format": "date-time",
+              "goType": "time.Time",
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "visibility": {
+          "enum": [
+            "private",
+            "public"
+          ],
+          "type": "string"
+        },
         "window_end": {
           "format": "date-time",
           "goType": "time.Time",
@@ -128,6 +150,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.pm.adhoc.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.pm.adhoc.tasks.by_id.definition",
+      "method": "DELETE",
+      "path": "/api/v1/pm/adhoc/tasks/:id/definition",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.pm.adhoc.tasks",
+      "method": "POST",
+      "path": "/api/v1/pm/adhoc/tasks",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.pm.adhoc.tasks.by_id.resume",
+      "method": "POST",
+      "path": "/api/v1/pm/adhoc/tasks/:id/resume",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.pm.adhoc.tasks.by_id",
+      "method": "PUT",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

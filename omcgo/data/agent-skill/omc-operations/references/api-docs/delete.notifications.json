@@ -65,6 +65,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.notifications.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/notifications/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.notifications.templates.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/notifications/templates/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.notifications.sync_stale",
+      "method": "POST",
+      "path": "/api/v1/notifications/sync-stale",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.notifications.templates",
+      "method": "POST",
+      "path": "/api/v1/notifications/templates",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.notifications.by_id.read",
+      "method": "PUT",
+      "path": "/api/v1/notifications/:id/read",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

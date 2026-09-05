@@ -143,6 +143,7 @@ const DataDictionary     = React.lazy(() => import('@/pages/system/DataDictionar
 const DictLoaderPage     = React.lazy(() => import('@/pages/system/DictLoader'));
 // issue #213 S3：首页 KPI 配置（管理员）
 const KpiConfigPage      = React.lazy(() => import('@/pages/system/KpiConfig'));
+const ActiveIntelligence = React.lazy(() => import('@/pages/system/ActiveIntelligence'));
 
 // Report Management
 const LTEStandardReport  = React.lazy(() => import('@/pages/report/LTEStandardReport'));
@@ -357,6 +358,7 @@ export const routes: RouteObject[] = [
       { path: 'system/dict-loader',    element: withSuspense(DictLoaderPage) },
       // issue #213 S3：首页 KPI 配置（菜单权限控制）
       { path: 'system/kpi-config',     element: withSuspense(KpiConfigPage) },
+      { path: 'system/active-intelligence', element: withSuspense(ActiveIntelligence) },
 
       // Report Management
       { path: 'report/lte-standard',   element: withSuspense(LTEStandardReport) },

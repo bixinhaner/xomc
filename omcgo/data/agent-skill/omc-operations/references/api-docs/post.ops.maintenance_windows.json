@@ -116,6 +116,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.ops.maintenance_windows.by_id.approve",
+      "method": "POST",
+      "path": "/api/v1/ops/maintenance-windows/:id/approve",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.ops.maintenance_windows",
+      "method": "GET",
+      "path": "/api/v1/ops/maintenance-windows",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.ops.maintenance_windows.active",
+      "method": "GET",
+      "path": "/api/v1/ops/maintenance-windows/active",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.ops.maintenance_windows.by_id",
+      "method": "GET",
+      "path": "/api/v1/ops/maintenance-windows/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.ops.templates.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/ops/templates/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

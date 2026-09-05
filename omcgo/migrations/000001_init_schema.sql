@@ -23575,6 +23575,135 @@ ALTER TABLE public.param_models
     ADD COLUMN IF NOT EXISTS content_hash character varying(64);
 -- +omcgo MainReconcileEnd
 
+-- Agent Studio 主动智能桥接：事件出站与 Finding 本地投影。
+-- 当前版本未封版，按基线规则折回 000001；所有 DDL 保持幂等，供既有库 reconcile。
+-- +omcgo MainReconcileBegin
+CREATE TABLE IF NOT EXISTS public.agent_bridge_event_outbox (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    event_id character varying(160) NOT NULL,
+    event_type character varying(120) NOT NULL,
+    payload jsonb NOT NULL,
+    status character varying(16) DEFAULT 'pending' NOT NULL,
+    attempt integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_error text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    delivered_at timestamp with time zone,
+    CONSTRAINT agent_bridge_event_outbox_event_id_key UNIQUE (event_id),
+    CONSTRAINT agent_bridge_event_outbox_status_check CHECK (status IN ('pending', 'delivered', 'dead'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_bridge_event_outbox_pending
+    ON public.agent_bridge_event_outbox (next_attempt_at, created_at)
+    WHERE status = 'pending';
+
+CREATE TABLE IF NOT EXISTS public.agent_findings (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    delivery_id character varying(160) NOT NULL,
+    remote_finding_id character varying(160) NOT NULL,
+    run_id character varying(160) NOT NULL,
+    scenario_key character varying(120) NOT NULL,
+    package_digest character varying(80) NOT NULL,
+    handbook_digest character varying(80) NOT NULL,
+    title text NOT NULL,
+    summary text NOT NULL,
+    severity character varying(16) NOT NULL,
+    confidence double precision NOT NULL,
+    facts jsonb DEFAULT '[]'::jsonb NOT NULL,
+    hypotheses jsonb DEFAULT '[]'::jsonb NOT NULL,
+    details jsonb DEFAULT '{}'::jsonb NOT NULL,
+    suggested_actions jsonb DEFAULT '[]'::jsonb NOT NULL,
+    presentation jsonb DEFAULT '{}'::jsonb NOT NULL,
+    payload_hash character varying(64) NOT NULL,
+    status character varying(16) DEFAULT 'active' NOT NULL,
+    trace_id character varying(160),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone,
+    CONSTRAINT agent_findings_delivery_id_key UNIQUE (delivery_id),
+    CONSTRAINT agent_findings_severity_check CHECK (severity IN ('info', 'low', 'medium', 'high', 'critical')),
+    CONSTRAINT agent_findings_confidence_check CHECK (confidence >= 0 AND confidence <= 1),
+    CONSTRAINT agent_findings_status_check CHECK (status IN ('active', 'resolved', 'expired', 'quarantined'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_findings_active_created
+    ON public.agent_findings (created_at DESC) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_agent_findings_scenario_created
+    ON public.agent_findings (scenario_key, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.agent_finding_resources (
+    finding_id uuid NOT NULL REFERENCES public.agent_findings(id) ON DELETE CASCADE,
+    resource_type character varying(64) NOT NULL,
+    resource_id character varying(160) NOT NULL,
+    resource_role character varying(64) NOT NULL,
+    label text,
+    PRIMARY KEY (finding_id, resource_type, resource_id, resource_role)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_finding_resources_lookup
+    ON public.agent_finding_resources (resource_type, resource_id, finding_id);
+
+CREATE TABLE IF NOT EXISTS public.agent_finding_scopes (
+    finding_id uuid NOT NULL REFERENCES public.agent_findings(id) ON DELETE CASCADE,
+    group_id uuid NOT NULL REFERENCES public.device_groups(id) ON DELETE CASCADE,
+    PRIMARY KEY (finding_id, group_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_finding_scopes_group
+    ON public.agent_finding_scopes (group_id, finding_id);
+
+CREATE TABLE IF NOT EXISTS public.agent_finding_user_states (
+    finding_id uuid NOT NULL REFERENCES public.agent_findings(id) ON DELETE CASCADE,
+    user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    read_at timestamp with time zone,
+    dismissed_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    PRIMARY KEY (finding_id, user_id)
+);
+
+DROP TRIGGER IF EXISTS trigger_agent_findings_updated_at ON public.agent_findings;
+CREATE TRIGGER trigger_agent_findings_updated_at
+    BEFORE UPDATE ON public.agent_findings
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+-- Assistant lifecycle v1: xOMC owns definitions, versions and authorization.
+CREATE TABLE IF NOT EXISTS agent_assistants (
+ id UUID PRIMARY KEY, owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ role_id UUID NOT NULL, revision INTEGER NOT NULL DEFAULT 0,
+ state TEXT NOT NULL DEFAULT 'draft' CHECK (state IN ('draft','active','paused','blocked')),
+ published_revision INTEGER, document JSONB NOT NULL,
+ next_run_at TIMESTAMPTZ, last_run_at TIMESTAMPTZ, last_error TEXT NOT NULL DEFAULT '', last_notice_at TIMESTAMPTZ,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS agent_assistants_owner_idx ON agent_assistants(owner_id,updated_at DESC);
+CREATE INDEX IF NOT EXISTS agent_assistants_schedule_idx ON agent_assistants(next_run_at) WHERE state='active';
+CREATE TABLE IF NOT EXISTS agent_assistant_versions (
+ assistant_id UUID NOT NULL REFERENCES agent_assistants(id) ON DELETE CASCADE,
+ revision INTEGER NOT NULL, definition JSONB NOT NULL, role_id UUID NOT NULL,
+ locale TEXT NOT NULL, timezone TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ PRIMARY KEY(assistant_id,revision)
+);
+CREATE TABLE IF NOT EXISTS agent_assistant_runs (
+ id UUID PRIMARY KEY, assistant_id UUID NOT NULL REFERENCES agent_assistants(id) ON DELETE CASCADE,
+ owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, revision INTEGER NOT NULL,
+ kind TEXT NOT NULL CHECK (kind IN ('trial','manual','schedule','event')),
+ status TEXT NOT NULL DEFAULT 'QUEUED' CHECK (status IN ('QUEUED','RUNNING','CANCELLING','CANCELLED','COMPLETED','FAILED')),
+ connector_id TEXT NOT NULL, request JSONB NOT NULL, principal JSONB NOT NULL,
+ dedupe_key TEXT NOT NULL, output JSONB, notify_visible BOOLEAN NOT NULL DEFAULT false, tools JSONB NOT NULL DEFAULT '[]',
+ error_code TEXT NOT NULL DEFAULT '', error_message TEXT NOT NULL DEFAULT '',
+ attempts INTEGER NOT NULL DEFAULT 0, lease_token TEXT NOT NULL DEFAULT '', lease_until TIMESTAMPTZ,
+ next_poll_at TIMESTAMPTZ NOT NULL DEFAULT now(), created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ started_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, read_at TIMESTAMPTZ,
+ UNIQUE(assistant_id,dedupe_key)
+);
+CREATE INDEX IF NOT EXISTS agent_assistant_runs_owner_idx ON agent_assistant_runs(owner_id,assistant_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS agent_assistant_runs_poll_idx ON agent_assistant_runs(next_poll_at,lease_until) WHERE status IN ('QUEUED','RUNNING','CANCELLING');
+-- End assistant lifecycle v1.
+-- Existing pre-release versions without a grant remain blocked until a new
+-- draft is tried and published; never infer approval from today's permissions.
+ALTER TABLE agent_assistant_versions ADD COLUMN IF NOT EXISTS scope_digest TEXT NOT NULL DEFAULT '';
+
+-- +omcgo MainReconcileEnd
+
 
 -- +goose Down
 -- +goose StatementBegin

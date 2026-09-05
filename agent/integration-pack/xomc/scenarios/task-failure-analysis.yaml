@@ -1,0 +1,46 @@
+apiVersion: agentstudio.scenario/v1
+kind: AgentScenario
+metadata:
+  key: task-failure-analysis
+  name: 任务失败智能分析
+  version: 1
+  description: 分析失败任务、设备状态、相关告警和近期历史。
+spec:
+  trigger:
+    eventType: omc.task.failed.v1
+  match:
+    all:
+    - field: data.taskType
+      op: notIn
+      value:
+      - temporary_diagnostic
+  dedupe:
+    keyTemplate: ${resource.task.id}
+    cooldownSeconds: 1800
+  rollout:
+    mode: shadow
+    percentage: 100
+  agent:
+    agentMode: external-operations
+    runtimeClass: background-analysis
+    skills:
+    - omc-operations@1.2.0
+    timeoutSeconds: 120
+    maxToolCalls: 18
+    maxOutputBytes: 65536
+    promptFile: prompts/task-failure-analysis.md
+    outputSchemaFile: schemas/task-failure-details-v1.schema.json
+    presentationFile: presentation/task-failure.yaml
+    allowedOperations:
+    - get.devices.by_id
+    - get.devices.tasks.by_task_id
+    - get.devices
+    - get.alarms.active
+  delivery:
+    surfaces:
+    - attention
+    - task-detail
+    expiresAfterSeconds: 604800
+  limits:
+    maxConcurrentRuns: 10
+    maxRunsPerHour: 200

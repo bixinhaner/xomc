@@ -1,0 +1,14 @@
+icon: daily-summary
+titleTemplate: 每日运维摘要
+defaultSurface: dashboard
+sections:
+- summary
+- facts
+- details
+- resources
+- suggestedActions
+actions:
+- open-finding
+- open-resource
+- dismiss
+- copy-summary

@@ -1,0 +1,49 @@
+{
+  "$id": "https://agentstudio.example/schemas/error-response-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ErrorResponse",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "error",
+    "requestId",
+    "traceId"
+  ],
+  "properties": {
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{2,119}$"
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "details": {
+          "type": "object"
+        }
+      }
+    },
+    "requestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "traceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    }
+  }
+}

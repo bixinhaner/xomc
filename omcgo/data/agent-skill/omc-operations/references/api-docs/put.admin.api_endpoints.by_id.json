@@ -106,6 +106,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.admin.api_endpoints.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/admin/api-endpoints/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.admin.api_endpoints",
+      "method": "POST",
+      "path": "/api/v1/admin/api-endpoints",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.admin.api_endpoints",
+      "method": "GET",
+      "path": "/api/v1/admin/api-endpoints",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.admin.api_endpoints.batch",
+      "method": "DELETE",
+      "path": "/api/v1/admin/api-endpoints/batch",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.admin.api_endpoints.sync",
+      "method": "POST",
+      "path": "/api/v1/admin/api-endpoints/sync",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

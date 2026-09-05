@@ -104,6 +104,20 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.sites",
+      "method": "GET",
+      "path": "/api/v1/sites",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.sites.by_id",
+      "method": "GET",
+      "path": "/api/v1/sites/:id",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

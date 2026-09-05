@@ -1,4 +1,5 @@
 import http from '../http';
+import { useMock } from '../apiSwitch';
 import type {
   AttentionAction,
   AttentionItem,
@@ -92,6 +93,20 @@ function mapSection(section: BackendAttentionSection): AttentionSection {
 
 export const attentionApi = {
   async getSummary(limit = 1): Promise<AttentionSummary> {
+    if (useMock) {
+      const finding: AttentionItem = {
+        id: 'abnormal:agent_finding:mock-finding-task-failure', kind: 'agent_finding', source: 'agent',
+        sourceId: 'mock-finding-task-failure', title: '任务失败主要由设备离线导致',
+        summary: '任务执行窗口内设备 SN001 处于离线状态，建议先恢复设备连通性。',
+        severity: 'high', priority: 'high', target: { type: 'device', id: 'device-456', name: 'SN001' },
+        createdAt: new Date().toISOString(), detailRoute: '/dashboard?agentFinding=mock-finding-task-failure',
+        allowedActions: ['view_agent_finding'],
+      };
+      return {
+        abnormalities: { status: 'ok', total: 1, items: limit > 0 ? [finding] : [] },
+        todos: { status: 'ok', total: 0, items: [] }, generatedAt: new Date().toISOString(),
+      };
+    }
     const { data } = await http.get<BackendAttentionSummary>('/dashboard/attention', {
       params: { abnormal_limit: limit, todo_limit: limit },
     });
@@ -103,6 +118,10 @@ export const attentionApi = {
   },
 
   async getPage(section: AttentionSectionKey, page: number, pageSize: number): Promise<AttentionPage> {
+    if (useMock) {
+      const summary = await this.getSummary(pageSize);
+      return { ...summary[section], page, pageSize };
+    }
     const { data } = await http.get<BackendAttentionPage>(`/dashboard/attention/${section}`, {
       params: { page, page_size: pageSize },
     });

@@ -115,6 +115,38 @@
     "request": "openapi",
     "response": "openapi"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.auth.change_password",
+      "method": "POST",
+      "path": "/api/v1/auth/change-password",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.auth.login",
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.auth.switch_role",
+      "method": "POST",
+      "path": "/api/v1/auth/switch-role",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.auth.captcha",
+      "method": "GET",
+      "path": "/api/v1/auth/captcha",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.auth.me",
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",

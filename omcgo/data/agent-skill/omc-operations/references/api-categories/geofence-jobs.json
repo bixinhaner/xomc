@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "1.0",
+  "category": "geofence-jobs",
+  "title": "geofence-jobs",
+  "operations": [
+    {
+      "operationId": "get.geofence_jobs.by_id",
+      "method": "GET",
+      "path": "/api/v1/geofence-jobs/:id",
+      "title": "geofence-jobs - 详情",
+      "summary": "geofence-jobs - 详情",
+      "description": "geofence-jobs：查询指定资源的详细信息",
+      "intents": [
+        "geofence-jobs - 详情",
+        "geofence-jobs：查询指定资源的详细信息",
+        "geofence-jobs",
+        "geofence jobs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.geofence_jobs.by_id.json"
+    },
+    {
+      "operationId": "get.geofence_jobs.by_id.items",
+      "method": "GET",
+      "path": "/api/v1/geofence-jobs/:id/items",
+      "title": "geofence-jobs - GET",
+      "summary": "geofence-jobs - GET",
+      "description": "geofence-jobs：执行 GET 请求对应的业务操作",
+      "intents": [
+        "geofence-jobs - GET",
+        "geofence-jobs：执行 GET 请求对应的业务操作",
+        "geofence-jobs",
+        "items",
+        "geofence jobs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.geofence_jobs.by_id.items.json"
+    }
+  ]
+}

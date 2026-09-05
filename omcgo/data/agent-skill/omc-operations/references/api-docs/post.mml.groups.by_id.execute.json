@@ -7,11 +7,11 @@
   "category": "mml",
   "title": "按组批量执行 mml_param_groups 下的全部命令（Sprint B-5）",
   "summary": "按组批量执行 mml_param_groups 下的全部命令（Sprint B-5）",
-  "description": "将指定 `mml_param_groups.id` 下的所有 mml_commands 一次性展开为一个\nmml_task。Fanouter + Sequencer 负责按 command_index 顺序串行下发到\n目标设备。`operation_filter` 可挑选执行子集（如仅 LST 或仅 MOD）。 Handler: ExecuteGroup handles POST /api/v1/mml/groups/:id/execute.\n把指定 mml_param_group 下的全部命令一次性下发（操作类型过滤可选）。\ndevice_sns 必填；其他字段缺省走 ExecuteImmediate。\n\n@Summary      按组批量执行 mml_command_groups 下的全部命令\n@Description  Fanouter + Sequencer 串行下发；operation_filter 可挑 LST/MOD/ADD/RMV 子集\n@Tags         MML\n@Security     BearerAuth\n@Param        id    path  string                        true   \"mml_command_groups.id (uuid)\"\n@Param        body  body  ExecuteGroupHTTPRequest       true   \"执行参数\"\n@Success      201  {object}  MMLTask\n@Failure      400  {string}  string  \"device_sns 缺失 / group_id 无效\"\n@Failure      401  {string}  string  \"未授权\"\n@Failure      404  {string}  string  \"group 不存在\"\n@Router       /api/v1/mml/groups/{id}/execute [post]",
+  "description": "将指定 `mml_param_groups.id` 下的所有 mml_commands 一次性展开为一个\nmml_task。Fanouter + Sequencer 负责按 command_index 顺序串行下发到\n目标设备。`operation_filter` 可挑选执行子集（如仅 LST 或仅 MOD）。 Handler: Fanouter + Sequencer 串行下发；operation_filter 可挑 LST/MOD/ADD/RMV 子集",
   "intents": [
     "MML - 执行",
     "按组批量执行 mml_param_groups 下的全部命令（Sprint B-5）",
-    "将指定 `mml_param_groups.id` 下的所有 mml_commands 一次性展开为一个\nmml_task。Fanouter + Sequencer 负责按 command_index 顺序串行下发到\n目标设备。`operation_filter` 可挑选执行子集（如仅 LST 或仅 MOD）。 Handler: ExecuteGroup handles POST /api/v1/mml/groups/:id/execute.\n把指定 mml_param_group 下的全部命令一次性下发（操作类型过滤可选）。\ndevice_sns 必填；其他字段缺省走 ExecuteImmediate。\n\n@Summary      按组批量执行 mml_command_groups 下的全部命令\n@Description  Fanouter + Sequencer 串行下发；operation_filter 可挑 LST/MOD/ADD/RMV 子集\n@Tags         MML\n@Security     BearerAuth\n@Param        id    path  string                        true   \"mml_command_groups.id (uuid)\"\n@Param        body  body  ExecuteGroupHTTPRequest       true   \"执行参数\"\n@Success      201  {object}  MMLTask\n@Failure      400  {string}  string  \"device_sns 缺失 / group_id 无效\"\n@Failure      401  {string}  string  \"未授权\"\n@Failure      404  {string}  string  \"group 不存在\"\n@Router       /api/v1/mml/groups/{id}/execute [post]",
+    "将指定 `mml_param_groups.id` 下的所有 mml_commands 一次性展开为一个\nmml_task。Fanouter + Sequencer 负责按 command_index 顺序串行下发到\n目标设备。`operation_filter` 可挑选执行子集（如仅 LST 或仅 MOD）。 Handler: Fanouter + Sequencer 串行下发；operation_filter 可挑 LST/MOD/ADD/RMV 子集",
     "mml",
     "groups",
     "execute"
@@ -220,6 +220,38 @@
     "request": "openapi",
     "response": "openapi"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.mml.admin.groups.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mml/admin/groups/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "patch.mml.admin.groups.by_id",
+      "method": "PATCH",
+      "path": "/api/v1/mml/admin/groups/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.mml.admin.groups",
+      "method": "POST",
+      "path": "/api/v1/mml/admin/groups",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.mml.execute",
+      "method": "POST",
+      "path": "/api/v1/mml/execute",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.mml.admin.groups",
+      "method": "GET",
+      "path": "/api/v1/mml/admin/groups",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",

@@ -56,6 +56,38 @@
     "request": "openapi",
     "response": "openapi"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.pm.thresholds",
+      "method": "POST",
+      "path": "/api/v1/pm/thresholds",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.pm.thresholds.by_id",
+      "method": "PUT",
+      "path": "/api/v1/pm/thresholds/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.pm.thresholds",
+      "method": "GET",
+      "path": "/api/v1/pm/thresholds",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.pm.thresholds.by_id",
+      "method": "GET",
+      "path": "/api/v1/pm/thresholds/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.pm.adhoc.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",

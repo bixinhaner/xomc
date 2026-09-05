@@ -151,6 +151,7 @@ export const componentRegistry: Record<string, ComponentType> = {
   'system/ApiManagement': lazy(() => import('@/pages/system/ApiManagement')),
   'system/DataDictionary': lazy(() => import('@/pages/system/DataDictionary')),
   'system/DictLoader': lazy(() => import('@/pages/system/DictLoader')),
+  'system/ActiveIntelligence': lazy(() => import('@/pages/system/ActiveIntelligence')),
 
   // Report Management
   'report/LTEStandardReport': lazy(() => import('@/pages/report/LTEStandardReport')),

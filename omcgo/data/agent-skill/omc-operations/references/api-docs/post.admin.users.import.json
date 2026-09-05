@@ -76,6 +76,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.admin.users.import.template",
+      "method": "GET",
+      "path": "/api/v1/admin/users/import/template",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.admin.users",
+      "method": "POST",
+      "path": "/api/v1/admin/users",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.admin.users",
+      "method": "GET",
+      "path": "/api/v1/admin/users",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.admin.users.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/admin/users/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.admin.users.by_id.roles.by_roleId",
+      "method": "DELETE",
+      "path": "/api/v1/admin/users/:id/roles/:roleId",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

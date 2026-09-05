@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0",
+  "category": "kpi-routes",
+  "title": "kpi-routes",
+  "operations": [
+    {
+      "operationId": "post.admin.kpi_routes.refresh",
+      "method": "POST",
+      "path": "/api/v1/admin/kpi-routes/refresh",
+      "title": "人工刷新 KPI 路由缓存",
+      "summary": "人工刷新 KPI 路由缓存",
+      "description": "仅 `super_admin` 可调用。先清理当前 app 进程的 KPI 路由 L1，再以\n有界后台上下文最多三次推进 Redis 全局 `cache_version`。\n无 Redis 时仅保证当前进程 L1 清理，响应 `scope=local` 且\n`multi_process_sync=false`。",
+      "intents": [
+        "kpi-routes - 刷新令牌",
+        "人工刷新 KPI 路由缓存",
+        "仅 `super_admin` 可调用。先清理当前 app 进程的 KPI 路由 L1，再以\n有界后台上下文最多三次推进 Redis 全局 `cache_version`。\n无 Redis 时仅保证当前进程 L1 清理，响应 `scope=local` 且\n`multi_process_sync=false`。",
+        "kpi-routes",
+        "admin",
+        "refresh",
+        "kpi routes"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.kpi_routes.refresh.json"
+    }
+  ]
+}

@@ -76,6 +76,26 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.admin.dead_letters.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/admin/dead-letters/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.admin.dead_letters",
+      "method": "GET",
+      "path": "/api/v1/admin/dead-letters",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.admin.dead_letters.by_id",
+      "method": "GET",
+      "path": "/api/v1/admin/dead-letters/:id",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

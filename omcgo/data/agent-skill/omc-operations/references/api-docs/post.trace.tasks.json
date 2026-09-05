@@ -85,6 +85,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.trace.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/trace/tasks/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.trace.tasks.batch_delete",
+      "method": "POST",
+      "path": "/api/v1/trace/tasks/batch-delete",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.trace.tasks.by_id.export",
+      "method": "POST",
+      "path": "/api/v1/trace/tasks/:id/export",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.trace.tasks.by_id.stop",
+      "method": "POST",
+      "path": "/api/v1/trace/tasks/:id/stop",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.trace.tasks",
+      "method": "GET",
+      "path": "/api/v1/trace/tasks",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

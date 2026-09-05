@@ -87,10 +87,10 @@
       "path": "/api/v1/products/alarm-ne-types",
       "title": "products - alarmnetypes",
       "summary": "products - alarmnetypes",
-      "description": "products：处理alarmnetypes相关数据 Handler: ListAlarmNeTypes GET /api/v1/products/alarm-ne-types\n返回 alarm_definitions.ne_type 字典（如 ENB / GNB / OMC / EPC / EGW / CPE / UPS）。",
+      "description": "products：处理alarmnetypes相关数据 Handler: ListAlarmNeTypes GET /api/v1/products/alarm-ne-types\n返回 alarm_definitions.ne_type 字典（如 ENB / GSM / GNB / OMC / EPC / EGW / CPE / UPS）。",
       "intents": [
         "products - alarmnetypes",
-        "products：处理alarmnetypes相关数据 Handler: ListAlarmNeTypes GET /api/v1/products/alarm-ne-types\n返回 alarm_definitions.ne_type 字典（如 ENB / GNB / OMC / EPC / EGW / CPE / UPS）。",
+        "products：处理alarmnetypes相关数据 Handler: ListAlarmNeTypes GET /api/v1/products/alarm-ne-types\n返回 alarm_definitions.ne_type 字典（如 ENB / GSM / GNB / OMC / EPC / EGW / CPE / UPS）。",
         "products",
         "alarm-ne-types",
         "alarm ne types"

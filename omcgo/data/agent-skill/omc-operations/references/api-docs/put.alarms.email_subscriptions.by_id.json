@@ -1,0 +1,219 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "put.alarms.email_subscriptions.by_id",
+  "method": "PUT",
+  "path": "/api/v1/alarms/email-subscriptions/:id",
+  "handler": "github.com/omcgo/omcgo/internal/alarm.(*AlarmEmailSubscriptionHandler).UpdateSubscription-fm",
+  "category": "alarms",
+  "title": "告警 - emailsubscriptions更新",
+  "summary": "告警 - emailsubscriptions更新",
+  "description": "告警：查询或维护指定对象的emailsubscriptions更新数据",
+  "intents": [
+    "告警 - emailsubscriptions更新",
+    "告警：查询或维护指定对象的emailsubscriptions更新数据",
+    "alarms",
+    "告警",
+    "email-subscriptions",
+    "email subscriptions"
+  ],
+  "tags": [
+    "alarms",
+    "告警",
+    "email-subscriptions"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：告警 - emailsubscriptions更新",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :id"
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "AlarmEmailSubscription",
+      "properties": {
+        "alarm_identifiers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "alarm_sources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "created_at": {
+          "format": "date-time",
+          "goType": "time.Time",
+          "type": "string"
+        },
+        "created_by": {
+          "format": "uuid",
+          "goType": "uuid.UUID",
+          "nullable": true,
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "device_group_ids": {
+          "items": {
+            "format": "uuid",
+            "goType": "uuid.UUID",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "device_ids": {
+          "items": {
+            "format": "uuid",
+            "goType": "uuid.UUID",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "event_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "format": "uuid",
+          "goType": "uuid.UUID",
+          "type": "string"
+        },
+        "include_default_recipients": {
+          "type": "boolean"
+        },
+        "interval_minutes": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "recipients": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "severities": {
+          "items": {
+            "goType": "int16",
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "tolerance_minutes": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "goType": "time.Time",
+          "type": "string"
+        },
+        "updated_by": {
+          "format": "uuid",
+          "goType": "uuid.UUID",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "relatedOperations": [
+    {
+      "operationId": "delete.alarms.email_subscriptions.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/alarms/email-subscriptions/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.alarms.email_subscriptions",
+      "method": "POST",
+      "path": "/api/v1/alarms/email-subscriptions",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.alarms.email_subscriptions",
+      "method": "GET",
+      "path": "/api/v1/alarms/email-subscriptions",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.alarms.alarm_filters.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/alarms/alarm-filters/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.alarms.active.batch.acknowledge",
+      "method": "POST",
+      "path": "/api/v1/alarms/active/batch/acknowledge",
+      "relation": "same-domain"
+    }
+  ],
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

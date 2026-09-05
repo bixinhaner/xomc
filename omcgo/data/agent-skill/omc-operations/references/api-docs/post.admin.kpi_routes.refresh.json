@@ -1,0 +1,170 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.admin.kpi_routes.refresh",
+  "method": "POST",
+  "path": "/api/v1/admin/kpi-routes/refresh",
+  "handler": "github.com/omcgo/omcgo/cmd/app/provider.registerKPIRouteAdminRoutes.func1",
+  "category": "kpi-routes",
+  "title": "人工刷新 KPI 路由缓存",
+  "summary": "人工刷新 KPI 路由缓存",
+  "description": "仅 `super_admin` 可调用。先清理当前 app 进程的 KPI 路由 L1，再以\n有界后台上下文最多三次推进 Redis 全局 `cache_version`。\n无 Redis 时仅保证当前进程 L1 清理，响应 `scope=local` 且\n`multi_process_sync=false`。",
+  "intents": [
+    "kpi-routes - 刷新令牌",
+    "人工刷新 KPI 路由缓存",
+    "仅 `super_admin` 可调用。先清理当前 app 进程的 KPI 路由 L1，再以\n有界后台上下文最多三次推进 Redis 全局 `cache_version`。\n无 Redis 时仅保证当前进程 L1 清理，响应 `scope=local` 且\n`multi_process_sync=false`。",
+    "kpi-routes",
+    "admin",
+    "refresh",
+    "kpi routes"
+  ],
+  "tags": [
+    "kpi-routes",
+    "admin",
+    "refresh",
+    "KPI"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：人工刷新 KPI 路由缓存",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "200": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "properties": {
+                  "attempts": {
+                    "example": 1,
+                    "maximum": 3,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "cache_version": {
+                    "example": 12,
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "multi_process_sync": {
+                    "example": true,
+                    "type": "boolean"
+                  },
+                  "scope": {
+                    "enum": [
+                      "global",
+                      "local"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "cache_version",
+                  "attempts",
+                  "scope",
+                  "multi_process_sync"
+                ],
+                "type": "object"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "example": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "KPI 路由失效完成"
+    },
+    "401": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "$ref": "#/components/schemas/EnvelopeErrorResponse"
+          }
+        }
+      },
+      "description": "未提供或提供了无效的认证凭据"
+    },
+    "403": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "$ref": "#/components/schemas/EnvelopeErrorResponse"
+          }
+        }
+      },
+      "description": "已认证，但不是 super_admin"
+    },
+    "503": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "$ref": "#/components/schemas/EnvelopeErrorResponse"
+          }
+        }
+      },
+      "description": "本进程 L1 已清理，但 Redis 全局版本推进最终失败"
+    }
+  },
+  "referencedSchemas": {
+    "EnvelopeErrorResponse": {
+      "description": "当前 Gin API 统一失败信封",
+      "properties": {
+        "biz_code": {
+          "description": "可选业务错误码",
+          "type": "integer"
+        },
+        "data": {
+          "additionalProperties": true,
+          "example": null,
+          "nullable": true,
+          "type": "object"
+        },
+        "msg": {
+          "description": "已脱敏、可供调用方处理的错误说明",
+          "example": "super_admin role required",
+          "type": "string"
+        },
+        "request_id": {
+          "description": "可选请求追踪 ID",
+          "type": "string"
+        },
+        "ret": {
+          "enum": [
+            0
+          ],
+          "example": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ret",
+        "msg",
+        "data"
+      ],
+      "type": "object"
+    }
+  },
+  "contractCoverage": {
+    "request": "path-only",
+    "response": "openapi"
+  },
+  "sources": [
+    "runtime-route",
+    "openapi"
+  ]
+}

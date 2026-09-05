@@ -93,6 +93,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.ops.diagnostics",
+      "method": "GET",
+      "path": "/api/v1/ops/diagnostics",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ops.diagnostics.inspection",
+      "method": "POST",
+      "path": "/api/v1/ops/diagnostics/inspection",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.ops.diagnostics.ping",
+      "method": "POST",
+      "path": "/api/v1/ops/diagnostics/ping",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.ops.diagnostics.traceroute",
+      "method": "POST",
+      "path": "/api/v1/ops/diagnostics/traceroute",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.ops.diagnostics.by_id",
+      "method": "GET",
+      "path": "/api/v1/ops/diagnostics/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

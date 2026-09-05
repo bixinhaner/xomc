@@ -58,6 +58,38 @@
     "request": "openapi",
     "response": "openapi"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.admin.roles",
+      "method": "POST",
+      "path": "/api/v1/admin/roles",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.admin.roles.by_id.copy",
+      "method": "POST",
+      "path": "/api/v1/admin/roles/:id/copy",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.admin.roles.by_id",
+      "method": "PUT",
+      "path": "/api/v1/admin/roles/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.admin.roles.by_id.api_permissions",
+      "method": "PUT",
+      "path": "/api/v1/admin/roles/:id/api-permissions",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.admin.roles.by_id.device_groups",
+      "method": "PUT",
+      "path": "/api/v1/admin/roles/:id/device-groups",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "openapi",

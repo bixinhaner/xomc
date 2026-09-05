@@ -1,0 +1,40 @@
+apiVersion: agentstudio.scenario/v1
+kind: AgentScenario
+metadata:
+  key: daily-operations-summary
+  name: 每日运维摘要
+  version: 1
+  description: 基于 xOMC 生成的摘要触发事件，提炼需关注的告警、失败任务和待办。
+spec:
+  trigger:
+    eventType: omc.daily-operations-summary-requested.v1
+  dedupe:
+    keyTemplate: ${event.eventId}
+    cooldownSeconds: 82800
+  rollout:
+    mode: disabled
+    percentage: 0
+  agent:
+    agentMode: external-operations
+    runtimeClass: background-analysis
+    skills:
+    - omc-operations@1.2.0
+    timeoutSeconds: 120
+    maxToolCalls: 18
+    maxOutputBytes: 65536
+    promptFile: prompts/daily-operations-summary.md
+    outputSchemaFile: schemas/daily-summary-details-v1.schema.json
+    presentationFile: presentation/daily-summary.yaml
+    allowedOperations:
+    - get.alarms.active
+    - get.devices
+    - get.device_access.candidates
+    - get.pm.counters.aggregated
+  delivery:
+    surfaces:
+    - dashboard
+    - message-center
+    expiresAfterSeconds: 172800
+  limits:
+    maxConcurrentRuns: 2
+    maxRunsPerHour: 24

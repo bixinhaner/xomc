@@ -606,13 +606,25 @@ export function AgentPanel({ open, onClose }: AgentPanelProps) {
   const [diagnosticOpen, setDiagnosticOpen] = useState(false);
   const [newConversationOpen, setNewConversationOpen] = useState(false);
   const [newConversationLoading, setNewConversationLoading] = useState(false);
+  const [launchFindingId, setLaunchFindingId] = useState<string | undefined>();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const receiveFinding = (event: Event) => {
+      const detail = (event as CustomEvent<{ context?: { agentFindingId?: string }; message?: string }>).detail;
+      if (!detail?.context?.agentFindingId) return;
+      setLaunchFindingId(detail.context.agentFindingId);
+      if (detail.message) setInput(detail.message);
+    };
+    window.addEventListener('xomc:open-agent-finding', receiveFinding);
+    return () => window.removeEventListener('xomc:open-agent-finding', receiveFinding);
+  }, []);
   const context = useMemo(
     () => ({
       path: location.pathname,
       query: Object.fromEntries(new URLSearchParams(location.search).entries()),
+      ...(launchFindingId ? { extra: { agentFindingId: launchFindingId } } : {}),
     }),
-    [location.pathname, location.search]
+    [launchFindingId, location.pathname, location.search]
   );
   const controller = useAgentPanelController({ context, active: open });
   const errorMessage = controller.error

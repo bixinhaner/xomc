@@ -107,6 +107,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.ops.tasks.by_id.approve",
+      "method": "POST",
+      "path": "/api/v1/ops/tasks/:id/approve",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ops.tasks.by_id.cancel",
+      "method": "POST",
+      "path": "/api/v1/ops/tasks/:id/cancel",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ops.tasks.by_id.pause",
+      "method": "POST",
+      "path": "/api/v1/ops/tasks/:id/pause",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ops.tasks.by_id.resume",
+      "method": "POST",
+      "path": "/api/v1/ops/tasks/:id/resume",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.ops.tasks.by_id.run",
+      "method": "POST",
+      "path": "/api/v1/ops/tasks/:id/run",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

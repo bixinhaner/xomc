@@ -63,6 +63,13 @@
                 "goType": "uuid.UUID",
                 "type": "string"
               },
+              "instance_indices": {
+                "items": {
+                  "goType": "int",
+                  "type": "integer"
+                },
+                "type": "array"
+              },
               "instance_selectors": {
                 "additionalProperties": {
                   "type": "string"
@@ -156,6 +163,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "get.mml.console.command_compatibility",
+      "method": "GET",
+      "path": "/api/v1/mml/console/command-compatibility",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.mml.admin.commands.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mml/admin/commands/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.mml.admin.commands.by_id.sub_fields.by_sid",
+      "method": "DELETE",
+      "path": "/api/v1/mml/admin/commands/:id/sub-fields/:sid",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.mml.admin.groups.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mml/admin/groups/:id",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "delete.mml.scripts.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mml/scripts/:id",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

@@ -63,10 +63,10 @@
       "path": "/api/v1/dashboard/alarm-trend",
       "title": "仪表盘 - alarmtrend",
       "summary": "仪表盘 - alarmtrend",
-      "description": "仪表盘：处理alarmtrend相关数据 Handler: GetAlarmTrend handles GET /api/v1/dashboard/alarm-trend?days=7.",
+      "description": "仪表盘：处理alarmtrend相关数据 Handler: GetAlarmTrend handles GET /api/v1/dashboard/alarm-trend?days=7\u0026metric=raised.",
       "intents": [
         "仪表盘 - alarmtrend",
-        "仪表盘：处理alarmtrend相关数据 Handler: GetAlarmTrend handles GET /api/v1/dashboard/alarm-trend?days=7.",
+        "仪表盘：处理alarmtrend相关数据 Handler: GetAlarmTrend handles GET /api/v1/dashboard/alarm-trend?days=7\u0026metric=raised.",
         "dashboard",
         "仪表盘",
         "alarm-trend",
@@ -92,6 +92,59 @@
       ],
       "risk": "read",
       "document": "api-docs/get.dashboard.alarm_type_pie.json"
+    },
+    {
+      "operationId": "get.dashboard.attention",
+      "method": "GET",
+      "path": "/api/v1/dashboard/attention",
+      "title": "仪表盘 - 列表",
+      "summary": "仪表盘 - 列表",
+      "description": "仪表盘：按筛选条件查询资源列表",
+      "intents": [
+        "仪表盘 - 列表",
+        "仪表盘：按筛选条件查询资源列表",
+        "dashboard",
+        "仪表盘",
+        "attention"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.dashboard.attention.json"
+    },
+    {
+      "operationId": "get.dashboard.attention.abnormalities",
+      "method": "GET",
+      "path": "/api/v1/dashboard/attention/abnormalities",
+      "title": "仪表盘 - 列表",
+      "summary": "仪表盘 - 列表",
+      "description": "仪表盘：按筛选条件查询资源列表",
+      "intents": [
+        "仪表盘 - 列表",
+        "仪表盘：按筛选条件查询资源列表",
+        "dashboard",
+        "仪表盘",
+        "attention",
+        "abnormalities"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.dashboard.attention.abnormalities.json"
+    },
+    {
+      "operationId": "get.dashboard.attention.todos",
+      "method": "GET",
+      "path": "/api/v1/dashboard/attention/todos",
+      "title": "仪表盘 - 列表",
+      "summary": "仪表盘 - 列表",
+      "description": "仪表盘：按筛选条件查询资源列表",
+      "intents": [
+        "仪表盘 - 列表",
+        "仪表盘：按筛选条件查询资源列表",
+        "dashboard",
+        "仪表盘",
+        "attention",
+        "todos"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.dashboard.attention.todos.json"
     },
     {
       "operationId": "get.dashboard.device_status",
@@ -171,10 +224,10 @@
       "path": "/api/v1/dashboard/kpi-time-series",
       "title": "仪表盘 - KPItimeseries",
       "summary": "仪表盘 - KPItimeseries",
-      "description": "仪表盘：处理KPItimeseries相关数据 Handler: GetKPITimeSeries handles GET /api/v1/dashboard/kpi-time-series?kpi_names=...\u0026start_time=...\u0026end_time=...",
+      "description": "仪表盘：处理KPItimeseries相关数据 Handler: GetKPITimeSeries handles GET /api/v1/dashboard/kpi-time-series?kpi_names=...\u0026start_time=...\u0026end_time=...\u0026granularity=...",
       "intents": [
         "仪表盘 - KPItimeseries",
-        "仪表盘：处理KPItimeseries相关数据 Handler: GetKPITimeSeries handles GET /api/v1/dashboard/kpi-time-series?kpi_names=...\u0026start_time=...\u0026end_time=...",
+        "仪表盘：处理KPItimeseries相关数据 Handler: GetKPITimeSeries handles GET /api/v1/dashboard/kpi-time-series?kpi_names=...\u0026start_time=...\u0026end_time=...\u0026granularity=...",
         "dashboard",
         "仪表盘",
         "kpi-time-series",
@@ -236,6 +289,24 @@
       ],
       "risk": "read",
       "document": "api-docs/get.dashboard.summary.json"
+    },
+    {
+      "operationId": "get.dashboard.top_alarm_devices",
+      "method": "GET",
+      "path": "/api/v1/dashboard/top-alarm-devices",
+      "title": "仪表盘 - topalarmdevices",
+      "summary": "仪表盘 - topalarmdevices",
+      "description": "仪表盘：处理topalarmdevices相关数据 Handler: GetTopAlarmDevices handles GET /api/v1/dashboard/top-alarm-devices.",
+      "intents": [
+        "仪表盘 - topalarmdevices",
+        "仪表盘：处理topalarmdevices相关数据 Handler: GetTopAlarmDevices handles GET /api/v1/dashboard/top-alarm-devices.",
+        "dashboard",
+        "仪表盘",
+        "top-alarm-devices",
+        "top alarm devices"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.dashboard.top_alarm_devices.json"
     },
     {
       "operationId": "get.dashboard.widgets",

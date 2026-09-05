@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "1.0",
+  "category": "parameter-sync",
+  "title": "parameter-sync",
+  "operations": [
+    {
+      "operationId": "get.parameter_sync.outbox.dead",
+      "method": "GET",
+      "path": "/api/v1/parameter-sync/outbox/dead",
+      "title": "parameter-sync - 列表",
+      "summary": "parameter-sync - 列表",
+      "description": "parameter-sync：按筛选条件查询资源列表",
+      "intents": [
+        "parameter-sync - 列表",
+        "parameter-sync：按筛选条件查询资源列表",
+        "parameter-sync",
+        "outbox",
+        "dead",
+        "parameter sync"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.parameter_sync.outbox.dead.json"
+    },
+    {
+      "operationId": "get.parameter_sync.requests.by_request_id",
+      "method": "GET",
+      "path": "/api/v1/parameter-sync/requests/:request_id",
+      "title": "parameter-sync - 详情",
+      "summary": "parameter-sync - 详情",
+      "description": "parameter-sync：查询指定资源的详细信息",
+      "intents": [
+        "parameter-sync - 详情",
+        "parameter-sync：查询指定资源的详细信息",
+        "parameter-sync",
+        "requests",
+        "parameter sync"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.parameter_sync.requests.by_request_id.json"
+    },
+    {
+      "operationId": "post.parameter_sync.outbox.by_id.retry",
+      "method": "POST",
+      "path": "/api/v1/parameter-sync/outbox/:id/retry",
+      "title": "parameter-sync - 重试",
+      "summary": "parameter-sync - 重试",
+      "description": "parameter-sync：重试失败任务或消息",
+      "intents": [
+        "parameter-sync - 重试",
+        "parameter-sync：重试失败任务或消息",
+        "parameter-sync",
+        "outbox",
+        "retry",
+        "parameter sync"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.parameter_sync.outbox.by_id.retry.json"
+    },
+    {
+      "operationId": "post.parameter_sync.requests.by_request_id.cancel",
+      "method": "POST",
+      "path": "/api/v1/parameter-sync/requests/:request_id/cancel",
+      "title": "parameter-sync - 取消",
+      "summary": "parameter-sync - 取消",
+      "description": "parameter-sync：取消未完成的任务或操作",
+      "intents": [
+        "parameter-sync - 取消",
+        "parameter-sync：取消未完成的任务或操作",
+        "parameter-sync",
+        "requests",
+        "cancel",
+        "parameter sync"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.parameter_sync.requests.by_request_id.cancel.json"
+    },
+    {
+      "operationId": "post.parameter_sync.requests.by_request_id.retry",
+      "method": "POST",
+      "path": "/api/v1/parameter-sync/requests/:request_id/retry",
+      "title": "parameter-sync - 重试",
+      "summary": "parameter-sync - 重试",
+      "description": "parameter-sync：重试失败任务或消息",
+      "intents": [
+        "parameter-sync - 重试",
+        "parameter-sync：重试失败任务或消息",
+        "parameter-sync",
+        "requests",
+        "retry",
+        "parameter sync"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.parameter_sync.requests.by_request_id.retry.json"
+    }
+  ]
+}

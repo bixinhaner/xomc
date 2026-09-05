@@ -1,0 +1,156 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.device_access.imports.preview",
+  "method": "POST",
+  "path": "/api/v1/device-access/imports/preview",
+  "handler": "github.com/omcgo/omcgo/internal/deviceaccess.(*PolicyHTTPHandler).PreviewImport-fm",
+  "category": "device-access",
+  "title": "device-access - 预览",
+  "summary": "device-access - 预览",
+  "description": "device-access：预览文件、配置或导出结果",
+  "intents": [
+    "device-access - 预览",
+    "device-access：预览文件、配置或导出结果",
+    "device-access",
+    "imports",
+    "preview",
+    "device access"
+  ],
+  "tags": [
+    "device-access",
+    "imports",
+    "preview"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：device-access - 预览",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [
+    {
+      "name": "dimension",
+      "in": "form",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "entry_type",
+      "in": "form",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "failure_policy",
+      "in": "form",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "file",
+      "in": "form",
+      "required": false,
+      "type": "file"
+    },
+    {
+      "name": "import_type",
+      "in": "form",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "mode",
+      "in": "form",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "target_policy_version_id",
+      "in": "form",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "target_rule_id",
+      "in": "form",
+      "required": false,
+      "type": "string"
+    }
+  ],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "relatedOperations": [
+    {
+      "operationId": "get.device_access.imports",
+      "method": "GET",
+      "path": "/api/v1/device-access/imports",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.device_access.imports.by_batchID.commit",
+      "method": "POST",
+      "path": "/api/v1/device-access/imports/:batchID/commit",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.device_access.imports.by_batchID.rollback",
+      "method": "POST",
+      "path": "/api/v1/device-access/imports/:batchID/rollback",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.device_access.imports.by_batchID",
+      "method": "GET",
+      "path": "/api/v1/device-access/imports/:batchID",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.device_access.imports.by_batchID.errors",
+      "method": "GET",
+      "path": "/api/v1/device-access/imports/:batchID/errors",
+      "relation": "same-domain"
+    }
+  ],
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

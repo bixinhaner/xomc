@@ -39,9 +39,6 @@
     "schema": {
       "goType": "UpdateScriptRequest",
       "properties": {
-        "content": {
-          "type": "string"
-        },
         "description": {
           "type": "string"
         },
@@ -56,7 +53,6 @@
         }
       },
       "required": [
-        "content",
         "script_name"
       ],
       "type": "object"
@@ -102,6 +98,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.mml.scripts.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mml/scripts/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.mml.scripts.by_id.cancel",
+      "method": "POST",
+      "path": "/api/v1/mml/scripts/:id/cancel",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.mml.scripts.by_id.executions",
+      "method": "POST",
+      "path": "/api/v1/mml/scripts/:id/executions",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.mml.scripts.by_id.import.validate",
+      "method": "POST",
+      "path": "/api/v1/mml/scripts/:id/import/validate",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.mml.scripts.by_id.pause",
+      "method": "POST",
+      "path": "/api/v1/mml/scripts/:id/pause",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

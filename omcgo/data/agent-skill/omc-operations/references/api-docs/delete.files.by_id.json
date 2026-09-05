@@ -73,6 +73,38 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.files",
+      "method": "POST",
+      "path": "/api/v1/files",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.files.by_id.distribute",
+      "method": "POST",
+      "path": "/api/v1/files/:id/distribute",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.files",
+      "method": "GET",
+      "path": "/api/v1/files",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.files.by_id",
+      "method": "GET",
+      "path": "/api/v1/files/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.files.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/files/:id/download",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

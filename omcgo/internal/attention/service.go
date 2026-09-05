@@ -247,6 +247,9 @@ func (s *Service) loadSection(ctx context.Context, scope Scope, sources []Ranked
 }
 
 func (s *Service) allowed(ctx context.Context, scope Scope, permission Permission) (bool, error) {
+	if permission.OwnerOnly {
+		return scope.UserID != uuid.Nil, nil
+	}
 	if scope.IsSuperAdmin {
 		return true, nil
 	}
@@ -281,6 +284,15 @@ func itemRank(item Item) int {
 		return 300
 	case KindDeviceAccessReview:
 		return 200
+	case KindAgentFinding:
+		switch item.Severity {
+		case "critical":
+			return 450
+		case "major":
+			return 350
+		default:
+			return 250
+		}
 	default:
 		return 0
 	}

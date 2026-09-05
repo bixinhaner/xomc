@@ -1,13 +1,13 @@
 {
   "schemaVersion": "1.0",
-  "catalogVersion": "c5520e0cc595082e",
-  "totalOperations": 689,
+  "catalogVersion": "94be0a4dc5d3b6a7",
+  "totalOperations": 909,
   "searchIndex": "api-index.jsonl",
   "categories": [
     {
       "id": "agent",
       "title": "agent",
-      "count": 9,
+      "count": 36,
       "file": "api-categories/agent.json"
     },
     {
@@ -31,7 +31,7 @@
     {
       "id": "alarms",
       "title": "告警",
-      "count": 21,
+      "count": 27,
       "file": "api-categories/alarms.json"
     },
     {
@@ -91,7 +91,7 @@
     {
       "id": "dashboard",
       "title": "仪表盘",
-      "count": 16,
+      "count": 20,
       "file": "api-categories/dashboard.json"
     },
     {
@@ -105,6 +105,12 @@
       "title": "device-abnormal-reboots",
       "count": 4,
       "file": "api-categories/device-abnormal-reboots.json"
+    },
+    {
+      "id": "device-access",
+      "title": "device-access",
+      "count": 39,
+      "file": "api-categories/device-access.json"
     },
     {
       "id": "device-groups",
@@ -121,7 +127,7 @@
     {
       "id": "devices",
       "title": "设备",
-      "count": 50,
+      "count": 57,
       "file": "api-categories/devices.json"
     },
     {
@@ -161,6 +167,24 @@
       "file": "api-categories/firmware.json"
     },
     {
+      "id": "geofence-bindings",
+      "title": "geofence-bindings",
+      "count": 3,
+      "file": "api-categories/geofence-bindings.json"
+    },
+    {
+      "id": "geofence-jobs",
+      "title": "geofence-jobs",
+      "count": 2,
+      "file": "api-categories/geofence-jobs.json"
+    },
+    {
+      "id": "geofences",
+      "title": "geofences",
+      "count": 24,
+      "file": "api-categories/geofences.json"
+    },
+    {
       "id": "gnb",
       "title": "gNB",
       "count": 12,
@@ -171,6 +195,12 @@
       "title": "groups",
       "count": 10,
       "file": "api-categories/groups.json"
+    },
+    {
+      "id": "imsparam",
+      "title": "imsparam",
+      "count": 6,
+      "file": "api-categories/imsparam.json"
     },
     {
       "id": "indicator-groups",
@@ -191,6 +221,12 @@
       "file": "api-categories/interop.json"
     },
     {
+      "id": "kpi-routes",
+      "title": "kpi-routes",
+      "count": 1,
+      "file": "api-categories/kpi-routes.json"
+    },
+    {
       "id": "logs",
       "title": "日志",
       "count": 5,
@@ -205,7 +241,7 @@
     {
       "id": "mml",
       "title": "MML",
-      "count": 62,
+      "count": 67,
       "file": "api-categories/mml.json"
     },
     {
@@ -217,13 +253,19 @@
     {
       "id": "northbound",
       "title": "northbound",
-      "count": 15,
+      "count": 86,
       "file": "api-categories/northbound.json"
+    },
+    {
+      "id": "notification",
+      "title": "notification",
+      "count": 1,
+      "file": "api-categories/notification.json"
     },
     {
       "id": "notifications",
       "title": "通知",
-      "count": 14,
+      "count": 16,
       "file": "api-categories/notifications.json"
     },
     {
@@ -239,6 +281,12 @@
       "file": "api-categories/param-models.json"
     },
     {
+      "id": "parameter-sync",
+      "title": "parameter-sync",
+      "count": 5,
+      "file": "api-categories/parameter-sync.json"
+    },
+    {
       "id": "permissions",
       "title": "permissions",
       "count": 1,
@@ -247,7 +295,7 @@
     {
       "id": "pm",
       "title": "性能 PM",
-      "count": 59,
+      "count": 58,
       "file": "api-categories/pm.json"
     },
     {
@@ -258,8 +306,8 @@
     },
     {
       "id": "provisioning",
-      "title": "provisioning",
-      "count": 4,
+      "title": "自动开站",
+      "count": 15,
       "file": "api-categories/provisioning.json"
     },
     {
@@ -305,9 +353,15 @@
       "file": "api-categories/station-logs.json"
     },
     {
+      "id": "storage-protection",
+      "title": "storage-protection",
+      "count": 5,
+      "file": "api-categories/storage-protection.json"
+    },
+    {
       "id": "sysConfig",
       "title": "系统配置",
-      "count": 6,
+      "count": 7,
       "file": "api-categories/sysConfig.json"
     },
     {
@@ -331,7 +385,7 @@
     {
       "id": "system-license",
       "title": "system-license",
-      "count": 3,
+      "count": 4,
       "file": "api-categories/system-license.json"
     },
     {

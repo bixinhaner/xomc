@@ -8,6 +8,7 @@ import type {
   AgentVisibilityConfig,
 } from '../../types/agentConfig';
 import type { AgentArtifactRef, AgentAttachmentRef, AgentPanelMessage } from '../../agentkit';
+import { useMock } from '../apiSwitch';
 
 export interface AgentConversationHistory {
   conversationId: string;
@@ -32,22 +33,35 @@ export interface AgentApi {
 
 export const agentApi: AgentApi = {
   async getVisibilityConfig() {
+    if (useMock) {
+      return { visible: true, enabled: true, status: 'connected', lastValidatedAt: new Date().toISOString(), lastError: '' };
+    }
     const { data } = await http.get<AgentVisibilityConfig>('/agent/visibility');
     return data;
   },
   async getRuntimeConfig() {
+    if (useMock) {
+      return {
+        visible: true, enabled: true, endpoint: '/api/v1/agent/runtime', connectorId: 'mock-xomc',
+        status: 'connected', lastValidatedAt: new Date().toISOString(), lastError: '', configuredSource: 'server',
+        policy: { allowedMethods: ['GET'], blockedPathPrefixes: ['/api/v1/auth/*', '/api/v1/admin/*'], toolTimeoutSeconds: 30, maxResponseBytes: 1_048_576 },
+      };
+    }
     const { data } = await http.get<AgentRuntimeServerConfig>('/agent/config');
     return data;
   },
   async getConversation() {
+    if (useMock) return { conversationId: 'mock-agent-conversation' };
     const { data } = await http.get<AgentConversation>('/agent/conversation');
     return data;
   },
   async startConversation() {
+    if (useMock) return { conversationId: `mock-agent-conversation-${Date.now()}` };
     const { data } = await http.post<AgentConversation>('/agent/conversation');
     return data;
   },
   async getConversationMessages() {
+    if (useMock) return { conversationId: 'mock-agent-conversation', messages: [] };
     const { data } = await http.get<AgentConversationHistory>('/agent/conversation/messages');
     return data;
   },

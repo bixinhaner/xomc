@@ -1,0 +1,79 @@
+{
+  "packageKey": "com.baicells.xomc",
+  "packageVersion": "1.0.0",
+  "generatedBy": "starter-kit",
+  "scenarios": {
+    "task-failure-analysis": {
+      "allowedOperations": [
+        "get.devices.by_id",
+        "get.devices.tasks.by_task_id",
+        "get.devices",
+        "get.alarms.active"
+      ],
+      "allowedMethods": [
+        "GET"
+      ],
+      "resourceRoles": [
+        "alarm",
+        "candidate",
+        "device",
+        "scope",
+        "task"
+      ]
+    },
+    "access-review-assistant": {
+      "allowedOperations": [
+        "get.device_access.candidates",
+        "get.devices.by_id",
+        "get.devices",
+        "get.topology.nodes"
+      ],
+      "allowedMethods": [
+        "GET"
+      ],
+      "resourceRoles": [
+        "alarm",
+        "candidate",
+        "device",
+        "scope",
+        "task"
+      ]
+    },
+    "severe-alarm-explanation": {
+      "allowedOperations": [
+        "get.alarms.active",
+        "get.devices.by_id",
+        "get.devices",
+        "get.pm.counters.aggregated"
+      ],
+      "allowedMethods": [
+        "GET"
+      ],
+      "resourceRoles": [
+        "alarm",
+        "candidate",
+        "device",
+        "scope",
+        "task"
+      ]
+    },
+    "daily-operations-summary": {
+      "allowedOperations": [
+        "get.alarms.active",
+        "get.devices",
+        "get.device_access.candidates",
+        "get.pm.counters.aggregated"
+      ],
+      "allowedMethods": [
+        "GET"
+      ],
+      "resourceRoles": [
+        "alarm",
+        "candidate",
+        "device",
+        "scope",
+        "task"
+      ]
+    }
+  }
+}

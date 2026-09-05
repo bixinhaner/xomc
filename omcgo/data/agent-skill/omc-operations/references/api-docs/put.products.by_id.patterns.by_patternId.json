@@ -98,6 +98,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "delete.products.by_id.patterns.by_patternId",
+      "method": "DELETE",
+      "path": "/api/v1/products/:id/patterns/:patternId",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.products.by_id.patterns",
+      "method": "POST",
+      "path": "/api/v1/products/:id/patterns",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "put.products.by_id.patterns.by_patternId.move",
+      "method": "PUT",
+      "path": "/api/v1/products/:id/patterns/:patternId/move",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "delete.products.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/products/:id",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "post.products",
+      "method": "POST",
+      "path": "/api/v1/products",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

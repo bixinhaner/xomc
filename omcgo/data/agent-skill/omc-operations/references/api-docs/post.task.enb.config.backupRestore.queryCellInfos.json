@@ -114,6 +114,38 @@
     "request": "go-handler",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.task.enb.config.backupRestore.addBackupRestoreTask",
+      "method": "POST",
+      "path": "/api/v1/task/enb/config/backupRestore/addBackupRestoreTask",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.task.enb.config.backupRestore.queryTaskDeviceList",
+      "method": "POST",
+      "path": "/api/v1/task/enb/config/backupRestore/queryTaskDeviceList",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.task.enb.config.backupRestore.queryTaskList",
+      "method": "POST",
+      "path": "/api/v1/task/enb/config/backupRestore/queryTaskList",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.task.enb.config.backupRestore.single.importFile",
+      "method": "POST",
+      "path": "/api/v1/task/enb/config/backupRestore/single/importFile",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.task.enb.config.backupRestore.terminateTask",
+      "method": "POST",
+      "path": "/api/v1/task/enb/config/backupRestore/terminateTask",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

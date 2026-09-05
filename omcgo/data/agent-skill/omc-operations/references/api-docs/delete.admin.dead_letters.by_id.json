@@ -74,6 +74,26 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
+  "relatedOperations": [
+    {
+      "operationId": "post.admin.dead_letters.by_id.replay",
+      "method": "POST",
+      "path": "/api/v1/admin/dead-letters/:id/replay",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.admin.dead_letters",
+      "method": "GET",
+      "path": "/api/v1/admin/dead-letters",
+      "relation": "same-resource"
+    },
+    {
+      "operationId": "get.admin.dead_letters.by_id",
+      "method": "GET",
+      "path": "/api/v1/admin/dead-letters/:id",
+      "relation": "same-resource"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

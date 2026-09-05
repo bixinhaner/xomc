@@ -1,0 +1,29 @@
+{
+  "contractVersion": "1.0",
+  "invocationId": "inv-01JQ8G9J4M",
+  "runId": "run-01JQ8G8AZZ",
+  "scenarioKey": "task-failure-analysis",
+  "packageDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "handbookDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "operationId": "get.devices.by_id",
+  "method": "GET",
+  "path": "/api/v1/devices/:id",
+  "arguments": {
+    "path": {
+      "id": "device-456"
+    },
+    "query": {},
+    "body": null
+  },
+  "resourceScope": [
+    {
+      "type": "device",
+      "id": "device-456",
+      "role": "device"
+    }
+  ],
+  "leaseToken": "lease-token-example-abcdefghijklmnopqrstuvwxyz123456",
+  "leaseExpiresAt": "2026-08-27T02:17:30Z",
+  "deadlineAt": "2026-08-27T02:18:00Z",
+  "traceId": "01JQ8G7N6K1A2B3C4D5E6F7G8H"
+}

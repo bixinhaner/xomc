@@ -7,10 +7,10 @@
   "category": "agent",
   "title": "agent - 详情",
   "summary": "agent - 详情",
-  "description": "agent：按序号读取当前 OMC 版本的完整 API 手册包分块 Handler: GetHandbookChunk returns one bounded base64 chunk of the immutable API handbook artifact.",
+  "description": "agent：查询指定资源的详细信息 Handler: GetHandbookChunk returns one bounded base64 chunk of the immutable API handbook artifact.",
   "intents": [
     "agent - 详情",
-    "agent：按序号读取当前 OMC 版本的完整 API 手册包分块 Handler: GetHandbookChunk returns one bounded base64 chunk of the immutable API handbook artifact.",
+    "agent：查询指定资源的详细信息 Handler: GetHandbookChunk returns one bounded base64 chunk of the immutable API handbook artifact.",
     "agent",
     "handbook",
     "chunks"
@@ -30,7 +30,7 @@
       "in": "path",
       "required": true,
       "type": "string",
-      "description": "Path parameter: index"
+      "description": "替换 URL 路径中的 :index"
     }
   ],
   "queryParams": [],
@@ -75,7 +75,39 @@
     "request": "path-only",
     "response": "standard-envelope"
   },
-  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "emptyResult": "空数组或 total=0 只说明该操作在当前用户权限和本次过滤条件下没有返回记录，不能单独证明业务对象、源数据或系统能力不存在。先核对参数、标识符、时间范围和权限；若用户目标仍未回答，再沿 relatedOperations 选择汇总、明细、原始或派生数据操作补充证据。",
+  "relatedOperations": [
+    {
+      "operationId": "get.agent.handbook.manifest",
+      "method": "GET",
+      "path": "/api/v1/agent/handbook/manifest",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.agent.handbook.routes",
+      "method": "GET",
+      "path": "/api/v1/agent/handbook/routes",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.agent.admin.overview",
+      "method": "GET",
+      "path": "/api/v1/agent/admin/overview",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.agent.artifacts.by_artifactID.content",
+      "method": "GET",
+      "path": "/api/v1/agent/artifacts/:artifactID/content",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "get.agent.assistants",
+      "method": "GET",
+      "path": "/api/v1/agent/assistants",
+      "relation": "same-domain"
+    }
+  ],
   "sources": [
     "runtime-route",
     "go-handler"

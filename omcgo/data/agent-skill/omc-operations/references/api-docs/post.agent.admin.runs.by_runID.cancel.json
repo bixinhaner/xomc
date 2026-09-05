@@ -1,0 +1,116 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.agent.admin.runs.by_runID.cancel",
+  "method": "POST",
+  "path": "/api/v1/agent/admin/runs/:runID/cancel",
+  "handler": "github.com/omcgo/omcgo/internal/agentbridge.(*AdminHandler).cancelRun-fm",
+  "category": "agent",
+  "title": "agent - 取消",
+  "summary": "agent - 取消",
+  "description": "agent：取消未完成的任务或操作",
+  "intents": [
+    "agent - 取消",
+    "agent：取消未完成的任务或操作",
+    "agent",
+    "admin",
+    "runs",
+    "cancel"
+  ],
+  "tags": [
+    "agent",
+    "admin",
+    "runs",
+    "cancel"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：agent - 取消",
+  "pathParams": [
+    {
+      "name": "runID",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :runID"
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "path-only",
+    "response": "standard-envelope"
+  },
+  "relatedOperations": [
+    {
+      "operationId": "post.agent.assistants.runs.by_runID.cancel",
+      "method": "POST",
+      "path": "/api/v1/agent/assistants/runs/:runID/cancel",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.agent.runs.by_runID.cancel",
+      "method": "POST",
+      "path": "/api/v1/agent/runs/:runID/cancel",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "patch.agent.admin.scenarios.by_scenarioKey",
+      "method": "PATCH",
+      "path": "/api/v1/agent/admin/scenarios/:scenarioKey",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.agent.assistants.by_id.runs",
+      "method": "POST",
+      "path": "/api/v1/agent/assistants/:id/runs",
+      "relation": "same-domain"
+    },
+    {
+      "operationId": "post.agent.assistants.runs.by_runID.read",
+      "method": "POST",
+      "path": "/api/v1/agent/assistants/runs/:runID/read",
+      "relation": "same-domain"
+    }
+  ],
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

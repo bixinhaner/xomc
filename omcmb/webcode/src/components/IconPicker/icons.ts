@@ -42,7 +42,7 @@ import {
   WarningOutlined, QuestionCircleOutlined,
   // ─── A.9 业务/场景类（8）────────────────────────────────────────
   HomeOutlined, ShopOutlined, BankOutlined, RocketOutlined,
-  BulbOutlined, FireOutlined, BugOutlined, MedicineBoxOutlined,
+  BulbOutlined, FireOutlined, BugOutlined, MedicineBoxOutlined, RobotOutlined,
   // ─── A.10 兼容现网 seed 数据（16）—— 出现在 seed/000057/000059 已用图标
   AreaChartOutlined, BgColorsOutlined, CalendarOutlined, ConsoleSqlOutlined,
   ControlOutlined, FieldNumberOutlined, FileDoneOutlined, FileZipOutlined,
@@ -91,7 +91,7 @@ export const iconRegistry: Record<string, IconComponent> = {
   WarningOutlined, QuestionCircleOutlined,
   // A.9
   HomeOutlined, ShopOutlined, BankOutlined, RocketOutlined,
-  BulbOutlined, FireOutlined, BugOutlined, MedicineBoxOutlined,
+  BulbOutlined, FireOutlined, BugOutlined, MedicineBoxOutlined, RobotOutlined,
   // A.10 兼容现网 seed
   AreaChartOutlined, BgColorsOutlined, CalendarOutlined, ConsoleSqlOutlined,
   ControlOutlined, FieldNumberOutlined, FileDoneOutlined, FileZipOutlined,
