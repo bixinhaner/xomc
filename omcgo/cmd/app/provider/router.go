@@ -430,12 +430,6 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	assistantService := agentassistant.NewService(agentassistant.NewRepository(c.PgPool), bridgeClient, executor, ad.roleRepo, c.PermService, device.NewPgDeviceGroupReader(c.PgPool), c.Logger)
 	agentassistant.NewHandler(assistantService).RegisterRoutes(v1)
 	subscriber := agentbridge.NewEventSubscriber(c.EventBus, c.PgPool, outboxRepo, ad.agentConfigHandler.Service(), executor, c.Logger)
-	if err := subscriber.Subscribe(); err != nil {
-		return fmt.Errorf("initialize proactive agent event subscriber: %w", err)
-	}
-	if c.AlarmEngine != nil {
-		c.AlarmEngine.SetRaisedHook(subscriber.HandleSevereAlarm)
-	}
 	hostname, hostnameErr := os.Hostname()
 	if hostnameErr != nil || hostname == "" {
 		hostname = "unknown"
@@ -448,29 +442,8 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	dailySummaryScheduler := agentbridge.NewDailySummaryScheduler(outboxRepo, ad.agentConfigHandler.Service(), executor, c.Logger)
 	forwarder.SetAssistantEventSink(assistantService)
 	toolWorker.SetAssistantAuthorizer(assistantService)
-	assistantService.Start()
-	c.GS.Register("assistant-lifecycle", 1, func(context.Context) error { return assistantService.Close() })
-	forwarder.Start()
-	toolWorker.Start()
-	findingWorker.Start()
-	heartbeatWorker.Start()
-	dailySummaryScheduler.Start()
-	c.GS.Register("agent-event-forwarder", 1, func(context.Context) error { return forwarder.Close() })
-	c.GS.Register("agent-tool-worker", 1, func(context.Context) error { return toolWorker.Close() })
-	c.GS.Register("agent-finding-worker", 1, func(context.Context) error { return findingWorker.Close() })
-	c.GS.Register("agent-heartbeat-worker", 1, func(context.Context) error { return heartbeatWorker.Close() })
-	c.GS.Register("agent-daily-summary-scheduler", 1, func(context.Context) error { return dailySummaryScheduler.Close() })
 	c.miscDeps.agentFindingHandler = agentbridge.NewFindingHandler(findingRepo, authz.NewResolver(c.PermService))
 	c.miscDeps.agentAdminHandler = agentbridge.NewAdminHandler(bridgeClient)
-
-	agentTarget, agentTargetErr := ad.agentConfigHandler.Service().GetRuntimeTarget(context.Background())
-	if agentTargetErr != nil {
-		c.Logger.Warn("load proactive agent bridge config", zap.Error(agentTargetErr))
-	} else if agentTarget != nil && agentTarget.Enabled && agentTarget.AgentStudioServiceToken != "" {
-		c.Logger.Info("proactive agent bridge started", zap.String("connector_id", agentTarget.ConnectorID))
-	} else {
-		c.Logger.Info("proactive agent bridge waiting for connector configuration")
-	}
 
 	// Helper: authenticated sub-group.
 	//
@@ -933,6 +906,36 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// Auto-sync API endpoints from Gin routes at startup
 	if err := syncApiEndpoints(c, ad); err != nil {
 		return fmt.Errorf("sync API endpoints and built-in permission baseline: %w", err)
+	}
+
+	// Workers and event callbacks may resolve the immutable handbook immediately.
+	// Activate them only after all routes and permissions have been initialized.
+	if err := subscriber.Subscribe(); err != nil {
+		return fmt.Errorf("initialize proactive agent event subscriber: %w", err)
+	}
+	if c.AlarmEngine != nil {
+		c.AlarmEngine.SetRaisedHook(subscriber.HandleSevereAlarm)
+	}
+	assistantService.Start()
+	c.GS.Register("assistant-lifecycle", 1, func(context.Context) error { return assistantService.Close() })
+	forwarder.Start()
+	toolWorker.Start()
+	findingWorker.Start()
+	heartbeatWorker.Start()
+	dailySummaryScheduler.Start()
+	c.GS.Register("agent-event-forwarder", 1, func(context.Context) error { return forwarder.Close() })
+	c.GS.Register("agent-tool-worker", 1, func(context.Context) error { return toolWorker.Close() })
+	c.GS.Register("agent-finding-worker", 1, func(context.Context) error { return findingWorker.Close() })
+	c.GS.Register("agent-heartbeat-worker", 1, func(context.Context) error { return heartbeatWorker.Close() })
+	c.GS.Register("agent-daily-summary-scheduler", 1, func(context.Context) error { return dailySummaryScheduler.Close() })
+
+	agentTarget, agentTargetErr := ad.agentConfigHandler.Service().GetRuntimeTarget(context.Background())
+	if agentTargetErr != nil {
+		c.Logger.Warn("load proactive agent bridge config", zap.Error(agentTargetErr))
+	} else if agentTarget != nil && agentTarget.Enabled && agentTarget.AgentStudioServiceToken != "" {
+		c.Logger.Info("proactive agent bridge started", zap.String("connector_id", agentTarget.ConnectorID))
+	} else {
+		c.Logger.Info("proactive agent bridge waiting for connector configuration")
 	}
 
 	return nil
