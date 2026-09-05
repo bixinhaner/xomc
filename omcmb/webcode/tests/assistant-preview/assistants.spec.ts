@@ -34,7 +34,14 @@ async function fixtures(page: Page) {
   });
   return { assistants, runs, failNextPlan: () => { conflict = true; } };
 }
-async function createPlan(page: Page) { await page.getByRole('button', { name: '创建助手', exact: true }).first().click(); await page.getByRole('textbox', { name: '发送需求' }).fill('工作日早上九点帮我检查设备和重要告警。'); await page.getByRole('textbox', { name: '发送需求' }).press('Enter'); await expect(page.getByRole('heading', { name: '每日设备健康简报', exact: true })).toBeVisible(); }
+async function createPlan(page: Page) {
+  await page.getByRole('button', { name: '创建助手', exact: true }).first().click();
+  await page.getByRole('textbox', { name: '发送需求' }).fill('工作日早上九点帮我检查设备和重要告警。');
+  await page.getByRole('textbox', { name: '发送需求' }).press('Enter');
+  await expect(page.getByRole('heading', { name: '每日设备健康简报', exact: true })).toBeVisible();
+  // A saved title can render before the mutation finishes refreshing its queries.
+  await expect(page.getByRole('button', { name: '用真实数据试运行' })).toBeEnabled();
+}
 
 test('desktop: real component creation, trial gate, publish, refresh, edit and conflict recovery', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1100 }); const store = await fixtures(page); const errors: string[] = []; page.on('pageerror', (e) => errors.push(e.message));
@@ -43,7 +50,9 @@ test('desktop: real component creation, trial gate, publish, refresh, edit and c
   await page.getByRole('button', { name: '用真实数据试运行' }).click(); await expect(page.getByRole('heading', { name: '有 2 台设备值得优先关注' })).toBeVisible(); await page.screenshot({ path: info.outputPath('03-desktop-results.png'), fullPage: true });
   await page.getByRole('button', { name: '确认启用', exact: true }).first().click(); await page.getByRole('dialog').getByRole('button', { name: '确认启用', exact: true }).click(); await expect(page.getByRole('button', { name: '暂停', exact: true })).toBeVisible(); expect(store.assistants[0].publishedRevision).toBe(1);
   await page.reload(); await expect(page.getByRole('button', { name: '暂停', exact: true })).toBeVisible(); await page.getByRole('tab', { name: '配置助手' }).click();
-  await page.getByRole('button', { name: '调整配置', exact: true }).click(); await page.getByRole('dialog').getByLabel('工作目标').fill('只分析当前重要告警，明确证据和待核实原因。'); await page.getByRole('dialog').getByRole('button', { name: /保存/ }).click(); await expect(page.getByText(/已发布的第 1 版仍按原方案运行/)).toBeVisible();
+  await page.getByRole('button', { name: '调整配置', exact: true }).click(); await page.getByRole('dialog').getByLabel('工作目标').fill('只分析当前重要告警，明确证据和待核实原因。');
+  // Ant Design inserts spacing in two-character Chinese button labels.
+  await page.getByRole('dialog').getByRole('button', { name: /^保\s*存$/ }).click(); await expect(page.getByText(/已发布的第 1 版仍按原方案运行/)).toBeVisible();
   store.failNextPlan(); const text = page.getByRole('textbox', { name: '发送需求' }); await text.fill('改成下午五点。'); await text.press('Enter'); await expect(text).toHaveValue('改成下午五点。'); await expect(page.getByRole('alert').filter({ hasText: /已在其他页面|版本|更新/ }).first()).toBeVisible();
   expect(errors).toEqual([]);
 });
